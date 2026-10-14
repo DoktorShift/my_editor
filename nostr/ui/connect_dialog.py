@@ -1,161 +1,95 @@
 # SPDX-FileCopyrightText: 2026 rinbal
 # SPDX-License-Identifier: AGPL-3.0-or-later
-"""Connect-to-Nostr dialog: three pairing flows on one tabbed surface.
+"""Connect Signer App: pair a signer app (Amber, nsec.app, …) with MyEditor.
 
-Tabs:
+Two ways, one window:
 
-  * **Paste URI**     paste a ``bunker://`` URI generated in Amber et al.
-  * **Scan QR**       display a ``nostrconnect://`` QR for the signer to
-                        scan; the channel opens once the signer's connect
-                        event arrives.
-  * **Manual**        build a ``bunker://`` URI from separate fields when
-                        you have the pubkey + relays + secret on paper but
-                        not as a URL.
+  * **Scan Code** (shown first, the way most signer apps connect): a code
+    for the signer app to scan. Behind it is a ``nostrconnect://`` link;
+    the channel opens as the window does, and the code works for
+    ``_QR_TTL_SECONDS``, after which New Code makes another. Copy Link
+    gives the same link as text, for a signer app on this computer.
+  * **Paste Link**: a ``bunker://`` link a signer app shows.
 
-All three paths converge on the same ``profile_connected(Profile)`` signal
-and persist the new profile to the on-disk store identically.
+The words are the person's, not the protocol's: no URI, pubkey, hex, relay
+or NIP number on screen. (Entering a signer's key and servers by hand, the
+old Manual tab, is what a ``bunker://`` link holds; a link pasted here
+does the same.) The code is always dark on white with a quiet zone, the
+way scanners read codes best, whatever the window's theme.
+
+Both ways end in ``profile_connected(Profile)``, and save the profile to
+the store, unless the dialog is opened with ``persist=False``: Create
+Account checks that the signer holds the new account before anything is
+saved, so a signer paired as someone else never replaces a profile that
+was already here.
+
+Closing the dialog, for any reason, closes its pairing channel; the
+session pool opens its own for the paired profile.
 """
 
 from __future__ import annotations
 
+import logging
 import secrets
 from typing import Optional
 
 from PySide6.QtCore import Qt, QTimer, QUrl, Signal
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
+    QApplication,
     QDialog,
     QHBoxLayout,
     QLabel,
     QLineEdit,
     QPushButton,
     QTabWidget,
-    QTextEdit,
     QVBoxLayout,
     QWidget,
 )
 
-from .. import DEFAULT_RELAYS
 from ..bunker import (
+    NIP46_RELAYS,
     BunkerClient,
     build_nostrconnect_uri,
+    humanize_failure,
     parse_bunker_uri,
 )
 from ..profiles import Profile, ProfileStore
 from ..qr import make_qr_pixmap
 from ..relay import RelayPool
+from .assistant import StepList, link_button, stylesheet, text_label
 
+from i18n import _, ngettext
 from url_safety import is_safe_external_url
 
+log = logging.getLogger(__name__)
 
-
-# Seconds the QR is valid before we ask the user to regenerate. After this,
-# the listener is closed and the "Try Again" affordance appears.
+# Seconds the code works before New Code makes another; the listener
+# closes then.
 _QR_TTL_SECONDS: int = 90
+_QR_SIZE = 280
 
+# The two ways, in the order shown.
+SCAN, PASTE = 0, 1
 
-# --------------------------------------------------------------------------- #
-# Stylesheets: same palette as the rest of the editor                        #
-# --------------------------------------------------------------------------- #
-
-_DARK_CSS = """
-QDialog { background: #1E1E1E; }
-QLabel { color: #D4D4D4; font-size: 12px; }
-QLabel#connect_hint { color: #858585; }
-QLabel#connect_status { color: #FFB347; }
-QLabel#qr_label { background: #1E1E1E; padding: 8px; }
-QLabel#countdown { color: #858585; font-size: 11px; }
-QLineEdit, QTextEdit {
-    background: #252526;
-    color: #D4D4D4;
-    border: 1px solid #3C3C3C;
-    border-radius: 4px;
-    padding: 6px 8px;
-    selection-background-color: #264F78;
-    font-family: "Menlo", "Consolas", "Noto Sans Mono", monospace;
-    font-size: 11px;
-}
-QPushButton {
-    background: #2D2D30;
-    color: #D4D4D4;
-    border: 1px solid #3C3C3C;
-    padding: 6px 14px;
-    border-radius: 4px;
-}
-QPushButton:hover { background: #3C3C3C; }
-QPushButton:pressed { background: #1E1E1E; }
-QPushButton:disabled { background: #252526; color: #6A6A6A; border-color: #2D2D2D; }
-
-QTabWidget::pane { border: 1px solid #3C3C3C; border-radius: 4px; top: -1px; }
-QTabBar::tab {
-    background: #252526;
-    color: #CCCCCC;
-    border: 1px solid #3C3C3C;
-    padding: 6px 14px;
-    border-top-left-radius: 4px;
-    border-top-right-radius: 4px;
-    margin-right: 2px;
-}
-QTabBar::tab:selected { background: #1E1E1E; color: #FFFFFF; }
-QTabBar::tab:hover { background: #3C3C3C; }
+_EXTRA_CSS = """
+QTabWidget::pane { border: none; top: 0px; }
+QLabel#qr { padding: 10px; }
 """
 
-_LIGHT_CSS = """
-QDialog { background: #FFFFFF; }
-QLabel { color: #333333; font-size: 12px; }
-QLabel#connect_hint { color: #777777; }
-QLabel#connect_status { color: #A05000; }
-QLabel#qr_label { background: #FFFFFF; padding: 8px; }
-QLabel#countdown { color: #999999; font-size: 11px; }
-QLineEdit, QTextEdit {
-    background: #FFFFFF;
-    color: #333333;
-    border: 1px solid #E1E1E1;
-    border-radius: 4px;
-    padding: 6px 8px;
-    selection-background-color: #0078D4;
-    font-family: "Menlo", "Consolas", "Noto Sans Mono", monospace;
-    font-size: 11px;
-}
-QPushButton {
-    background: #ECECEC;
-    color: #333333;
-    border: 1px solid #CCCCCC;
-    padding: 6px 14px;
-    border-radius: 4px;
-}
-QPushButton:hover { background: #E1E1E1; }
-QPushButton:pressed { background: #D0D0D0; }
-QPushButton:disabled { background: #F8F8F8; color: #BBBBBB; border-color: #EBEBEB; }
-
-QTabWidget::pane { border: 1px solid #E1E1E1; border-radius: 4px; top: -1px; }
-QTabBar::tab {
-    background: #F3F3F3;
-    color: #555555;
-    border: 1px solid #E1E1E1;
-    padding: 6px 14px;
-    border-top-left-radius: 4px;
-    border-top-right-radius: 4px;
-    margin-right: 2px;
-}
-QTabBar::tab:selected { background: #FFFFFF; color: #000000; }
-QTabBar::tab:hover { background: #ECECEC; }
-"""
-
-
-# --------------------------------------------------------------------------- #
-# Dialog                                                                       #
-# --------------------------------------------------------------------------- #
 
 class ConnectDialog(QDialog):
-    """One dialog, three pairing tabs.
+    """Pair a signer app: scan a code, or paste a link (module docstring).
 
-    All paths emit ``profile_connected(Profile)`` on success.  Cancel /
-    close tears down any in-flight ``BunkerClient`` so we never leave a
-    relay subscription dangling after the dialog is dismissed.
+    All paths emit ``profile_connected(Profile)`` on success. Cancel and
+    closing tear down any in-flight ``BunkerClient`` so no subscription is
+    left behind after the dialog is gone.
     """
 
     profile_connected = Signal(object)  # Profile
+    # The person has no signer app: offer the other ways into an account.
+    create_requested = Signal()
+    restore_requested = Signal()
 
     def __init__(
         self,
@@ -164,199 +98,200 @@ class ConnectDialog(QDialog):
         parent=None,
         *,
         is_dark: bool = True,
+        persist: bool = True,
+        offer_alternatives: bool = True,
     ) -> None:
+        """``persist`` False emits the paired profile without saving it.
+        ``offer_alternatives`` False leaves out the links to Create Account
+        and Restore Account, for when the dialog is part of one of those."""
         super().__init__(parent)
-        self.setWindowTitle("Connect Nostr Signer")
+        self.setWindowTitle(_("Connect Signer App"))
         self.setModal(True)
-        self.setMinimumSize(560, 480)
 
         self._pool = pool
         self._store = store
         self._is_dark = is_dark
+        self._persist = persist
+        self._offer_alternatives = offer_alternatives
 
-        # Exactly one in-flight client at a time; switching tabs / cancel
-        # tears it down so we don't accumulate orphan subscriptions.
+        # Exactly one in-flight client at a time; switching ways or closing
+        # tears it down so no orphan subscriptions pile up.
         self._client: Optional[BunkerClient] = None
-        # QR countdown UI plumbing.
         self._qr_countdown_timer: Optional[QTimer] = None
         self._qr_seconds_left: int = 0
 
         self._build_ui()
-        self._apply_theme()
-        # Auto-start the QR listener whenever the QR tab is the active one.
+        self.setStyleSheet(stylesheet(is_dark) + _EXTRA_CSS)
         self._tabs.currentChanged.connect(self._on_tab_changed)
+        # The code is shown first, and its channel opens with the window.
+        self._start_qr_listener()
+        self._update_paste_button()
 
     # -- UI build ----------------------------------------------------------
 
     def _build_ui(self) -> None:
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(20, 18, 20, 16)
-        layout.setSpacing(10)
+        layout.setContentsMargins(24, 22, 24, 18)
+        layout.setSpacing(12)
+
+        layout.addWidget(text_label(_("Connect Your Signer App"), "title"))
+        layout.addWidget(text_label(
+            _("A signer app keeps your private key and asks you before anything is "
+              "signed. MyEditor never sees the key.")))
 
         self._tabs = QTabWidget()
-        self._tabs.addTab(self._build_paste_tab(), "Paste URI")
-        self._tabs.addTab(self._build_qr_tab(), "Scan QR")
-        self._tabs.addTab(self._build_manual_tab(), "Manual")
+        self._tabs.setDocumentMode(True)
+        self._tabs.addTab(self._build_scan_tab(), _("Scan Code"))
+        self._tabs.addTab(self._build_paste_tab(), _("Paste Link"))
+        self._tabs.tabBar().setAccessibleName(_("How to connect"))
         layout.addWidget(self._tabs, 1)
 
-        # Shared status line + close-only footer. Each tab has its own
-        # action button; the dialog footer is just a uniform escape hatch.
-        self._status = QLabel("")
-        self._status.setObjectName("connect_status")
-        self._status.setWordWrap(True)
-        self._status.setMinimumHeight(20)
+        # What is happening now: waiting, connecting, or what went wrong.
+        self._status = text_label("", "muted")
+        self._status.setMinimumHeight(18)
         layout.addWidget(self._status)
+
+        # The other ways into an account, on a line of their own so longer
+        # words never squeeze them.
+        if self._offer_alternatives:
+            others = QHBoxLayout()
+            others.setSpacing(16)
+            others.addWidget(text_label(_("No signer app yet?"), "muted", wrap=False))
+            for label, signal in ((_("Create an Account"), self.create_requested),
+                                  (_("Restore from Backup"), self.restore_requested)):
+                others.addWidget(link_button(
+                    label, lambda sig=signal: (self._on_cancel(), sig.emit())))
+            others.addStretch(1)
+            layout.addLayout(others)
 
         footer = QHBoxLayout()
         footer.addStretch(1)
-        self._cancel_btn = QPushButton("Close")
+        self._cancel_btn = QPushButton(_("Cancel"))
+        self._cancel_btn.setAutoDefault(False)
         self._cancel_btn.clicked.connect(self._on_cancel)
         footer.addWidget(self._cancel_btn)
+        self._paste_btn = QPushButton(_("Connect"))
+        self._paste_btn.setAutoDefault(False)
+        self._paste_btn.clicked.connect(self._on_paste_connect)
+        footer.addWidget(self._paste_btn)
         layout.addLayout(footer)
+        # At least this wide, so the code and the steps beside each other
+        # never squeeze; longer words widen the window instead.
+        layout.addStrut(460)
 
-    # -- Paste tab ---------------------------------------------------------
+    def _build_scan_tab(self) -> QWidget:
+        tab = QWidget()
+        column = QVBoxLayout(tab)
+        column.setContentsMargins(0, 14, 0, 0)
+        column.setSpacing(10)
+        column.addWidget(StepList([
+            ("open", _("In your signer app, choose to connect an app (in Amber: "
+                       "Connect app, the scan icon).")),
+            ("scan", _("Scan this code, then approve the request in the app.")),
+        ]))
+
+        self._qr_label = QLabel()
+        self._qr_label.setObjectName("qr")
+        self._qr_label.setAlignment(Qt.AlignCenter)
+        self._qr_label.setAccessibleName(_("Code to scan with your signer app"))
+        column.addWidget(self._qr_label, 0, Qt.AlignHCenter)
+
+        self._countdown_label = text_label("", "muted")
+        self._countdown_label.setAlignment(Qt.AlignCenter)
+        column.addWidget(self._countdown_label)
+
+        row = QHBoxLayout()
+        row.addStretch(1)
+        # A new code, once this one has expired or failed.
+        self._regen_btn = QPushButton(_("New Code"))
+        self._regen_btn.setAutoDefault(False)
+        self._regen_btn.clicked.connect(self._start_qr_listener)
+        self._regen_btn.hide()
+        row.addWidget(self._regen_btn)
+        # The same link as text, for a signer app on this computer.
+        self._copy_btn = link_button(_("Copy Link"), self._copy_qr_uri)
+        self._copy_btn.setToolTip(_("For a signer app on this computer"))
+        row.addWidget(self._copy_btn)
+        row.addStretch(1)
+        column.addLayout(row)
+        column.addStretch(1)
+        self._qr_uri = ""
+        return tab
 
     def _build_paste_tab(self) -> QWidget:
         tab = QWidget()
-        layout = QVBoxLayout(tab)
-        layout.setContentsMargins(16, 14, 16, 14)
-        layout.setSpacing(10)
-
-        header = QLabel("Paste a <b>bunker://</b> URI from your signer.")
-        header.setWordWrap(True)
-        layout.addWidget(header)
-
-        hint = QLabel(
-            "Your signer (Amber, nsec.app, nsec.bunker, …) has an option "
-            "to generate a bunker URL. Copy it and paste it below. You'll "
-            "be asked to approve the connection on the signer side."
-        )
-        hint.setObjectName("connect_hint")
-        hint.setWordWrap(True)
-        layout.addWidget(hint)
-
-        self._paste_edit = QTextEdit()
-        self._paste_edit.setPlaceholderText("bunker://<pubkey>?relay=wss://...&secret=...")
-        self._paste_edit.setAcceptRichText(False)
-        self._paste_edit.setFixedHeight(80)
+        column = QVBoxLayout(tab)
+        column.setContentsMargins(0, 14, 0, 0)
+        column.setSpacing(8)
+        label = text_label(_("Connection link:"), "item_title")
+        self._paste_edit = QLineEdit()
+        self._paste_edit.setPlaceholderText("bunker://…")
+        label.setBuddy(self._paste_edit)
+        self._paste_edit.setAccessibleName(_("Connection link"))
         self._paste_edit.textChanged.connect(self._update_paste_button)
-        layout.addWidget(self._paste_edit)
-
-        layout.addStretch(1)
-
-        button_row = QHBoxLayout()
-        button_row.addStretch(1)
-        self._paste_btn = QPushButton("Connect")
-        self._paste_btn.clicked.connect(self._on_paste_connect)
-        button_row.addWidget(self._paste_btn)
-        layout.addLayout(button_row)
-
-        self._update_paste_button()
+        self._paste_edit.returnPressed.connect(self._on_paste_connect)
+        column.addWidget(label)
+        column.addWidget(self._paste_edit)
+        column.addWidget(text_label(
+            _("Some signer apps show a link instead of scanning a code. Copy it there "
+              "and paste it here; it starts with bunker://."), "help"))
+        column.addStretch(1)
         return tab
 
+    # -- paste ---------------------------------------------------------------
+
     def _update_paste_button(self) -> None:
-        text = self._paste_edit.toPlainText().strip()
-        self._paste_btn.setEnabled(
-            self._client is None and text.startswith("bunker://")
-        )
+        on_paste = self._tabs.currentIndex() == PASTE
+        self._paste_btn.setVisible(on_paste)
+        self._paste_btn.setDefault(on_paste)
+        text = self._paste_edit.text().strip()
+        self._paste_btn.setEnabled(self._client is None and text.startswith("bunker://"))
 
     def _on_paste_connect(self) -> None:
-        uri = self._paste_edit.toPlainText().strip()
+        uri = self._paste_edit.text().strip()
+        if self._client is not None or not uri:
+            return
         try:
             parse_bunker_uri(uri)
         except ValueError as exc:
-            self._set_status(f"Invalid URI: {exc}", error=True)
+            log.info("connection link refused: %s", exc)
+            self._set_status(_("That link can’t be used. Copy it again from your signer "
+                               "app: it starts with bunker://."), error=True)
             return
         self._begin_bunker_connect(uri)
 
-    # -- QR tab ------------------------------------------------------------
-
-    def _build_qr_tab(self) -> QWidget:
-        tab = QWidget()
-        layout = QVBoxLayout(tab)
-        layout.setContentsMargins(16, 14, 16, 14)
-        layout.setSpacing(8)
-
-        header = QLabel("Scan this QR with your signer.")
-        header.setWordWrap(True)
-        layout.addWidget(header)
-
-        hint = QLabel(
-            "Open Amber (or any NIP-46 compatible signer), choose "
-            "<b>Add account</b> → <b>Scan QR</b>, and approve the connection."
-        )
-        hint.setObjectName("connect_hint")
-        hint.setWordWrap(True)
-        layout.addWidget(hint)
-
-        # Centered QR pixmap.
-        qr_row = QHBoxLayout()
-        qr_row.addStretch(1)
-        self._qr_label = QLabel()
-        self._qr_label.setObjectName("qr_label")
-        self._qr_label.setAlignment(Qt.AlignCenter)
-        self._qr_label.setMinimumSize(280, 280)
-        qr_row.addWidget(self._qr_label)
-        qr_row.addStretch(1)
-        layout.addLayout(qr_row)
-
-        # Countdown + copy + try-again controls
-        self._countdown_label = QLabel("")
-        self._countdown_label.setObjectName("countdown")
-        self._countdown_label.setAlignment(Qt.AlignCenter)
-        layout.addWidget(self._countdown_label)
-
-        self._qr_uri_field = QLineEdit()
-        self._qr_uri_field.setReadOnly(True)
-        self._qr_uri_field.setPlaceholderText("nostrconnect://…")
-        layout.addWidget(self._qr_uri_field)
-
-        button_row = QHBoxLayout()
-        button_row.addStretch(1)
-        self._copy_btn = QPushButton("Copy URI")
-        self._copy_btn.clicked.connect(self._copy_qr_uri)
-        button_row.addWidget(self._copy_btn)
-        self._regen_btn = QPushButton("Try Again")
-        self._regen_btn.clicked.connect(self._start_qr_listener)
-        button_row.addWidget(self._regen_btn)
-        layout.addLayout(button_row)
-
-        return tab
+    # -- scan ----------------------------------------------------------------
 
     def _start_qr_listener(self) -> None:
-        """Mint a fresh keypair + secret, render the QR, begin listening."""
+        """A new pairing secret and channel, its code shown, and the clock."""
         self._teardown_client(reason="restarting QR")
         self._set_status("")
+        self._regen_btn.hide()
 
         secret = secrets.token_hex(8)
         client = BunkerClient(self._pool, parent=self)
         self._watch_client_diagnostics(client)
         local_pk = client.listen_for_nostrconnect(
-            relays=list(DEFAULT_RELAYS),
+            relays=list(NIP46_RELAYS),
             secret=secret,
             on_success=self._on_pair_success,
             on_failure=self._on_pair_failure,
             timeout_ms=_QR_TTL_SECONDS * 1000,
         )
-        uri = build_nostrconnect_uri(
-            local_pk, list(DEFAULT_RELAYS), secret,
-        )
+        self._qr_uri = build_nostrconnect_uri(local_pk, list(NIP46_RELAYS), secret)
         self._client = client
-        self._qr_uri_field.setText(uri)
-
-        # Render QR with the same palette as the dialog.
-        dark = "#FFFFFF" if self._is_dark else "#000000"
-        light = "#1E1E1E" if self._is_dark else "#FFFFFF"
-        self._qr_label.setPixmap(make_qr_pixmap(uri, size=280, dark=dark, light=light))
-
-        self._set_status("Waiting for your signer to scan…")
+        # Dark on white, whatever the theme: scanners read that best.
+        self._qr_label.setPixmap(make_qr_pixmap(self._qr_uri, size=_QR_SIZE,
+                                                dark="#000000", light="#FFFFFF"))
+        self._qr_label.setEnabled(True)
+        self._copy_btn.setEnabled(True)
+        self._set_status(_("Waiting for your signer app…"))
         self._start_qr_countdown()
 
     def _start_qr_countdown(self) -> None:
         self._qr_seconds_left = _QR_TTL_SECONDS
         self._update_countdown_label()
-        if self._qr_countdown_timer is not None:
-            self._qr_countdown_timer.stop()
+        self._stop_qr_listener()
         self._qr_countdown_timer = QTimer(self)
         self._qr_countdown_timer.setInterval(1000)
         self._qr_countdown_timer.timeout.connect(self._tick_countdown)
@@ -365,102 +300,35 @@ class ConnectDialog(QDialog):
     def _tick_countdown(self) -> None:
         self._qr_seconds_left = max(0, self._qr_seconds_left - 1)
         self._update_countdown_label()
-        if self._qr_seconds_left == 0 and self._qr_countdown_timer is not None:
-            self._qr_countdown_timer.stop()
+        if self._qr_seconds_left == 0:
+            self._retire_code(_("This code has expired."))
 
     def _update_countdown_label(self) -> None:
         if self._qr_seconds_left > 0:
-            self._countdown_label.setText(f"Code expires in {self._qr_seconds_left}s")
-        else:
-            self._countdown_label.setText("Code expired, press Try Again")
+            self._countdown_label.setText(ngettext(
+                "This code works for {seconds} more second.",
+                "This code works for {seconds} more seconds.",
+                self._qr_seconds_left).format(seconds=self._qr_seconds_left))
+
+    def _retire_code(self, why: str) -> None:
+        """The code no longer pairs: dim it, say ``why``, offer a new one."""
+        self._stop_qr_listener()
+        self._teardown_client(reason="code retired")
+        self._qr_label.setEnabled(False)
+        self._copy_btn.setEnabled(False)
+        self._countdown_label.setText(why)
+        self._set_status("")
+        self._regen_btn.show()
 
     def _copy_qr_uri(self) -> None:
-        from PySide6.QtWidgets import QApplication
-        QApplication.clipboard().setText(self._qr_uri_field.text())
+        if self._qr_uri:
+            QApplication.clipboard().setText(self._qr_uri)
+            self._set_status(_("Link copied. Paste it in your signer app."))
 
     def _stop_qr_listener(self) -> None:
         if self._qr_countdown_timer is not None:
             self._qr_countdown_timer.stop()
             self._qr_countdown_timer = None
-
-    # -- Manual tab --------------------------------------------------------
-
-    def _build_manual_tab(self) -> QWidget:
-        tab = QWidget()
-        layout = QVBoxLayout(tab)
-        layout.setContentsMargins(16, 14, 16, 14)
-        layout.setSpacing(8)
-
-        header = QLabel("Enter the signer's pubkey and its relays.")
-        header.setWordWrap(True)
-        layout.addWidget(header)
-
-        hint = QLabel(
-            "Useful when you have a long-lived bunker setup whose pieces "
-            "you keep separately rather than as one URL."
-        )
-        hint.setObjectName("connect_hint")
-        hint.setWordWrap(True)
-        layout.addWidget(hint)
-
-        layout.addWidget(QLabel("Bunker pubkey (hex):"))
-        self._manual_pk = QLineEdit()
-        self._manual_pk.setPlaceholderText("64 hex chars")
-        self._manual_pk.textChanged.connect(self._update_manual_button)
-        layout.addWidget(self._manual_pk)
-
-        layout.addWidget(QLabel("Relays (one per line):"))
-        self._manual_relays = QTextEdit()
-        self._manual_relays.setPlaceholderText(
-            "wss://relay.example\nwss://another.example"
-        )
-        self._manual_relays.setAcceptRichText(False)
-        self._manual_relays.setFixedHeight(80)
-        self._manual_relays.textChanged.connect(self._update_manual_button)
-        layout.addWidget(self._manual_relays)
-
-        layout.addWidget(QLabel("Secret (optional):"))
-        self._manual_secret = QLineEdit()
-        self._manual_secret.setPlaceholderText("Pairing token if your signer gave you one")
-        layout.addWidget(self._manual_secret)
-
-        layout.addStretch(1)
-
-        button_row = QHBoxLayout()
-        button_row.addStretch(1)
-        self._manual_btn = QPushButton("Connect")
-        self._manual_btn.clicked.connect(self._on_manual_connect)
-        button_row.addWidget(self._manual_btn)
-        layout.addLayout(button_row)
-
-        self._update_manual_button()
-        return tab
-
-    def _update_manual_button(self) -> None:
-        pk = self._manual_pk.text().strip().lower()
-        relays = [r for r in self._manual_relays.toPlainText().splitlines() if r.strip()]
-        valid_pk = len(pk) == 64 and all(c in "0123456789abcdef" for c in pk)
-        self._manual_btn.setEnabled(
-            self._client is None and valid_pk and bool(relays)
-        )
-
-    def _on_manual_connect(self) -> None:
-        from urllib.parse import quote
-        pk = self._manual_pk.text().strip().lower()
-        relays = [r.strip() for r in self._manual_relays.toPlainText().splitlines() if r.strip()]
-        secret = self._manual_secret.text().strip()
-        # Synthesise a bunker:// URI and route through the same code path
-        # as the Paste tab, keeps the parsing/validation in one place.
-        parts = [f"relay={quote(r, safe='')}" for r in relays]
-        if secret:
-            parts.append(f"secret={quote(secret, safe='')}")
-        uri = f"bunker://{pk}?" + "&".join(parts)
-        try:
-            parse_bunker_uri(uri)
-        except ValueError as exc:
-            self._set_status(f"Invalid input: {exc}", error=True)
-            return
-        self._begin_bunker_connect(uri)
 
     # -- shared connect flow -----------------------------------------------
 
@@ -468,8 +336,8 @@ class ConnectDialog(QDialog):
         self._teardown_client(reason="starting new attempt")
         self._client = BunkerClient(self._pool, parent=self)
         self._watch_client_diagnostics(self._client)
-        self._set_status("Contacting signer. Approve the request on your phone…")
-        self._refresh_action_buttons()
+        self._set_status(_("Contacting your signer app. Approve the request there…"))
+        self._update_paste_button()
         self._client.connect_to_bunker(
             uri,
             on_success=self._on_pair_success,
@@ -485,14 +353,14 @@ class ConnectDialog(QDialog):
         """The signer wants the user to authenticate before it will answer."""
         if is_safe_external_url(url):
             QDesktopServices.openUrl(QUrl(url))
-            self._set_status(
-                "Your signer needs you to approve this in the browser window "
+            self._set_status(_(
+                "Your signer app needs you to approve this in the browser window "
                 "that just opened. Waiting…"
-            )
+            ))
         else:
             self._set_status(
-                "Your signer asked for approval at an address that cannot be "
-                "opened safely, so the connection was not continued.",
+                _("Your signer app asked for approval at an address that cannot be "
+                  "opened safely, so the connection was not continued."),
                 error=True,
             )
 
@@ -503,8 +371,8 @@ class ConnectDialog(QDialog):
         looks the same as the signer never having replied.
         """
         self._set_status(
-            "A signer replied but the message could not be read. It may be "
-            "using an older encryption format than this app supports.",
+            _("Your signer app answered in a form MyEditor can’t read. An update "
+              "of the signer app may help."),
             error=True,
         )
 
@@ -518,16 +386,22 @@ class ConnectDialog(QDialog):
             display_name="",
             picture="",
         )
-        self._store.upsert(profile)
-        self._set_status(f"Connected as {profile.npub_short()}.")
+        if self._persist:
+            self._store.upsert(profile)
         self._stop_qr_listener()
         self.profile_connected.emit(profile)
         self.accept()
 
     def _on_pair_failure(self, reason: str) -> None:
-        self._set_status(f"Connect failed: {reason}", error=True)
+        log.info("signer pairing failed: %s", reason)
         self._teardown_client(reason=reason)
-        self._refresh_action_buttons()
+        if self._tabs.currentIndex() == SCAN:
+            if self._qr_seconds_left == 0:
+                return                    # the code ran out: said already, not an error
+            self._retire_code("")
+        self._set_status(_("Couldn’t connect: {reason}").format(
+            reason=humanize_failure(reason)), error=True)
+        self._update_paste_button()
 
     # -- bookkeeping -------------------------------------------------------
 
@@ -537,37 +411,31 @@ class ConnectDialog(QDialog):
             self._client = None
             client.close(reason=reason)
 
-    def _refresh_action_buttons(self) -> None:
-        self._update_paste_button()
-        self._update_manual_button()
-
     def _on_tab_changed(self, index: int) -> None:
-        # Tabs: 0 = Paste, 1 = QR, 2 = Manual.
-        self._teardown_client(reason="switched tab")
+        self._teardown_client(reason="switched way")
         self._stop_qr_listener()
         self._set_status("")
-        self._refresh_action_buttons()
-        if index == 1:
-            # Entering the QR tab, kick off the listener right away.
+        if index == SCAN:
             self._start_qr_listener()
+        else:
+            self._countdown_label.setText("")
+            self._paste_edit.setFocus()
+        self._update_paste_button()
 
     def _set_status(self, text: str, *, error: bool = False) -> None:
         self._status.setText(text)
-        if error:
-            color = "#FF6B6B" if self._is_dark else "#C0392B"
-        else:
-            color = "#FFB347" if self._is_dark else "#A05000"
-        self._status.setStyleSheet(f"color: {color};")
-
-    def _apply_theme(self) -> None:
-        self.setStyleSheet(_DARK_CSS if self._is_dark else _LIGHT_CSS)
+        self._status.setObjectName("error" if error else "muted")
+        self._status.style().unpolish(self._status)
+        self._status.style().polish(self._status)
 
     # -- cancel / close ----------------------------------------------------
 
     def _on_cancel(self) -> None:
         self.reject()
 
-    def reject(self) -> None:  # type: ignore[override]
+    def done(self, result: int) -> None:  # type: ignore[override]
+        # Accepted, canceled or closed: the pairing channel goes with the
+        # dialog, so nothing keeps listening once it is gone.
         self._teardown_client(reason="dialog dismissed")
         self._stop_qr_listener()
-        super().reject()
+        super().done(result)

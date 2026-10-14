@@ -28,6 +28,16 @@ from nostr.draft_store import DraftStore
 from nostr.drafts import DraftWrapMeta
 from nostr.profiles import Profile
 from nostr.ui.drafts_panel import DraftsPanel
+from tests.accessibility import unnamed_controls
+from tests.widget_lifetime import delete_new_windows
+
+
+@pytest.fixture(autouse=True)
+def _windows_deleted():
+    """Every window and panel a test makes is deleted after it: left to
+    the cycle collector, one without a parent can crash it."""
+    yield from delete_new_windows()
+
 
 PK = "a" * 64
 
@@ -101,7 +111,7 @@ def test_it_outranks_the_failure_count_too():
     assert status_of(p)[1] is True
 
     p.set_signer_unreachable(True)
-    assert "signer is not responding" in status_of(p)[0].lower()
+    assert "signer app is not responding" in status_of(p)[0].lower()
 
 
 def test_a_stale_narration_line_does_not_outrank_the_explanation():
@@ -113,14 +123,14 @@ def test_a_stale_narration_line_does_not_outrank_the_explanation():
     assert status_of(p)[0] == "Refreshing drafts…"
 
     p.set_signer_unreachable(True)
-    assert "signer is not responding" in status_of(p)[0].lower()
+    assert "signer app is not responding" in status_of(p)[0].lower()
 
 
 def test_an_incapable_signer_still_wins_because_no_retry_can_help():
     p = panel(locked_store(2))
     p.set_signer_unreachable(True)
     p.set_signer_unsupported(True)
-    assert "NIP-44" in status_of(p)[0]
+    assert status_of(p)[0] == "Your signer app can’t decrypt drafts"
 
 
 def test_clearing_it_returns_the_line_to_normal():
@@ -168,7 +178,7 @@ def test_drafts_that_did_decrypt_keep_the_screen():
     p.set_signer_unreachable(True)
     assert not showing_placeholder(p)
     # The line still carries the message, and each row keeps its retry.
-    assert "signer is not responding" in status_of(p)[0].lower()
+    assert "signer app is not responding" in status_of(p)[0].lower()
 
 
 def test_recovering_puts_the_list_back():
@@ -218,3 +228,67 @@ def test_a_placeholder_with_no_remedy_hides_the_button():
     p.set_active_profile(None)
     assert showing_placeholder(p)
     assert not p._empty_action.isVisibleTo(p)
+
+
+def test_every_control_has_a_name_in_each_empty_state():
+    """A screen reader names the list and the empty state's button in
+    every state: no drafts, signer silent, nothing matching, and back."""
+    empty_store = DraftStore()
+    empty_store.bind_profile(PK)
+    empty = panel(empty_store)
+    assert showing_placeholder(empty)
+    assert not empty._empty_action.isVisibleTo(empty)
+    assert unnamed_controls(empty) == []
+    assert empty._list.accessibleName() == "Drafts"
+
+    quiet = panel(locked_store())
+    quiet.set_signer_unreachable(True)
+    assert unnamed_controls(quiet) == []
+
+    store = locked_store(2)
+    store.set_decrypted("d0", inner={"kind": 1, "content": "Pineapple", "tags": []})
+    searching = panel(store)
+    searching._search_edit.setText("zzzznomatch")
+    assert showing_placeholder(searching)
+    assert unnamed_controls(searching) == []
+    searching._search_edit.setText("")
+    assert unnamed_controls(searching) == []
+
+
+NARROW_SCRIPT = r"""
+import json, os, sys
+sys.path.insert(0, sys.argv[1])
+os.environ["QT_QPA_PLATFORM"] = "offscreen"
+import i18n
+i18n.install(sys.argv[2])
+from PySide6.QtWidgets import QApplication
+app = QApplication(sys.argv[:1])
+import theme
+app.setStyle(theme.AppStyle("Fusion"))
+from nostr.ui import drafts_panel as dp
+from tests.test_drafts_panel_signer_silence import locked_store, panel
+r = {}
+for state in ("unreachable", "unsupported"):
+    p = panel(locked_store(0 if state == "unsupported" else 3))
+    p.resize(dp.MIN_PANEL_WIDTH, 480)
+    p.show()
+    app.processEvents()
+    getattr(p, f"set_signer_{state}")(True)
+    app.processEvents()
+    text, _problem = p._status_line()
+    label = p._status_label
+    r[state] = [text, label.fontMetrics().horizontalAdvance(text), label.width()]
+    p.close()
+print("RESULT " + json.dumps(r, ensure_ascii=False))
+"""
+
+
+@pytest.mark.parametrize("language", ["en", "de"])
+def test_the_signer_lines_fit_the_narrowest_panel_whole(tmp_path, language):
+    # Review N3: the German "Deine Signer-App kann Entwürfe nicht
+    # entschlüsseln" needed 307 px in a 236 px line and lost its verb to
+    # the ellipsis. A status line is said whole or not at all.
+    from tests.app_process import run_window_script
+    r = run_window_script(NARROW_SCRIPT, tmp_path, language)
+    for state, (text, needs, room) in r.items():
+        assert needs <= room, (state, text, needs, room)

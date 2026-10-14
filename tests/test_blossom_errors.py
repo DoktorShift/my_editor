@@ -14,7 +14,7 @@ import re
 
 import pytest
 
-from nostr.blossom.client import BlossomError
+from nostr.blossom.client import BlossomClient, BlossomError
 from nostr.blossom.errors import ERROR_CODES, friendly_message, sanitize_reason
 from nostr.blossom.store import _format_err
 
@@ -33,7 +33,7 @@ def test_every_code_is_its_own_name():
 
 
 def test_every_code_has_friendly_copy():
-    assert len(ALL_CODES) == 14
+    assert len(ALL_CODES) == 21
     for code in ALL_CODES:
         message = friendly_message(code)
         assert message
@@ -86,29 +86,12 @@ def test_sanitize_reason_caps_length():
     assert len(sanitize_reason(b"x" * 5000)) == 200
 
 
-def test_a_header_cannot_forge_a_second_line():
-    """R7: this string lands in a label, and a raw header can carry
-    CR LF. A newline must never survive to make a second line."""
-    detail = sanitize_reason(b"Denied\r\nX-Injected: 1")
-    message = friendly_message(ERROR_CODES.AUTH_REJECTED, detail=detail)
-    assert "\n" not in message
-    assert "\r" not in message
-    assert message.count(".") >= 1
-    assert "X-Injected" in message      # shown as text, not as a header
-
-
-def test_detail_is_appended_as_its_own_sentence():
-    message = friendly_message(ERROR_CODES.SERVER_TOO_LARGE,
-                               detail="Maximum is 10 MiB")
-    assert message.startswith(friendly_message(ERROR_CODES.SERVER_TOO_LARGE))
-    assert message.endswith("Maximum is 10 MiB.")
-
-
-def test_detail_never_replaces_the_mapped_copy():
+def test_the_servers_own_words_never_reach_the_person():
+    """BUD-01's X-Reason is a diagnostic: in English whatever the app's
+    language, and in the server's terms ("pubkey", "blobs"). It is kept
+    for the diagnostics, never shown."""
     for code in ALL_CODES:
-        assert friendly_message(code, detail="whatever").startswith(
-            friendly_message(code)
-        )
+        assert friendly_message(code, detail="Pubkey not in whitelist") == friendly_message(code)
 
 
 # --------------------------------------------------------------------------- #
@@ -126,20 +109,63 @@ def test_format_err_never_leaks_a_qt_transport_string():
     assert text == friendly_message(ERROR_CODES.UPLOAD_FAILED)
 
 
-def test_format_err_uses_the_code_and_carries_the_detail():
+def test_format_err_uses_the_code_alone():
     err = BlossomError("HTTP 413", status=413,
                        code=ERROR_CODES.SERVER_TOO_LARGE,
                        detail="Maximum is 10 MiB")
-    assert _format_err(err) == friendly_message(
-        ERROR_CODES.SERVER_TOO_LARGE, detail="Maximum is 10 MiB"
-    )
+    assert _format_err(err) == friendly_message(ERROR_CODES.SERVER_TOO_LARGE)
 
 
-@pytest.mark.parametrize("reason", [
-    "signer rejected the Blossom auth event: user declined",
-    "Connect a Nostr signer first.",
+# Words a person should never have to read in a media message.
+_JARGON = ("blob", "sha", "hash", "http", "mib", "blossom", "authorization",
+           "redirect", "described", "mirror", "endpoint", "token", "signed")
+
+
+def test_copy_is_plain_words():
+    for code in ALL_CODES + ["NO_SUCH_CODE"]:
+        words = re.findall(r"[a-z0-9]+", friendly_message(code).lower())
+        assert not set(words) & set(_JARGON), (code, friendly_message(code))
+
+
+def test_copy_is_short():
+    """One or two short sentences: what happened, what to do."""
+    for code in ALL_CODES:
+        message = friendly_message(code)
+        assert len(message) <= 110, (code, message)
+        assert message.count(". ") <= 1, (code, message)
+
+
+# --------------------------------------------------------------------------- #
+# A server's refusal, as the person reads it from an upload
+# --------------------------------------------------------------------------- #
+
+@pytest.mark.parametrize("status, code, words", [
+    (401, "AUTH_REJECTED", "doesn’t accept your account"),
+    (403, "AUTH_REJECTED", "doesn’t accept your account"),
+    (413, "SERVER_TOO_LARGE", "too large"),
+    (415, "UNSUPPORTED_TYPE", "doesn’t take this kind of file"),
+    (429, "RATE_LIMITED", "busy"),
 ])
-def test_signer_strings_pass_through_byte_identical(reason):
-    """The asset manager still classifies signer failures by prefix.
-    Rewording them here would silently reclassify every one of them."""
-    assert _format_err(reason) == reason
+def test_a_refusal_says_the_remedy_for_it_in_plain_words(tmp_path, status, code, words):
+    from PySide6.QtWidgets import QApplication
+    from nostr.blossom.settings import BlossomSettings
+    from nostr.blossom.store import MediaStore
+    from tests.blossom_fakes import (FakeBlossomServer, FakeNam, FakeProfile,
+                                     FakeSessionPool, SERVER)
+    QApplication.instance() or QApplication([])
+    settings = BlossomSettings(tmp_path / "s.json")
+    settings.set_custom_servers([SERVER])
+    server = FakeBlossomServer(SERVER, fail_with=status,
+                               fail_reason="Pubkey not in whitelist; blobs of image/png refused")
+    nam = FakeNam(None, responder=server)
+    store = MediaStore(session_pool=FakeSessionPool(), profile_provider=FakeProfile,
+                       settings=settings, client=BlossomClient(nam=nam))
+    said, codes = [], []
+    store.upload_failed.connect(lambda n, r: said.append(r))
+    store.upload_failed_code.connect(lambda n, c: codes.append(c))
+    store.upload_bytes(b"abc", name="a.png", mime_type="image/png")
+    nam.settle()
+    assert codes == [code]
+    assert words in said[0]
+    found = set(re.findall(r"[a-z0-9]+", said[0].lower()))
+    assert not found & (set(_JARGON) | {"pubkey", "whitelist", "png"}), said[0]

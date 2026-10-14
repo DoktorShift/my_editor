@@ -48,10 +48,13 @@ release.
 
 Each OS can only build its own installer (no cross-compiling).
 
-Dev tools (in addition to `requirements.txt`):
+A release installs exactly what `packaging/requirements-build.lock` names
+(every package at one version, checked against its hash), so two builds of
+the same commit ship the same libraries. Do the same locally:
 
 ```bash
-pip install pyinstaller pillow      # pillow only needed to regenerate icons/background
+pip install --require-hashes -r packaging/requirements-build.lock
+pip install pillow      # only needed to regenerate icons/background
 ```
 
 Common first step on every OS:
@@ -69,6 +72,26 @@ Then:
 - **Windows:** install [Inno Setup](https://jrsoftware.org/isinfo.php), then
   `iscc /DMyAppVersion=<ver> packaging\windows\installer.iss`
   -> `dist\my-editor-<ver>-windows-setup.exe`
+
+## Exact versions (lock files)
+
+`requirements.txt` says which versions the app works with;
+`packaging/requirements-build.lock` (release builds) and
+`packaging/requirements-test.lock` (the test workflow) say which ones are
+used, for Windows, macOS and Linux alike, with hashes. They are compiled from
+`packaging/requirements-*.in` with [uv](https://docs.astral.sh/uv/). After
+adding or changing a requirement, or to move to newer versions on purpose
+(add `--upgrade`):
+
+```bash
+uv pip compile packaging/requirements-build.in --universal --python-version 3.12 \
+    --generate-hashes -o packaging/requirements-build.lock
+uv pip compile packaging/requirements-test.in --universal --python-version 3.12 \
+    --generate-hashes -o packaging/requirements-test.lock
+```
+
+`tests/test_dependency_locks.py` fails when a requirement is missing from a
+lock file.
 
 ## Regenerating icons
 
@@ -107,6 +130,10 @@ Keep the icon centers in the generator in sync with `icon_locations` in
 - The Linux `.deb` installs the app under `/opt/my-editor`, symlinks
   `/usr/bin/my-editor` onto `PATH`, adds the menu launcher and icon, and declares
   the Qt runtime libraries as dependencies so `apt` pulls them in automatically.
+- Spell checking uses each system's own checker (see [`docs/spelling.md`](../docs/spelling.md)).
+  macOS needs `rubicon-objc` (pure Python, in the bundle); Windows needs nothing;
+  on Linux the system's Enchant is used and never bundled, and the `.deb`
+  recommends `libenchant-2-2`, which brings an English dictionary.
 - QtWebEngine is excluded in the spec (the app does not use it), which keeps
   bundles around 100-200 MB instead of 500 MB+.
 - macOS double-click file association via Finder is handled by the app itself:

@@ -33,8 +33,18 @@ from typing import Iterable, Optional
 from urllib.parse import unquote, unquote_to_bytes, urlsplit
 from urllib.request import url2pathname
 
-from PySide6.QtCore import QBuffer, QByteArray, QIODevice
+from PySide6.QtCore import QBuffer, QByteArray, QIODevice, QSize
 from PySide6.QtGui import QImage, QImageReader
+
+
+# The picture files a document takes in when they are dropped or pasted
+# (copied in the Finder or Explorer). SVG is absent: it is not decoded
+# anywhere in this process.
+IMAGE_FILE_SUFFIXES = frozenset({".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp"})
+
+
+def is_image_file(path: str) -> bool:
+    return os.path.splitext(path)[1].lower() in IMAGE_FILE_SUFFIXES
 
 
 _MAGIC_MIMES = (
@@ -148,12 +158,32 @@ def data_uri_bytes(name: str) -> Optional[bytes]:
         return None
 
 
-def decode_image_bytes(data: bytes) -> Optional[QImage]:
+def _scaled_to_cover(size: QSize, box: Optional[QSize]) -> Optional[QSize]:
+    """The smallest size of ``size``'s shape that still covers ``box``, or
+    None when that is the image's own size (never upscale)."""
+    if box is None:
+        return None
+    factors = [want / have for want, have in ((box.width(), size.width()),
+                                              (box.height(), size.height())) if want > 0]
+    if not factors:
+        return None
+    factor = max(factors)
+    if factor >= 1:
+        return None
+    return QSize(max(1, round(size.width() * factor)), max(1, round(size.height() * factor)))
+
+
+def decode_image_bytes(data: bytes, *, at_least: Optional[QSize] = None) -> Optional[QImage]:
     """Decode ``data`` to a QImage, or None when the policy refuses it.
 
     Refusal reasons: unrecognised magic, a format outside
     :data:`DECODABLE_MIMES`, a declared size past
     :data:`MAX_DECODE_PIXELS`, or a decoder failure.
+
+    ``at_least`` decodes no larger than needed to cover that box (a
+    width or height of 0 is not asked for): a 64 px thumbnail of a
+    4000 px photo then costs 64 px of memory, not 48 MB. Never larger
+    than the image itself.
     """
     if not data:
         return None
@@ -181,6 +211,9 @@ def decode_image_bytes(data: bytes) -> Optional[QImage]:
             return None
         if size.width() * size.height() > MAX_DECODE_PIXELS:
             return None
+        scaled = _scaled_to_cover(size, at_least)
+        if scaled is not None:
+            reader.setScaledSize(scaled)
         image = reader.read()
     finally:
         buffer.close()

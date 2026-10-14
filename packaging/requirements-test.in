@@ -1,0 +1,5 @@
+# What the test workflow installs: the app, the membership sidecar (so its
+# tests run) and pytest. Compiled into requirements-test.lock.
+-r ../requirements.txt
+-r ../sidecar/requirements.txt
+pytest~=9.0

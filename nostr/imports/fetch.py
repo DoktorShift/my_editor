@@ -12,8 +12,10 @@ Bounds:
 - body size capped at 16 MiB, enforced mid-transfer (the reply is
   aborted the moment the cap is crossed, not after buffering),
 - 30 s transfer timeout,
-- redirect chain capped explicitly (Qt 6 follows redirects with its
-  no-less-safe policy by default; the hop cap stops loops).
+- nothing on the person's own network: every address, and every
+  redirect before it is followed (five at most), passes the network
+  guard (netguard.py), which also connects to the address it checked
+  (``NetGuard.get``: one transfer, shared by both fetchers here).
 
 Decoding is intentionally permissive: feeds in the wild lie about
 encoding, so we fall back through ``Content-Type charset`` to the XML
@@ -31,25 +33,21 @@ import re
 from typing import Callable, Optional
 
 from PySide6.QtCore import QObject, QUrl
-from PySide6.QtNetwork import (
-    QNetworkAccessManager,
-    QNetworkReply,
-    QNetworkRequest,
-)
+from PySide6.QtNetwork import QNetworkAccessManager
 
 import url_safety
+from i18n import _
 from image_safety import sniff_image_mime
 
 from .errors import ERROR_CODES, SourceError
+from .netguard import UNRESOLVED_REASON, Fetched, NetGuard
 
 
 _USER_AGENT = b"my-editor-rss/1"
-_TRANSFER_TIMEOUT_MS = 30 * 1000          # 30s of idle time
 _MAX_BODY_BYTES = 16 * 1024 * 1024        # 16 MiB hard cap on a single body
-_MAX_REDIRECTS = 8                        # slash-fix / https-upgrade / www hops
-_OVERSIZE_MESSAGE = (
-    f"Feed exceeds the {_MAX_BODY_BYTES // (1024 * 1024)} MiB size limit"
-)
+# Shown as it is: the importer has no friendlier copy for TOO_LARGE.
+_OVERSIZE_MESSAGE = _("Feed exceeds the {size} MiB size limit").format(
+    size=_MAX_BODY_BYTES // (1024 * 1024))
 
 # Ceiling for a rehosted image, before the destination server's own cap
 # narrows it further. A feed body should never carry anything near this.
@@ -58,9 +56,10 @@ _MAX_BLOB_BYTES = 25 * 1024 * 1024
 _BLOB_USER_AGENT = b"my-editor-rehost/1"
 # Short copy: these land in the per-image row of the image review
 # dialog, next to the filename.
-_BLOB_UNSAFE_URL = "URL was not allowed"
-_BLOB_OVERSIZE = "Image is too large to rehost"
-_BLOB_EMPTY = "Image was empty"
+_BLOB_UNSAFE_URL = _("URL was not allowed")
+_BLOB_OVERSIZE = _("Image is too large to rehost")
+_BLOB_EMPTY = _("Image was empty")
+_BLOB_NOT_FOUND = _("Image address could not be found")
 
 _CHARSET_FROM_CONTENT_TYPE = re.compile(
     r"charset\s*=\s*([A-Za-z0-9_\-.:]+)", re.IGNORECASE
@@ -74,12 +73,16 @@ class SourceFetcher(QObject):
     """Reusable one-shot HTTP(S) body fetcher.
 
     Call :meth:`fetch` per request. The object owns one
-    ``QNetworkAccessManager`` for the life of the instance.
+    ``QNetworkAccessManager`` for the life of the instance. ``guard`` and
+    ``nam`` are seams for tests (a resolver that never asks the network,
+    a transport that never connects).
     """
 
-    def __init__(self, parent: Optional[QObject] = None) -> None:
+    def __init__(self, parent: Optional[QObject] = None, *,
+                 guard: Optional[NetGuard] = None, nam=None) -> None:
         super().__init__(parent)
-        self._nam = QNetworkAccessManager(self)
+        self._nam = nam or QNetworkAccessManager(self)
+        self._guard = guard or NetGuard()
 
     def fetch(
         self,
@@ -96,74 +99,77 @@ class SourceFetcher(QObject):
         qurl = QUrl(url)
         if not qurl.isValid() or qurl.scheme() not in ("http", "https"):
             on_failure(SourceError(
-                "Feed URL must be http(s)", ERROR_CODES.FETCH_ERROR))
+                _("Feed URL must be http(s)"), ERROR_CODES.FETCH_ERROR))
             return
+        self._get(url, on_success, on_failure)
 
-        request = QNetworkRequest(qurl)
-        request.setTransferTimeout(_TRANSFER_TIMEOUT_MS)
-        request.setMaximumRedirectsAllowed(_MAX_REDIRECTS)
-        request.setRawHeader(b"User-Agent", _USER_AGENT)
-        request.setRawHeader(
-            b"Accept",
-            b"application/rss+xml, application/atom+xml, application/feed+json, "
-            b"application/xml;q=0.9, */*;q=0.1",
-        )
-
-        reply = self._nam.get(request)
-        # Abort mid-transfer the moment the byte cap is crossed instead
-        # of buffering an arbitrarily large body first. ``abort()``
-        # surfaces in ``finished`` as OperationCanceledError; the flag
-        # lets the handler report a size rejection rather than a
-        # generic network failure.
-        oversize = {"hit": False}
-
-        def _size_guard(received: int, _total: int, r=reply) -> None:
-            if received > _MAX_BODY_BYTES and not oversize["hit"]:
-                oversize["hit"] = True
-                r.abort()
-
-        reply.downloadProgress.connect(_size_guard)
-        reply.finished.connect(
-            lambda r=reply: self._on_finished(r, on_success, on_failure, oversize)
-        )
-
-    # -- internals ---------------------------------------------------------
-
-    def _on_finished(
+    def fetch_feed(
         self,
-        reply: QNetworkReply,
-        on_success: Callable[[str], None],
+        url: str,
+        *,
+        etag: str = "",
+        last_modified: str = "",
+        on_body: Callable[[str, dict], None],
+        on_not_modified: Callable[[], None],
         on_failure: Callable[[SourceError], None],
-        oversize: dict,
     ) -> None:
-        try:
-            if oversize["hit"]:
-                on_failure(SourceError(_OVERSIZE_MESSAGE, ERROR_CODES.TOO_LARGE))
-                return
-            if reply.error() != QNetworkReply.NoError:
-                on_failure(SourceError(
-                    reply.errorString() or "network error",
-                    ERROR_CODES.FETCH_ERROR,
-                ))
-                return
+        """A conditional GET for a feed check: with the validators of the
+        last answer, a feed that did not change answers 304 and costs no
+        download (``on_not_modified``). ``on_body`` gets the text and the
+        new validators: ``{"etag", "last_modified", "final_url"}``."""
+        qurl = QUrl(url)
+        if not qurl.isValid() or qurl.scheme() not in ("http", "https"):
+            on_failure(SourceError(
+                _("Feed URL must be http(s)"), ERROR_CODES.FETCH_ERROR))
+            return
+        headers = []
+        if etag:
+            headers.append((b"If-None-Match", etag.encode("latin-1", "ignore")))
+        if last_modified:
+            headers.append((b"If-Modified-Since", last_modified.encode("latin-1", "ignore")))
+        meta: dict = {}
+        self._get(url, lambda text: on_body(text, meta), on_failure, headers=headers,
+                  meta=meta, on_not_modified=on_not_modified)
 
-            data = bytes(reply.readAll())
-            if not data:
-                on_failure(SourceError(
-                    "Empty response", ERROR_CODES.EMPTY_RESPONSE))
-                return
-            # Belt and braces: some backends deliver in one burst with
-            # no intermediate progress signal before ``finished``.
-            if len(data) > _MAX_BODY_BYTES:
-                on_failure(SourceError(_OVERSIZE_MESSAGE, ERROR_CODES.TOO_LARGE))
-                return
+    def _get(self, url: str, on_success, on_failure, *, headers=(), meta=None,
+             on_not_modified=None) -> None:
+        headers = list(headers) + [
+            (b"User-Agent", _USER_AGENT),
+            (b"Accept", b"application/rss+xml, application/atom+xml, application/feed+json, "
+                        b"application/xml;q=0.9, */*;q=0.1")]
+        # The answer is read by a function that does not hold this
+        # fetcher: the transfer is its manager's child, and a callback
+        # holding the fetcher would close a cycle through them.
+        answered = SourceFetcher._answered
+        self._guard.get(self._nam, url, headers=headers, max_bytes=_MAX_BODY_BYTES,
+                        on_done=lambda fetched: answered(
+                            fetched, on_success, on_failure, meta, on_not_modified))
 
-            content_type_var = reply.header(QNetworkRequest.ContentTypeHeader)
-            content_type = str(content_type_var) if content_type_var else ""
-            text = _decode_body(data, content_type)
-            on_success(text)
-        finally:
-            reply.deleteLater()
+    @staticmethod
+    def _answered(fetched: Fetched, on_success, on_failure, meta, on_not_modified) -> None:
+        if fetched.refused:
+            on_failure(SourceError(fetched.refused, ERROR_CODES.LOCAL_NETWORK))
+            return
+        if fetched.unresolved:
+            on_failure(SourceError(UNRESOLVED_REASON, ERROR_CODES.FETCH_ERROR))
+            return
+        if fetched.too_large:
+            on_failure(SourceError(_OVERSIZE_MESSAGE, ERROR_CODES.TOO_LARGE))
+            return
+        if fetched.error:
+            on_failure(SourceError(fetched.error or _("network error"),
+                                   ERROR_CODES.FETCH_ERROR))
+            return
+        if on_not_modified is not None and fetched.status == 304:
+            on_not_modified()
+            return
+        if meta is not None:
+            meta.update(etag=fetched.etag, last_modified=fetched.last_modified,
+                        final_url=fetched.url)
+        if not fetched.data:
+            on_failure(SourceError("Empty response", ERROR_CODES.EMPTY_RESPONSE))
+            return
+        on_success(_decode_body(fetched.data, fetched.content_type))
 
 
 class BlobFetcher(QObject):
@@ -178,10 +184,11 @@ class BlobFetcher(QObject):
     is being downloaded rather than after a server refuses it. This
     module's own ceiling is the upper bound either way.
 
-    The address is checked against the mirror policy before the request
-    and again on the reply, because redirects are followed and the
-    bytes may end up coming from somewhere the caller never named. This
-    request carries no credentials, so a redirect cannot leak one.
+    The address passes the network guard before the request, every
+    redirect before it is followed, and the final address is checked
+    once more on the reply, because the bytes may end up coming from
+    somewhere the caller never named. This request carries no
+    credentials, so a redirect cannot leak one.
     """
 
     def __init__(
@@ -189,13 +196,18 @@ class BlobFetcher(QObject):
         parent: Optional[QObject] = None,
         *,
         max_bytes: int = _MAX_BLOB_BYTES,
+        accept: bytes = b"image/*;q=0.9, */*;q=0.1",
         nam=None,
+        guard: Optional[NetGuard] = None,
     ) -> None:
         super().__init__(parent)
-        # ``nam`` is a seam for tests: a fake transport keeps the size
-        # cap and the redirect recheck assertable without a network.
+        # ``nam`` and ``guard`` are seams for tests: a fake transport and
+        # resolver keep the size cap and the redirect recheck assertable
+        # without a network.
         self._nam = nam or QNetworkAccessManager(self)
+        self._guard = guard or NetGuard()
         self._max_bytes = max(1, min(int(max_bytes), _MAX_BLOB_BYTES))
+        self._accept = accept
 
     def fetch(
         self,
@@ -213,64 +225,26 @@ class BlobFetcher(QObject):
         if not url_safety.is_safe_mirror_source(url):
             on_failure(_BLOB_UNSAFE_URL)
             return
+        answered = BlobFetcher._answered     # not a callback holding this fetcher
+        self._guard.get(self._nam, url, headers=[
+            (b"User-Agent", _BLOB_USER_AGENT),
+            (b"Accept", self._accept)], max_bytes=self._max_bytes,
+            on_done=lambda fetched: answered(fetched, on_success, on_failure))
 
-        request = QNetworkRequest(QUrl(url))
-        request.setTransferTimeout(_TRANSFER_TIMEOUT_MS)
-        request.setMaximumRedirectsAllowed(_MAX_REDIRECTS)
-        request.setRawHeader(b"User-Agent", _BLOB_USER_AGENT)
-        request.setRawHeader(b"Accept", b"image/*;q=0.9, */*;q=0.1")
-
-        reply = self._nam.get(request)
-        # Same discipline as the feed fetcher: abort the moment the cap
-        # is crossed instead of buffering an arbitrarily large body and
-        # measuring it afterwards. A declared ``Content-Length`` over
-        # the cap is refused without transferring anything at all.
-        oversize = {"hit": False}
-
-        def _size_guard(received: int, total: int, r=reply) -> None:
-            if oversize["hit"]:
-                return
-            if received > self._max_bytes or total > self._max_bytes:
-                oversize["hit"] = True
-                r.abort()
-
-        reply.downloadProgress.connect(_size_guard)
-        reply.finished.connect(
-            lambda r=reply: self._on_finished(
-                r, oversize, on_success, on_failure)
-        )
-
-    # -- internals ---------------------------------------------------------
-
-    def _on_finished(
-        self,
-        reply: QNetworkReply,
-        oversize: dict,
-        on_success: Callable[[bytes, str], None],
-        on_failure: Callable[[str], None],
-    ) -> None:
-        try:
-            if oversize["hit"]:
-                on_failure(_BLOB_OVERSIZE)
-                return
-            if reply.error() != QNetworkReply.NoError:
-                on_failure("Could not download the image")
-                return
-            final = reply.url().toString()
-            if final and not url_safety.is_safe_mirror_source(final):
-                on_failure(_BLOB_UNSAFE_URL)
-                return
-            data = bytes(reply.readAll())
-            if not data:
-                on_failure(_BLOB_EMPTY)
-                return
-            if len(data) > self._max_bytes:
-                on_failure(_BLOB_OVERSIZE)
-                return
-            content_type = reply.header(QNetworkRequest.ContentTypeHeader)
-            on_success(data, _blob_mime(str(content_type or ""), data))
-        finally:
-            reply.deleteLater()
+    @staticmethod
+    def _answered(fetched: Fetched, on_success, on_failure) -> None:
+        if fetched.refused:
+            on_failure(_BLOB_UNSAFE_URL)
+        elif fetched.unresolved:
+            on_failure(_BLOB_NOT_FOUND)
+        elif fetched.too_large:
+            on_failure(_BLOB_OVERSIZE)
+        elif fetched.error:
+            on_failure(_("Could not download the image"))
+        elif not fetched.data:
+            on_failure(_BLOB_EMPTY)
+        else:
+            on_success(fetched.data, _blob_mime(fetched.content_type, fetched.data))
 
 
 def _blob_mime(content_type: str, data: bytes) -> str:

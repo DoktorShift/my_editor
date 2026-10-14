@@ -20,6 +20,8 @@ from __future__ import annotations
 import re
 from typing import List
 
+from i18n import _
+
 from ..constants import NOSTR_MAX_ARTICLES, NOSTRHUB_NIP_KIND, NOSTRHUB_RELAYS
 from ..errors import ERROR_CODES, SourceError
 from ..registry import ResolveContext, ResolveInput, ResolveResult, SourceResolver
@@ -27,11 +29,11 @@ from ...rss.parser import Feed, FeedItem
 from ..sources.mdx import derive_summary
 from ..sources.nostr import (
     NostrEntity,
-    dedup_relays,
     event_tag,
     extract_nostr_entity,
     fetch_author_name,
 )
+from ...outbox.policy import dedupe_relays, public_relays
 from ...bech32 import encode_naddr
 
 HUB_BASE_URL = "https://nostrhub.io"
@@ -103,7 +105,10 @@ def _build_feed(events: list, *, author_name: str, source_url: str) -> Feed:
         key=lambda it: it.published_at or 0,
         reverse=True,
     )
-    title = f"{author_name} · NostrHub NIPs" if author_name else "NostrHub NIPs"
+    title = (
+        _("{name} · NostrHub NIPs").format(name=author_name) if author_name
+        else _("NostrHub NIPs")
+    )
     return Feed(format="nostr", title=title, link=source_url,
                 description=None, items=tuple(items))
 
@@ -124,7 +129,9 @@ def _resolve(input_: ResolveInput, ctx: ResolveContext) -> None:
         return
 
     ctx.stage("connecting", url, hostname="nostrhub.io")
-    relays = dedup_relays(entity.relays, NOSTRHUB_RELAYS)
+    # The address's own relays (public ones: they are a stranger's
+    # word), then where NostrHub keeps its events.
+    relays = dedupe_relays(public_relays(entity.relays), NOSTRHUB_RELAYS)
 
     def _finish(events: list, source_url: str) -> None:
         if ctx.is_cancelled():

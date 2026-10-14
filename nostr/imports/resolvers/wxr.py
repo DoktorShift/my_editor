@@ -12,6 +12,8 @@ before the RSS catch-all.
 
 from __future__ import annotations
 
+from i18n import _
+
 from ...rss.parser import Feed
 from ..errors import ERROR_CODES, SourceError
 from ..registry import ResolveContext, ResolveInput, ResolveResult, SourceResolver
@@ -38,7 +40,7 @@ def _resolve(input_: ResolveInput, ctx: ResolveContext) -> None:
             return
         feed = Feed(
             format="wxr",
-            title=export.title or "WordPress export",
+            title=export.title or _("WordPress export"),
             link=None,
             description=None,
             items=export.items,
@@ -51,7 +53,7 @@ def _resolve(input_: ResolveInput, ctx: ResolveContext) -> None:
         lambda: parse_wxr(input_.pasted_body or ""),
         _deliver,
         lambda exc: ctx.on_failure(SourceError(
-            f"Could not read that WordPress export: {exc}",
+            _("Could not read that WordPress export: {error}").format(error=exc),
             ERROR_CODES.UNKNOWN,
         )),
     )

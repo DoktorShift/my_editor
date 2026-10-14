@@ -19,18 +19,22 @@ goes through an explicit format allowlist rather than Qt sniffing.
 
 from __future__ import annotations
 
+import errno
 import hashlib
 import os
-import tempfile
 from pathlib import Path
 from typing import Dict, Optional
 
-from PySide6.QtCore import QObject, QUrl, Signal
+from PySide6.QtCore import QObject, QTimer, QUrl, Signal
 from PySide6.QtGui import QPixmap
 from PySide6.QtNetwork import QNetworkAccessManager, QNetworkReply, QNetworkRequest
 
 import url_safety
+from atomic_file import free_path, new_document_file, place_document, save_document, write_bytes
+from i18n import _
 from image_safety import decode_image_bytes
+
+from ..blossom.hashes import hash_from_url
 
 
 CACHE_DIR = Path.home() / ".config" / "my_editor" / "blossom_cache"
@@ -48,7 +52,10 @@ _HTTP_TIMEOUT_MS = 30_000
 # that policy still allows https to https into a loopback address.
 _MAX_REDIRECTS = 4
 
-_UNSAFE_URL_REASON = "blob URL was not allowed"
+# Shown to a person, as the reason a preview is missing. "not an image"
+# below is not translated: callers compare against it.
+_UNSAFE_URL_REASON = _("blob URL was not allowed")
+_WRONG_FILE_REASON = _("a server returned the wrong file")
 
 
 class ThumbnailLoader(QObject):
@@ -229,6 +236,21 @@ class ThumbnailLoader(QObject):
 
         reply.finished.connect(_done)
 
+    def download_to(self, url: str, sha256: str, target, *, size: int,
+                    transform=None, keep_existing: bool = False) -> "FileDownload":
+        """Save As: stream the file at ``url`` into ``target``, bounded by
+        its own ``size`` rather than the thumbnail cap, and checked against
+        ``sha256`` before it takes the target's name. ``transform`` turns
+        the downloaded bytes into what is written (a private file's
+        envelope into the file). ``keep_existing``: a file at the target
+        when the download ends stays, and this one takes the next free
+        name. Same policy, redirect rules and final-URL check as every
+        other download here."""
+        job = FileDownload(self._nam, url, sha256, Path(target), size=size,
+                           transform=transform, keep_existing=keep_existing, parent=self)
+        job.start()
+        return job
+
     # -- shared request plumbing ------------------------------------------
 
     def _start(self, url: str):
@@ -264,9 +286,9 @@ class ThumbnailLoader(QObject):
         other.
         """
         if oversize["hit"]:
-            return b"", "blob exceeds cache limit"
+            return b"", _("blob exceeds cache limit")
         if reply.error() != QNetworkReply.NoError:
-            return b"", reply.errorString() or "network error"
+            return b"", reply.errorString() or _("network error")
         # Redirects were followed, so the bytes may come from an origin
         # the caller never named; validate where they came from before
         # reading them.
@@ -274,9 +296,9 @@ class ThumbnailLoader(QObject):
             return b"", _UNSAFE_URL_REASON
         data = bytes(reply.readAll())
         if not data:
-            return b"", "empty response"
+            return b"", _("empty response")
         if len(data) > _MAX_DOWNLOAD_BYTES:
-            return b"", "blob exceeds cache limit"
+            return b"", _("blob exceeds cache limit")
         return data, ""
 
     def _on_reply(
@@ -296,7 +318,7 @@ class ThumbnailLoader(QObject):
             # Validate the bytes match the hash before trusting them.
             actual = hashlib.sha256(data).hexdigest()
             if actual != sha:
-                self.failed.emit(sha, "downloaded bytes do not match sha256")
+                self.failed.emit(sha, _WRONG_FILE_REASON)
                 return
             image = decode_image_bytes(data)
             if image is None:
@@ -325,6 +347,13 @@ class ThumbnailLoader(QObject):
                 self.url_failed.emit(url, reason)
                 return
             sha = hashlib.sha256(data).hexdigest()
+            # A blob address names its file (BUD-03: the last 64-hex run
+            # of the path). Bytes that hash to anything else are not that
+            # file, whoever served them.
+            named = hash_from_url(url.split("#", 1)[0].split("?", 1)[0])
+            if named and named != sha:
+                self.url_failed.emit(url, _WRONG_FILE_REASON)
+                return
             image = decode_image_bytes(data)
             # Cached either way, and the url → sha mapping recorded
             # either way, so a refusal is remembered as cheaply as a
@@ -340,6 +369,223 @@ class ThumbnailLoader(QObject):
             self.url_ready.emit(url, sha, QPixmap.fromImage(image))
         finally:
             reply.deleteLater()
+
+
+# A file whose size is not known is still bounded: the largest file the
+# members' server takes.
+_UNKNOWN_SIZE_LIMIT = 1024 * 1024 * 1024
+
+
+# A disk with no room left, or none left for this account.
+_FULL_ERRNOS = {errno.ENOSPC, getattr(errno, "EDQUOT", errno.ENOSPC)}
+
+
+# The longest name a folder holds: 255 UTF-16 units on Windows, 255 bytes
+# on macOS and Linux.
+_NAME_LIMIT = 255
+
+
+def _name_too_long(path) -> bool:
+    if not path:
+        return False
+    name = os.path.basename(os.fsdecode(path))
+    if os.name == "nt":
+        return len(name.encode("utf-16-le")) // 2 > _NAME_LIMIT
+    return len(os.fsencode(name)) > _NAME_LIMIT
+
+
+def write_problem(exc: OSError) -> str:
+    """Why a file could not be written, as FileDownload says it. Windows
+    has no ENAMETOOLONG for a name too long for the folder (it says the
+    path wasn't found, or the name is invalid), so the name itself says it."""
+    if exc.errno == errno.ENAMETOOLONG or any(
+            _name_too_long(p) for p in (exc.filename, exc.filename2)):
+        return "name"
+    return "full" if exc.errno in _FULL_ERRNOS else "write"
+
+
+class FileDownload(QObject):
+    """One Save As download, streamed to a file beside the target and
+    moved onto it only when it is the right file. ``finished`` carries ""
+    or why not: "cancelled", "network", "missing", "server",
+    "too_large", "wrong_file", "unsafe", "key" (the transform could not
+    open the right file: a private file's key is wrong), "full" (no room
+    on the disk), "name" (too long for the folder) or "write". It is
+    sent once, whatever goes wrong, and the part file is gone by then."""
+
+    progress = Signal(int, int)        # received, total
+    finished = Signal(str)
+
+    def __init__(self, nam, url: str, sha256: str, target: Path, *, size: int,
+                 transform=None, keep_existing: bool = False, parent=None) -> None:
+        super().__init__(parent)
+        self._nam, self._url, self._sha = nam, url, (sha256 or "").lower()
+        self._target = Path(target)
+        self._keep_existing = keep_existing
+        # The hidden file it is written to, beside the target.
+        self._part: Optional[Path] = None
+        self._limit = size if size > 0 else _UNKNOWN_SIZE_LIMIT
+        self._transform = transform
+        self._hash = hashlib.sha256()
+        self._received = 0
+        self._file = None
+        self._reply = None
+        self._why = ""
+        self._ended = False
+
+    def start(self) -> None:
+        """Begin. A download that cannot begin (an address not allowed, a
+        folder that is gone or may not be written in) says so on the next
+        turn of the event loop, once whoever started it is listening."""
+        problem = ""
+        if not url_safety.is_safe_media_url(self._url):
+            problem = "unsafe"
+        else:
+            try:
+                # Beside the file a link names, where it will be put (or
+                # beside the link, when that folder takes no new file,
+                # and the file is written in place); a file kept beside a
+                # new name goes beside the target.
+                try:
+                    fd, part = new_document_file(self._target, suffix=".part",
+                                                 follow_link=not self._keep_existing)
+                except PermissionError:
+                    if not os.path.islink(self._target):
+                        raise
+                    fd, part = new_document_file(self._target, suffix=".part",
+                                                 follow_link=False)
+                self._part = Path(part)
+                self._file = os.fdopen(fd, "wb")
+            except OSError as exc:
+                problem = write_problem(exc)
+        if problem:
+            QTimer.singleShot(0, self, lambda: self._end(problem))
+            return
+        request = QNetworkRequest(QUrl(self._url))
+        request.setRawHeader(b"User-Agent", b"my-editor-blossom-save/1")
+        request.setTransferTimeout(_HTTP_TIMEOUT_MS)
+        request.setAttribute(QNetworkRequest.Attribute.RedirectPolicyAttribute,
+                             QNetworkRequest.RedirectPolicy.NoLessSafeRedirectPolicy)
+        request.setMaximumRedirectsAllowed(_MAX_REDIRECTS)
+        self._reply = reply = self._nam.get(request)
+        if hasattr(reply, "readyRead"):
+            reply.readyRead.connect(self._read)
+        reply.downloadProgress.connect(self._on_progress)
+        reply.finished.connect(self._on_finished)
+
+    @property
+    def target(self) -> Path:
+        """Where the file is saved: the target asked for, or the free name
+        it took beside a file that is kept."""
+        return self._target
+
+    def cancel(self) -> None:
+        if self._ended or self._why:
+            return
+        self._why = "cancelled"
+        if self._reply is not None:
+            self._reply.abort()            # finished follows, and ends it
+        else:
+            self._end("cancelled")
+
+    def _on_progress(self, received: int, total: int) -> None:
+        if received > self._limit or (total > 0 and total > self._limit):
+            if not self._why:
+                self._why = "too_large"
+                self._reply.abort()
+            return
+        self.progress.emit(int(received), int(total if total > 0 else self._limit))
+
+    def _read(self) -> None:
+        data = bytes(self._reply.readAll())
+        if not data or self._why:
+            return
+        self._received += len(data)
+        if self._received > self._limit:
+            self._why = "too_large"
+            self._reply.abort()
+            return
+        self._hash.update(data)
+        try:
+            self._file.write(data)
+        except OSError as exc:
+            self._why = write_problem(exc)
+            self._reply.abort()
+
+    def _on_finished(self) -> None:
+        reply = self._reply
+        try:
+            if not self._why:
+                self._read()
+            if not self._why:
+                self._why = self._reply_problem(reply)
+            if not self._why and self._hash.hexdigest() != self._sha:
+                self._why = "wrong_file"
+            self._end(self._why)
+        finally:
+            reply.deleteLater()
+
+    def _reply_problem(self, reply) -> str:
+        status = int(reply.attribute(QNetworkRequest.HttpStatusCodeAttribute) or 0)
+        if reply.error() != QNetworkReply.NoError or not 200 <= status < 300:
+            if status == 404:
+                return "missing"
+            return "network" if status == 0 else "server"
+        if not _final_url_allowed(self._url, reply.url().toString()):
+            return "unsafe"
+        return ""
+
+    def _end(self, why: str) -> None:
+        if self._ended:
+            return
+        self._ended = True
+        said = "write"
+        try:
+            said = self._close(why) or self._place()
+        except OSError as exc:
+            said = write_problem(exc)
+        except MemoryError:
+            # Written in place (a hard link, a folder that takes no new
+            # file), the file is held in memory, and this one didn't fit.
+            said = "write"
+        finally:
+            try:
+                if self._part is not None:
+                    self._part.unlink()
+            except OSError:
+                pass
+            self.finished.emit(said)
+
+    def _close(self, why: str) -> str:
+        """Close the part file: ``why`` the download ended early, else why
+        its last bytes didn't reach the disk (a disk that filled, a
+        volume removed), else ""."""
+        file, self._file = self._file, None
+        if file is None:
+            return why
+        try:
+            with file:
+                if not why:
+                    file.flush()
+                    os.fsync(file.fileno())
+        except OSError as exc:
+            return why or write_problem(exc)
+        return why
+
+    def _place(self) -> str:
+        """Put the downloaded file at the target, as any of the person's
+        files is saved (atomic_file.save_document): onto the file a link
+        names, keeping that file's permissions. Raises OSError."""
+        if self._keep_existing:
+            self._target = Path(free_path(self._target))
+        if self._transform is None:
+            place_document(self._part, self._target)
+            return ""
+        data = self._transform(self._part.read_bytes())
+        if data is None:
+            return "key"
+        save_document(self._target, data)
+        return ""
 
 
 def _final_url_allowed(requested: str, final: str) -> bool:
@@ -375,19 +621,4 @@ def _write_cache_file(path: Path, data: bytes) -> None:
     private as the config directory it lives in. An aborted write leaves
     no temp file behind.
     """
-    fd, tmp_path = tempfile.mkstemp(
-        prefix=".blob_", suffix=".tmp", dir=str(path.parent)
-    )
-    try:
-        with os.fdopen(fd, "wb") as f:
-            f.write(data)
-            f.flush()
-            os.fsync(f.fileno())
-        _chmod(tmp_path, 0o600)
-        os.replace(tmp_path, path)
-    except OSError:
-        try:
-            os.unlink(tmp_path)
-        except OSError:
-            pass
-        raise
+    write_bytes(path, data)

@@ -41,6 +41,12 @@ class SaveWindow(_Window):
     _save_to = MainWindow._save_to
     _to_rmd_content = MainWindow._to_rmd_content
     _export_title_for = MainWindow._export_title_for
+    _saving_without = MainWindow._saving_without
+    _detail_label = MainWindow._detail_label
+    _detail_names = MainWindow._detail_names
+    _article_details_of = MainWindow._article_details_of
+    _published_article_of = MainWindow._published_article_of
+    _say_saved = MainWindow._say_saved
 
     def __init__(self, cache_dir):
         super().__init__(cache_dir)
@@ -171,3 +177,58 @@ def test_a_document_without_images_is_unchanged_by_the_guard(win):
     ed = _editor_with(text="just words")
     for name in ("notes.org", "README", "paper.Rmd", "plain.txt"):
         assert win._loses_content_on_save(ed, name) is False
+
+
+def test_a_saved_file_keeps_the_line_endings_it_was_read_with(win, tmp_path, monkeypatch):
+    # On Windows a Markdown file from a Git repository must not turn
+    # every line into CRLF the first time it is saved.
+    import atomic_file
+    from PySide6.QtWidgets import QTextEdit
+
+    monkeypatch.setattr(atomic_file.os, "linesep", "\r\n")
+    ed = QTextEdit()
+    ed.setPlainText("Line one\nLine two")
+    ed._newline = "\n"
+    win._ed = ed
+    path = str(tmp_path / "notes.txt")
+    assert win._save_to(path) is True
+    assert b"\r\n" not in open(path, "rb").read()
+
+    ed._newline = None          # a new document: this system's ending
+    assert win._save_to(path) is True
+    assert b"\r\n" in open(path, "rb").read()
+
+
+def test_a_save_leaving_typed_details_out_says_so_beside_the_media_still_to_go_in():
+    """Round 8, L1: the message about the details replaced the one about
+    audio or video still to be uploaded."""
+    shown = []
+    window = types.SimpleNamespace(
+        status=types.SimpleNamespace(showMessage=shown.append),
+        _media_not_uploaded=lambda document: [types.SimpleNamespace(alt="talk.mp4", sha256="s")])
+    window._detail_names = lambda details: MainWindow._detail_names(window, details)
+    window._detail_label = MainWindow._detail_label
+    ed = types.SimpleNamespace(document=lambda: None, _details_not_saved=frozenset({"tags"}))
+    MainWindow._say_saved(window, ed, "/notes/post.md")
+    assert shown == ["Saved without what you typed for “Hashtags”: MyEditor can’t write it "
+                     "into the file. “talk.mp4” goes into the file once it is uploaded."]
+
+
+@pytest.mark.parametrize("refused, title, button", [
+    ({"tags"}, "“Hashtags” can’t be saved in the file", "Save Without It"),
+    ({"title", "tags"}, "Some article details can’t be saved in the file", "Save Without Them"),
+])
+def test_saving_without_details_names_them_in_its_button(monkeypatch, refused, title, button):
+    """Round 9, L5: "Save Without It" for several details."""
+    import main_window as module
+    asked = []
+    monkeypatch.setattr(module, "ask", lambda parent, **kwargs: asked.append(kwargs) or "keep")
+    window = types.SimpleNamespace(is_dark_theme=False,
+                                   _article_details_of=lambda ed: module.ArticleDetails())
+    window._detail_label = MainWindow._detail_label
+    window._detail_names = lambda details: MainWindow._detail_names(window, details)
+    front = types.SimpleNamespace(refused=frozenset(refused))
+    assert MainWindow._saving_without(window, types.SimpleNamespace(), front, "/n/post.md") \
+        is False
+    assert asked[0]["title"] == title
+    assert [b.label for b in asked[0]["buttons"]] == [button, "Keep Editing"]

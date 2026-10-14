@@ -31,6 +31,8 @@ import re
 from dataclasses import dataclass, field
 from typing import Dict, List, Tuple
 
+import front_matter
+
 from ...rss.normalize import html_to_markdown
 
 
@@ -73,30 +75,18 @@ def _clamp(line: str, max_len: int) -> str:
 # Frontmatter                                                                 #
 # --------------------------------------------------------------------------- #
 
-_FRONTMATTER_RE = re.compile(r"^﻿?---\r?\n([\s\S]*?)\r?\n---\r?\n?")
-_FRONTMATTER_KV_RE = re.compile(r"^([A-Za-z0-9_-]+)\s*:\s*(.*)$")
-
-
 def parse_frontmatter(raw: str) -> Tuple[Dict[str, str], str]:
-    """Split ``---`` YAML frontmatter off the top; values may be quoted.
-
-    Deliberately a flat key:value parse, not full YAML: content
-    frontmatter in the wild is overwhelmingly flat, and a YAML
-    dependency for ``title:`` extraction would be all cost.
-    """
-    match = _FRONTMATTER_RE.match(str(raw or ""))
-    if not match:
+    """Split ``---`` front matter off the top (front_matter.split, the one
+    reader of it): its values as texts, a list's items joined by commas."""
+    front, body = front_matter.split(str(raw or ""))
+    if front is None:
         return {}, str(raw or "")
-    frontmatter: Dict[str, str] = {}
-    for line in match.group(1).split("\n"):
-        kv = _FRONTMATTER_KV_RE.match(line)
-        if not kv:
-            continue
-        value = kv.group(2).strip()
-        if len(value) >= 2 and value[0] == value[-1] and value[0] in "'\"":
-            value = value[1:-1]
-        frontmatter[kv.group(1)] = value
-    return frontmatter, raw[match.end():]
+    values: Dict[str, str] = {}
+    for item in front.entries:
+        value = item.value
+        if item.key and value is not None:
+            values[item.key] = value if isinstance(value, str) else ", ".join(value)
+    return values, body
 
 
 # --------------------------------------------------------------------------- #

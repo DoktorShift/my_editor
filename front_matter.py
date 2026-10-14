@@ -1,0 +1,928 @@
+# SPDX-FileCopyrightText: 2026 rinbal
+# SPDX-License-Identifier: AGPL-3.0-or-later
+"""A Markdown file's front matter: the block at its top that Jekyll, Hugo,
+Obsidian and iA Writer keep a document's details in. YAML between ``---``
+lines (closed by ``...`` too, as Pandoc allows), or TOML between ``+++``
+lines, which Hugo's own new posts use.
+
+The front matter as written is the source of truth. It is read as entries,
+each its key and the lines written for it (the key's line and the indented
+lines under it), and kept with the lines that open and close the block and
+the blank lines after it, so that a file saved without a change to its
+details comes back byte for byte, and a change rewrites only the entries it
+touches.
+
+Values are read the way front matter in the wild writes them, not as full
+YAML: a plain or quoted text, a block of text (``|``, ``>``, with ``-`` or
+``+``), a list in brackets (``[a, b]``) or a list of "- item" lines. A value
+this reader cannot read fully (a mapping, Hugo's ``cover:`` with ``image``
+and ``alt`` under it) reads as None: it is never shown as a detail and never
+replaced. Values this app writes are quoted whenever YAML would read them as
+something other than the text (a date, a number, true, a comment).
+
+TOML is read with tomllib, one entry at a time, and written in TOML
+(``key = "value"``, dates bare as TOML's own); its tables (``[params]``)
+are kept whole and never read, and new entries go above them, where TOML
+needs its plain keys.
+
+A ``---`` block counts as front matter when it holds at least one key, or
+nothing at all; otherwise it is text (a document that opens with a divider).
+
+What this reader makes of a file, and every change written to it, is held
+against what a YAML parser (PyYAML) or tomllib reads there (parsed): a
+detail they read otherwise is never read or changed by this app.
+"""
+
+from __future__ import annotations
+
+import difflib
+import functools
+import json
+import re
+import tomllib
+from dataclasses import dataclass, field, replace
+from datetime import date, datetime
+from typing import AbstractSet, Any, FrozenSet, List, Optional, Sequence, Tuple, Union
+
+import yaml
+
+YAML = "yaml"
+TOML = "toml"
+
+# A line ends in CRLF, LF, or a lone CR (classic Mac OS), as YAML ends it.
+# (TOML ends one at CRLF or LF only: tomllib reads a TOML front matter as
+# written, each line with its ending, and reads none with a lone CR.)
+_EOL = r"(?:\r\n|\r|\n)"
+# The block: "---" on the first line (after a byte order mark), then
+# anything, then "---" (or "...") on a line of its own; for TOML "+++" both.
+_BLOCK = re.compile(rf"\A(﻿?---[ \t]*){_EOL}(.*?){_EOL}?(?<=[\r\n])((?:---|\.\.\.)[ \t]*)"
+                    rf"(?:{_EOL}|\Z)", re.DOTALL)
+_TOML_BLOCK = re.compile(rf"\A(﻿?\+\+\+[ \t]*){_EOL}(.*?){_EOL}?(?<=[\r\n])(\+\+\+[ \t]*)"
+                         rf"(?:{_EOL}|\Z)", re.DOTALL)
+# A TOML key line (a bare, quoted or dotted key, then "="), indented or not.
+_TOML_KEY = re.compile(r"^\s*([^\s#\[=][^=]*?)[ \t]*=")
+# A YAML key line: a key, quoted ("tags", 'tags') or plain, spaces inside
+# it too (Obsidian's "created at"), then ":".
+_KEY = re.compile(r"""^("[^"\n]*"|'[^'\n]*'|[^\s\-?:,\[\]{}#&*!|>'"%@`](?:[^\s:]|[ \t]+(?=[^\s:#]))*)"""
+                  r"""[ \t]*:(?:[ \t]+(.*?))?[ \t]*$""")
+_BLOCK_SCALAR = re.compile(r"^([|>])([+-]?)(\d?)[ \t]*(?:#.*)?$")
+# A plain value YAML reads as text again, as written: no indicator first,
+# no ": " or " #" inside, and not a word or form YAML reads as another type.
+_PLAIN = re.compile(r"^[^\s\-?:,\[\]{}#&*!|>'\"%@`][^\n]*$")
+_YAML_WORDS = {"true", "false", "yes", "no", "on", "off", "y", "n", "null", "~"}
+# How YAML writes "no value" (unquoted).
+_YAML_NULLS = {"~", "null", "Null", "NULL"}
+_YAML_NUMBER = re.compile(r"^[-+]?(?:0[xob][0-9a-fA-F_]+|[0-9][0-9_]*(?:\.[0-9_]*)?"
+                          r"(?:[eE][-+]?[0-9]+)?|\.[0-9]+|\.inf|\.nan)$", re.IGNORECASE)
+_YAML_DATE = re.compile(r"^\d{4}-\d{1,2}-\d{1,2}(?:[Tt ].*)?$")
+
+
+@dataclass(frozen=True)
+class Entry:
+    """One key of the front matter, with the lines written for it."""
+
+    key: str
+    lines: Tuple[str, ...]
+    syntax: str = YAML
+
+    @property
+    def table(self) -> str:
+        """The name of the TOML table this entry is the header of
+        ("[ taxonomies ]  # terms" is "taxonomies"); "" for any other."""
+        if self.syntax != TOML:
+            return ""
+        found = re.match(r"^\[\s*([^\[\]]+?)\s*\]\s*(?:#.*)?$", self.key)
+        return found.group(1).strip("\"'") if found else ""
+
+    @property
+    def path(self) -> Tuple[str, ...]:
+        """The keys this entry is written under: its key, or for a TOML key
+        written dotted ("taxonomies.tags", Zola's) each of its parts, as
+        tomllib reads them."""
+        if self.syntax != TOML or "." not in self.key or self.key.startswith("["):
+            return (self.key,)
+        try:
+            read = tomllib.loads("\n".join(self.lines))
+        except tomllib.TOMLDecodeError:
+            return (self.key,)
+        path = []
+        while isinstance(read, dict) and len(read) == 1:
+            name, read = next(iter(read.items()))
+            path.append(name)
+        return tuple(path) or (self.key,)
+
+    def inner_entries(self) -> List["Entry"]:
+        """A TOML table's own entries ("[taxonomies]" and the keys under it);
+        none for any other entry."""
+        if self.syntax != TOML or not self.key.startswith("["):
+            return []
+        return _with_trailers_apart(_toml_entries(self.lines[1:]))
+
+    def with_inner(self, inner: Sequence["Entry"]) -> "Entry":
+        """This TOML table with ``inner`` as its entries."""
+        return Entry(self.key, (self.lines[0],) + tuple(
+            line for entry in inner for line in entry.lines), self.syntax)
+
+    @property
+    def written(self) -> str:
+        """The value on the key's line as written, without a comment after
+        it ("2024-03-01", '"My post"')."""
+        if self.syntax == TOML:
+            after = self.lines[0].partition("=")[2].strip()
+        else:
+            found = _KEY.match(self.lines[0])
+            after = (found.group(2) or "") if found else ""
+        return _without_comment(after).strip()
+
+    @property
+    def value(self) -> Union[str, List[str], None]:
+        """The value as text, or as a list of texts for a list; None for a
+        value this reader cannot read fully (a mapping, anything else)."""
+        if self.syntax == TOML:
+            return _toml_value(self)
+        first = _KEY.match(self.lines[0])
+        written = (first.group(2) or "") if first else ""
+        rest = [line for line in self.lines[1:] if line.strip()
+                and not line.lstrip().startswith("#")]
+        block = _BLOCK_SCALAR.match(written)
+        if block is not None:
+            return _block_text(self.lines[1:], block.group(1), block.group(2))
+        if written.startswith("["):
+            flow = _flow_list(written, self.lines[1:])
+            if flow is None:
+                return None                 # not closed where it can be read
+            return [_unquote(part) for part in _split_inline(flow[0][1:-1]) if part.strip()]
+        if not written and rest:
+            if all(line.lstrip().startswith("- ") or line.strip() == "-" for line in rest):
+                return [_list_item(line) for line in rest]
+            return None                     # a mapping or something else: unread
+        if rest or written.startswith(("{", "&", "*", "!")):
+            return None                     # continued over lines, or not plain YAML
+        plain = _without_comment(written)
+        if plain in _YAML_NULLS:
+            return ""                       # YAML's "no value"
+        return _unquote(plain)
+
+
+@dataclass(frozen=True)
+class FrontMatter:
+    """A file's front matter as written: its entries, the lines that open
+    and close it, and the blank lines between it and the text."""
+
+    entries: Tuple[Entry, ...]
+    opening: str = "---"
+    closing: str = "---"
+    gap: str = "\n"
+    # Line endings as the file writes them.
+    newline: str = "\n"
+    changed: bool = field(default=False, compare=False)
+    syntax: str = YAML
+    # The names of the details the write that made this front matter left
+    # as they were, as no way of writing them read back as set
+    # (article_details); for whoever asked for it to be told.
+    refused: FrozenSet[str] = field(default=frozenset(), compare=False)
+    # Every line of the block as the file writes it, from the opening line
+    # to the closing one, each with its own line ending ("\r\n", "\n", "\r",
+    # or none at the end of a file): a front matter mixing them is written
+    # back with each line's own (join). None for one MyEditor writes anew.
+    as_written: Tuple[Tuple[str, str], ...] = field(default=(), compare=False)
+
+    def with_entries(self, entries: Sequence[Entry]) -> "FrontMatter":
+        return replace(self, entries=tuple(entries), refused=frozenset(),
+                       changed=tuple(entries) != self.entries or self.changed)
+
+    def with_refused(self, names: AbstractSet[str]) -> "FrontMatter":
+        return replace(self, refused=frozenset(names))
+
+    def where_new_entries_go(self, entries: Sequence[Entry]) -> int:
+        """Where an entry added to ``entries`` goes: at the end, or in TOML
+        above its first table (and the blank or comment lines before it),
+        where TOML needs its plain keys."""
+        at = next((i for i, entry in enumerate(entries) if entry.key.startswith("[")),
+                  len(entries))
+        if at == len(entries):
+            return at
+        while at > 0 and not entries[at - 1].key:
+            at -= 1
+        return at
+
+
+def split(text: str) -> Tuple[Optional[FrontMatter], str]:
+    """``(front matter, body)`` of ``text``, or ``(None, text)`` when it has
+    no front matter (no block at its top, or a block without a key)."""
+    text = text or ""
+    syntax = TOML
+    found = _TOML_BLOCK.match(text)
+    if found is None:
+        syntax = YAML
+        found = _BLOCK.match(text)
+    if found is None:
+        return None, text
+    # Lines end at CRLF, LF or a lone CR only, as YAML ends them: a form
+    # feed or U+2028 inside a line stays there.
+    lines = re.split(_EOL, found.group(2)) if found.group(2) else []
+    entries = _toml_entries(lines) if syntax == TOML else _yaml_entries(lines)
+    if lines and not any(entry.key for entry in entries):
+        return None, text                   # a divider, some text, a divider: text
+    entries = _with_trailers_apart(entries)
+    as_written = _lines_as_written(found.group(0))
+    endings = [ending for _line, ending in as_written]
+    newline = max(("\n", "\r\n", "\r"), key=endings.count)  # the most used, LF first
+    rest = text[found.end():]
+    body = rest.lstrip("\r\n")
+    return (FrontMatter(tuple(entries), found.group(1), found.group(3),
+                        rest[:len(rest) - len(body)], newline, syntax=syntax,
+                        as_written=as_written), body)
+
+
+def _lines_as_written(text: str) -> Tuple[Tuple[str, str], ...]:
+    """``(line, its line ending)`` of each line of ``text``: "\r\n", "\n",
+    "\r", or "" for a last line without one."""
+    parts = re.split(f"({_EOL})", text)
+    lines = tuple(zip(parts[0::2], parts[1::2] + [""]))
+    return lines[:-1] if lines[-1] == ("", "") else lines
+
+
+def parsed(front: Optional[FrontMatter]) -> Optional[dict]:
+    """``front`` as a YAML parser (or tomllib) reads it: its keys and their
+    values ({} for none), or None when it reads no mapping there, or one
+    too large to hold against (an alias repeated over and over). Shared:
+    never changed by its reader."""
+    if front is None:
+        return {}
+    lines = [line for entry in front.entries for line in entry.lines]
+    if front.syntax == TOML:
+        # As written, each line with its own ending: TOML ends none at a
+        # lone CR, and tomllib reads no front matter holding one.
+        endings = _endings(front, [front.opening, *lines, front.closing])[1:-1]
+        return _parsed_text(TOML, "".join(line + (ending or "\n")
+                                          for line, ending in zip(lines, endings)))
+    # Each line ends in a line break, the last one too, as in the file: a
+    # block text at the end ("|+") keeps its own.
+    return _parsed_text(YAML, "".join(line + "\n" for line in lines))
+
+
+# The most values a front matter is held against: far more than any holds,
+# far fewer than an alias repeated within itself ("billion laughs") gives.
+_MOST_VALUES = 10_000
+
+
+# PyYAML's own reader, never its libyaml one: that reads some files (a tab
+# in a list) the other refuses, and is not on every system.
+@functools.lru_cache(maxsize=64)
+def _parsed_text(syntax: str, text: str) -> Optional[dict]:
+    try:
+        mapping = tomllib.loads(text) if syntax == TOML else _yaml_load(text)
+        if mapping is None and syntax == YAML:
+            mapping = {}                    # nothing but comments and blanks
+        if not isinstance(mapping, dict) or not _within(mapping, [_MOST_VALUES]):
+            return None
+    except (yaml.YAMLError, ValueError, TypeError, RecursionError):
+        # Not YAML or TOML; a date no calendar has; nested past counting.
+        return None
+    return mapping
+
+
+def _yaml_load(text: str) -> Any:
+    """PyYAML's reading of ``text``. Its own reader refuses a tab where
+    libyaml, Jekyll and Hugo read a space: after a key's colon, before a
+    comment, at a line's end. Such a tab is read as a space; one in a
+    line's indentation, which YAML forbids, is not."""
+    try:
+        return yaml.load(text, Loader=yaml.SafeLoader)
+    except yaml.YAMLError:
+        if "\t" not in text:
+            raise
+    spaced = re.sub(r"(?m)(?<=\S)[^\S\n]*\t", lambda tabs: tabs.group(0).replace("\t", " "),
+                    text)
+    return yaml.load(spaced, Loader=yaml.SafeLoader)
+
+
+def reads_as(written: str, value: Any, syntax: str = YAML) -> bool:
+    """Whether ``written``, a value as a file writes it bare ("1.10",
+    "yes", "12:30"), is what a parser reads as ``value`` (1.1, True, 750)."""
+    try:
+        read = tomllib.loads(f"v = {written}")["v"] if syntax == TOML \
+            else yaml.load(written, Loader=yaml.SafeLoader)
+    except (yaml.YAMLError, ValueError, TypeError, KeyError):
+        return False
+    return type(read) is type(value) and (read == value or read != read and value != value)
+
+
+def _within(value: Any, left: List[int]) -> bool:
+    """Whether ``value`` holds no more values than ``left[0]`` (counted
+    down as they are met, each alias again)."""
+    left[0] -= 1
+    if left[0] < 0:
+        return False
+    if isinstance(value, dict):
+        return all(_within(key, left) and _within(item, left) for key, item in value.items())
+    if isinstance(value, list):
+        return all(_within(item, left) for item in value)
+    return True
+
+
+def _yaml_entries(lines: Sequence[str]) -> List[Entry]:
+    entries: List[Entry] = []
+    for line in lines:
+        key = _KEY.match(line)
+        if key is not None and not line[:1].isspace():
+            entries.append(Entry(_unquote(key.group(1)), (line,)))
+        elif entries:
+            entries[-1] = Entry(entries[-1].key, entries[-1].lines + (line,))
+        else:
+            # Lines before any key (a comment, a blank line): kept with no key.
+            entries.append(Entry("", (line,)))
+    return entries
+
+
+def _toml_entries(lines: Sequence[str]) -> List[Entry]:
+    """TOML's entries: each plain key with its lines (a text or a list may
+    go on over lines); a table, from its header on, is one entry, kept whole,
+    whose key is its header."""
+    entries: List[Entry] = []
+    for line in lines:
+        last = entries[-1] if entries else None
+        open_text = last is not None and _open_multiline("\n".join(last.lines))
+        key = _TOML_KEY.match(line)
+        # TOML lets a key or a table be indented; such a line starts one
+        # only after an entry TOML reads whole, not inside a list going on
+        # over lines ('  "a = b",').
+        starts = not line[:1].isspace() or last is None or _whole(last)
+        if last is not None and (open_text or last.key.startswith("[")):
+            entries[-1] = Entry(last.key, last.lines + (line,), TOML)
+        elif line.lstrip().startswith("[") and starts:
+            entries.append(Entry(line.strip(), (line,), TOML))
+        elif key is not None and starts:
+            entries.append(Entry(_unquote(key.group(1).strip()), (line,), TOML))
+        elif last is not None:
+            entries[-1] = Entry(last.key, last.lines + (line,), TOML)
+        else:
+            entries.append(Entry("", (line,), TOML))
+    return entries
+
+
+def _whole(entry: Entry) -> bool:
+    """Whether TOML reads ``entry`` (a key and its lines) as it is."""
+    try:
+        tomllib.loads("\n".join(entry.lines))
+    except tomllib.TOMLDecodeError:
+        return False
+    return True
+
+
+def _open_multiline(written: str) -> bool:
+    """Whether a TOML multi-line text is still open at the end of ``written``."""
+    return written.count('"""') % 2 == 1 or written.count("'''") % 2 == 1
+
+
+def _toml_value(entry: Entry) -> Union[str, List[str], None]:
+    """A TOML entry's value as text (a date or a time as ISO 8601, a number
+    or true as written), or a list of texts; None for a table or any other
+    kind of value."""
+    if not entry.key or entry.key.startswith("["):
+        return None
+    try:
+        values = tomllib.loads("\n".join(entry.lines))
+    except tomllib.TOMLDecodeError:
+        return None
+    if len(values) != 1:
+        return None
+    value = values
+    for name in entry.path:                 # a dotted key's own value
+        if not isinstance(value, dict) or name not in value:
+            return None
+        value = value[name]
+    if isinstance(value, (datetime, date)):
+        return value.isoformat()
+    if isinstance(value, str):
+        return value
+    if isinstance(value, (bool, int, float)):
+        return entry.written
+    if isinstance(value, list) and all(isinstance(item, str) for item in value):
+        return value
+    if isinstance(value, list):
+        return _toml_items(entry, value)
+    return None
+
+
+def _toml_items(entry: Entry, value: list) -> Optional[List[str]]:
+    """A TOML list holding numbers among its texts ("python", 3.10), on
+    its line or over lines: each item as written ("3.10", never "3.1"),
+    when each is what tomllib reads there; else None."""
+    written = " ".join(_without_toml_comment(line) for line in
+                       (entry.lines[0].partition("=")[2], *entry.lines[1:])).strip()
+    if not (written.startswith("[") and written.endswith("]")):
+        return None
+    items = [part.strip() for part in _split_inline(written[1:-1]) if part.strip()]
+    if len(items) != len(value):
+        return None
+    texts = []
+    for text, item in zip(items, value):
+        if isinstance(item, str) and _unquote(text) == item:
+            texts.append(item)
+        elif not isinstance(item, (str, list, dict)) and reads_as(text, item, TOML):
+            texts.append(text)
+        else:
+            return None
+    return texts
+
+
+def _without_toml_comment(line: str) -> str:
+    """A TOML line without its comment: from a "#" outside a string on."""
+    quote, at = "", 0
+    while at < len(line):
+        char = line[at]
+        if quote:
+            taken, quote = _in_quote(quote, line, at) if quote == '"' else \
+                (char, "" if char == quote else quote)  # '...' has no escapes
+            at += len(taken)
+            continue
+        if char == "#":
+            return line[:at]
+        if char in "\"'":
+            quote = char
+        at += 1
+    return line
+
+
+def _with_trailers_apart(entries: List[Entry]) -> List[Entry]:
+    """The blank and comment lines at the end of each entry as an entry of
+    their own, without a key: they introduce what follows (or close the
+    block), so rewriting the entry before them leaves them where they are."""
+    apart: List[Entry] = []
+    for entry in entries:
+        lines = list(entry.lines)
+        trailer: List[str] = []
+        while entry.key and len(lines) > 1 and (
+                not lines[-1].strip() or lines[-1].startswith("#")):
+            trailer.insert(0, lines.pop())
+        apart.append(Entry(entry.key, tuple(lines), entry.syntax))
+        if trailer:
+            apart.append(Entry("", tuple(trailer), entry.syntax))
+    return apart
+
+
+def join(front: Optional[FrontMatter], body: str) -> str:
+    """``body`` under ``front`` as it was written, or alone when there is
+    none (or nothing but blank lines is left in it)."""
+    above = head(front, body)
+    return above + body.lstrip("\n") if above else body
+
+
+def head(front: Optional[FrontMatter], body: str) -> str:
+    """What goes above ``body`` in its file (join): ``front`` as it was
+    written and the blank lines after it, or "" when there is none (or
+    nothing but blank lines is left in it)."""
+    if front is None or front.changed and not any(
+            line.strip() for entry in front.entries for line in entry.lines):
+        return ""                           # none, or none left (an empty one stays)
+    if not front.changed and front.as_written:
+        written = "".join(line + ending for line, ending in front.as_written)
+    else:
+        lines = [front.opening, *(line for entry in front.entries for line in entry.lines),
+                 front.closing]
+        written = "".join(line + ending for line, ending in zip(lines, _endings(front, lines)))
+    # The blank lines after it as they were (none when the text began
+    # right under it); in the file's line ending for one written anew.
+    gap = front.gap if front.as_written else \
+        front.gap.replace("\r\n", "\n").replace("\n", front.newline)
+    if body.lstrip("\n") and not written.endswith(("\n", "\r")):
+        gap = front.newline                 # it ended the file: the text goes under it
+    return written + gap
+
+
+def _endings(front: FrontMatter, lines: Sequence[str]) -> List[str]:
+    """The line ending of each of ``lines`` (the block's, opening and
+    closing ones too), as ``front`` was written: a line kept, its own; one
+    written in place of another, that one's; a new one, the ending of the
+    line it follows. A front matter written anew: the file's line ending."""
+    old = front.as_written
+    if not old:
+        return [front.newline] * len(lines)
+    endings: List[str] = []
+    matcher = difflib.SequenceMatcher(None, [line for line, _ending in old], list(lines),
+                                      autojunk=False)
+    for tag, i1, i2, j1, j2 in matcher.get_opcodes():
+        for k in range(j2 - j1):
+            if tag == "equal" or tag == "replace" and i1 + k < i2:
+                endings.append(old[i1 + k][1])
+            else:
+                endings.append(endings[-1] if endings else front.newline)
+    return endings
+
+
+def entry(key: str, value: Union[str, Sequence[str]], *, syntax: str = YAML,
+          bare: bool = False) -> Entry:
+    """An entry for ``key`` written the way this app writes one: a text,
+    quoted when it has to be, or a list in brackets; in TOML, ``key =``
+    and its texts always quoted. ``bare``: ``value`` is written as it is
+    (a date in a form both read as a date)."""
+    if syntax == TOML:
+        if isinstance(value, str):
+            written = value if bare else json.dumps(value, ensure_ascii=False)
+        else:
+            written = "[" + ", ".join(json.dumps(item, ensure_ascii=False)
+                                      for item in value) + "]"
+        return Entry(key, (f"{key} = {written}",), TOML)
+    if isinstance(value, str):
+        return Entry(key, (f"{key}: {value if bare else _quoted(value)}",))
+    items = ", ".join(_quoted(item, in_list=True) for item in value)
+    return Entry(key, (f"{key}: [{items}]",))
+
+
+def rewritten(old: Entry, value: Union[str, Sequence[str]], *, bare: bool = False) -> Entry:
+    """``old`` with ``value`` in its place, in the file's own style: the key
+    and the spaces after it as written, a comment after the value kept,
+    quotes of the kind it had, a block list a block list, an inline list
+    inline with the items that stay as they were written, a block text a
+    block text. A value written in a way this can't follow is written as
+    entry() writes a new one; and in TOML, anything TOML would not read
+    (never written)."""
+    written = _rewritten(old, value, bare)
+    return _valid(written, value, bare) if old.syntax == TOML else written
+
+
+def _rewritten(old: Entry, value: Union[str, Sequence[str]], bare: bool) -> Entry:
+    key_part, rest = _key_and_rest(old)
+    if key_part is None:
+        return entry(old.key, value, syntax=old.syntax, bare=bare)
+    if old.syntax == YAML and not key_part[-1:].isspace():
+        # A key left empty to fill ("title:"): YAML needs a space after it.
+        key_part += " "
+    written, comment = _value_and_comment(rest)
+    if isinstance(value, str):
+        block = _BLOCK_SCALAR.match(written) if old.syntax == YAML else None
+        if block is not None:
+            if block.group(1) == ">":
+                # Folded, YAML reads a line break as a space, and n empty
+                # lines as n line breaks.
+                value = re.sub(r"\n+", lambda breaks: breaks.group(0) + "\n", value)
+            return Entry(old.key, (key_part + written + comment,)
+                         + _block_lines(old.lines[1:], value), old.syntax)
+        if len(old.lines) > 1 and old.syntax == TOML:
+            return entry(old.key, value, syntax=old.syntax, bare=bare)
+        return Entry(old.key, (key_part + _like(written, value, old.syntax, bare) + comment,)
+                     + tuple(old.lines[1:]), old.syntax)
+    items = list(value)
+    if old.syntax == TOML and written == "[" and len(old.lines) > 2 \
+            and old.lines[-1].strip().startswith("]"):
+        lines = _multi_line_list_like(old.lines[1:-1], items)
+        if lines is not None:
+            return Entry(old.key, (old.lines[0],) + lines + (old.lines[-1],), old.syntax)
+        return entry(old.key, items, syntax=old.syntax, bare=bare)
+    flow = _flow_list(rest, old.lines[1:]) if rest.startswith("[") else None
+    if flow is not None:
+        # An inline list, on its line or over lines: written on one line,
+        # the whole of it, its comments after it.
+        return Entry(old.key, (key_part + _inline_list_like(flow[0], items, old.syntax)
+                               + flow[1],) + flow[2], old.syntax)
+    if old.syntax == YAML and not written and old.value is not None:
+        return Entry(old.key, (key_part.rstrip() + comment,)
+                     + _block_list_like(old.lines[1:], items), old.syntax)
+    return entry(old.key, items, syntax=old.syntax, bare=bare)
+
+
+def quoted(old: Optional[Entry], key: str, value: Union[str, Sequence[str]],
+           syntax: str = YAML) -> Entry:
+    """``value`` written the one way YAML and TOML always read back as it
+    is: in double quotes, with escapes (each item of a list so). In place
+    of ``old``, its key and a comment after its value as written; else as
+    a new entry for ``key``."""
+    text = _double_quoted(value) if isinstance(value, str) else \
+        "[" + ", ".join(_double_quoted(item) for item in value) + "]"
+    key_part, rest = _key_and_rest(old) if old is not None else (None, "")
+    if key_part is None:
+        return Entry(key, (key + (" = " if syntax == TOML else ": ") + text,), syntax)
+    if old.syntax == YAML and not key_part[-1:].isspace():
+        key_part += " "
+    return Entry(old.key, (key_part + text + _value_and_comment(rest)[1],), old.syntax)
+
+
+def _double_quoted(text: str) -> str:
+    """``text`` in double quotes as YAML and TOML both read it back: with
+    JSON's escapes, and any character either would read as a line break or
+    refuse written as it is (U+2028, U+0085, a control) escaped too."""
+    return "".join(char if char.isprintable() else
+                   f"\\u{ord(char):04x}" if ord(char) <= 0xFFFF else f"\\U{ord(char):08x}"
+                   for char in json.dumps(text, ensure_ascii=False))
+
+
+def _valid(written: Entry, value, bare: bool) -> Entry:
+    """``written``, a TOML entry, when TOML reads it; else the value as
+    entry() writes it, which TOML always does."""
+    try:
+        tomllib.loads("\n".join(written.lines))
+    except tomllib.TOMLDecodeError:
+        return entry(written.key, value, syntax=TOML, bare=bare)
+    return written
+
+
+def _flow_list(written: str, more: Sequence[str]) -> Optional[Tuple[str, str, Tuple[str, ...]]]:
+    """A flow list ("[a, b]"), on its line or continued on the lines
+    ``more``: its text on one line, what follows it as comments (the
+    comment after its "]", then those inside it, each kept), and the
+    comment lines after it. Read as YAML
+    reads it: a "#" starts a comment only after a space or at a line's
+    start, and never inside quotes; the list ends at the "]" that closes
+    it, not one in a comment or a text. None when it is not closed there,
+    or something other than a comment follows it."""
+    content: List[str] = []
+    inside: List[str] = []
+    after: List[str] = []
+    depth, quote, tail, closed = 0, "", "", False
+    for row in [written, *more]:
+        if closed:
+            if row.strip() and not row.strip().startswith("#"):
+                return None                 # the entry goes on after the list
+            after.append(row)               # a comment line after it, or blank
+            continue
+        out, at = [], 0
+        while at < len(row):
+            char = row[at]
+            if quote:
+                taken, quote = _in_quote(quote, row, at)
+                out.append(taken)
+                at += len(taken)
+                continue
+            if char == "#" and (at == 0 or row[at - 1] in " \t"):
+                inside.append(row[at:].strip())
+                break
+            out.append(char)
+            if char in "\"'" and _at_item_start(out[:-1], content):
+                quote = char
+            elif char in "[{":
+                depth += 1
+                if depth > 1:
+                    return None             # a list or a mapping in it: unread
+            elif char in "]}":
+                depth -= 1
+                if depth == 0:
+                    tail = row[at + 1:]
+                    if tail.strip() and not re.match(r"\s+#", tail):
+                        return None
+                    closed = True
+                    break
+            at += 1
+        content.append("".join(out).strip())
+    if not closed or quote:
+        return None
+    return (" ".join(part for part in content if part),
+            tail.rstrip() + "".join("  " + comment for comment in inside), tuple(after))
+
+
+def _at_item_start(line: Sequence[str], before: Sequence[str]) -> bool:
+    """Whether what is read of a flow list so far (``before``, its earlier
+    lines, then ``line``) ends where an item starts: after "[", "{", ","
+    or ":" and blanks. Only there does a quote open an item."""
+    for text in ("".join(line), *reversed(before)):
+        text = text.rstrip()
+        if text:
+            return text[-1] in "[{,:"
+    return True
+
+
+def _key_and_rest(old: Entry) -> Tuple[Optional[str], str]:
+    """The key's part of its first line, with the spaces after ":" or "="
+    as written, and the rest of the line."""
+    pattern = r"^(\s*[^=]+?\s*=[ \t]*)(.*)$" if old.syntax == TOML else \
+        r"^([^\s:][^:]*?[ \t]*:[ \t]*)(.*)$"
+    found = re.match(pattern, old.lines[0])
+    return (found.group(1), found.group(2)) if found else (None, "")
+
+
+def _value_and_comment(rest: str) -> Tuple[str, str]:
+    """The value as written and what follows it (spaces and a comment)."""
+    if rest.startswith("#"):
+        return "", " " + rest               # no value yet, a comment only
+    quoted = _QUOTED.match(rest)
+    flow = _flow_list(rest, ()) if rest.startswith("[") else None
+    if quoted is not None:
+        end = quoted.end()
+    elif flow is not None:
+        return flow[0], flow[1]
+    else:
+        found = re.search(r"\s+#", rest)
+        end = found.start() if found else len(rest.rstrip())
+    tail = rest[end:]
+    if tail.strip() and not re.match(r"\s+#", tail):
+        return rest, ""
+    return rest[:end], tail
+
+
+def _like(written: str, value: str, syntax: str, bare: bool) -> str:
+    """``value`` quoted the way ``written`` was: in single quotes, in
+    double quotes, or bare when it can be."""
+    if bare:
+        return value
+    if written.startswith("'") and "\n" not in value and (syntax == YAML or "'" not in value):
+        return "'" + (value.replace("'", "''") if syntax == YAML else value) + "'"
+    if syntax == TOML or written.startswith('"'):
+        return json.dumps(value, ensure_ascii=False)
+    return _quoted(value)
+
+
+def _inline_list_like(written: str, items: Sequence[str], syntax: str) -> str:
+    """An inline list of ``items``, written as ``written`` was: each item
+    that stays as it was written, the separator and the padding inside the
+    brackets as they were, a new item quoted like the first one."""
+    inside = written[1:written.rfind("]")] if "]" in written else written[1:]
+    tokens = [token.strip() for token in _split_inline(inside) if token.strip()]
+    kept = {}
+    for token in tokens:
+        kept.setdefault(_unquote(token), token)
+    first = tokens[0] if tokens else ""
+    parts = []
+    for item in items:
+        if item in kept:
+            parts.append(kept.pop(item))
+        elif syntax == TOML or first.startswith(("'", '"')):
+            parts.append(_like(first, item, syntax, False) if first.startswith("'")
+                         else json.dumps(item, ensure_ascii=False))
+        else:
+            parts.append(_quoted(item, in_list=True))
+    separator = "," if inside and ", " not in inside and "," in inside else ", "
+    pad = " " if inside.startswith(" ") else ""
+    return "[" + pad + separator.join(parts) + (pad if inside.endswith(" ") else "") + "]"
+
+
+def _block_list_like(lines: Sequence[str], items: Sequence[str]) -> Tuple[str, ...]:
+    """A block list of ``items`` as ``lines`` wrote one: each item that stays
+    on its own line as written, a new one indented like the first, any
+    other line (a comment) kept after them."""
+    item_lines = [line for line in lines if re.match(r"^\s*-(\s|$)", line)]
+    others = [line for line in lines if line not in item_lines]
+    lead = re.match(r"^(\s*-\s*)", item_lines[0]).group(1) if item_lines else "  - "
+    kept = {}
+    for line in item_lines:
+        kept.setdefault(_list_item(line), line)
+    return tuple(kept.pop(item) if item in kept else lead + _quoted(item) for item in items) \
+        + tuple(others)
+
+
+# One item on a line of a TOML array over several lines: its indent, the
+# item ("..." or '...', or a number, true or a date as written), a comma
+# after it or not, and a comment.
+_TOML_ITEM_LINE = re.compile(
+    r"""^(\s*)("(?:[^"\\]|\\.)*"|'[^']*'|[^\s,#"'\[\]{}]+)(\s*,)?(\s*#.*)?$""")
+
+
+def _multi_line_list_like(lines: Sequence[str],
+                          items: Sequence[str]) -> Optional[Tuple[str, ...]]:
+    """A TOML array over lines, one item a line, as ``lines`` wrote it:
+    each item that stays keeps its line and comment, a new one is indented
+    and quoted like the first, and every item but the last has its comma
+    (the last has one when the file's last item had one). None when the
+    lines are laid out otherwise (two items on a line, leading commas,
+    comment lines): the array is then written on one line."""
+    parsed = []
+    for line in lines:
+        if not line.strip():
+            continue
+        found = _TOML_ITEM_LINE.match(line)
+        if found is None:
+            return None
+        parsed.append(found.groups())
+    if not parsed:
+        return None
+    indent, first, _comma, _comment = parsed[0]
+    trailing = bool(parsed[-1][2])
+    kept = {}
+    for row in parsed:
+        kept.setdefault(_unquote(row[1]), row)
+    rows = []
+    for item in items:
+        if item in kept:
+            rows.append(kept.pop(item))
+        else:
+            token = _like(first, item, TOML, False) if first.startswith("'") \
+                else json.dumps(item, ensure_ascii=False)
+            rows.append((indent, token, None, None))
+    written = []
+    for at, (row_indent, token, comma, comment) in enumerate(rows):
+        wants = at < len(rows) - 1 or trailing
+        written.append(row_indent + token + ((comma or ",") if wants else "")
+                       + (comment or ""))
+    return tuple(written)
+
+
+def _block_lines(lines: Sequence[str], value: str) -> Tuple[str, ...]:
+    """``value`` as the lines of a block text, indented as ``lines`` were."""
+    indents = [len(line) - len(line.lstrip(" ")) for line in lines if line.strip()]
+    indent = " " * (min(indents) if indents else 2)
+    return tuple(indent + row if row else "" for row in value.split("\n"))
+
+
+def _quoted(value: str, *, in_list: bool = False) -> str:
+    """``value`` as YAML reads it back as the same text: bare when it can
+    be, else in double quotes."""
+    plain = (_PLAIN.match(value) is not None and value == value.strip() and value.isprintable()
+             and ": " not in value and " #" not in value and not value.endswith(":")
+             and value.lower() not in _YAML_WORDS and not _YAML_NUMBER.match(value)
+             and not _YAML_DATE.match(value)
+             and not (in_list and any(char in value for char in ",[]{}")))
+    return value if plain else _double_quoted(value)
+
+
+def _list_item(line: str) -> str:
+    """The text of a block list's item line ("  - \"#idea\"   # a note")."""
+    return _unquote(_without_comment(line.strip()[1:].strip()))
+
+
+def _block_text(lines: Sequence[str], style: str, chomping: str) -> str:
+    """The text of a block scalar: its indented lines, as they are for "|",
+    folded for ">" as YAML folds them."""
+    body = list(lines)
+    indents = [len(line) - len(line.lstrip(" ")) for line in body if line.strip()]
+    cut = min(indents) if indents else 0
+    rows = [line[cut:] if line.strip() else "" for line in body]
+    while rows and not rows[-1]:
+        rows.pop()
+    if style == "|":
+        text = "\n".join(rows)
+    else:
+        # Folded: lines next to each other joined by a space, n empty lines
+        # between two read as n line breaks.
+        text, empty = "", 0
+        for row in rows:
+            if not row:
+                empty += 1
+                continue
+            if text:
+                text += "\n" * empty if empty else " "
+            text += row.strip()
+            empty = 0
+    return text if chomping == "-" else text + "\n" if chomping == "+" else text
+
+
+# A quoted value: "..." with its escapes, or '...' with '' for a quote.
+_QUOTED = re.compile(r"""^("(?:[^"\\]|\\.)*"|'(?:[^']|'')*')""")
+
+
+def _without_comment(written: str) -> str:
+    """A value without the comment after it ("post  # Jekyll's", or
+    '"My post"  # shown on the site')."""
+    quoted = _QUOTED.match(written)
+    if quoted is not None:
+        rest = written[quoted.end():]
+        return quoted.group(1) if not rest.strip() or re.match(r"\s+#", rest) else written
+    if written.startswith("#"):
+        return ""                           # no value, a comment only
+    found = re.search(r"\s+#", written)
+    return written[:found.start()] if found else written
+
+
+def _unquote(value: str) -> str:
+    value = value.strip()
+    if len(value) >= 2 and value[0] == value[-1] == '"':
+        try:
+            return str(json.loads(value))
+        except ValueError:
+            return value[1:-1]
+    if len(value) >= 2 and value[0] == value[-1] == "'":
+        return value[1:-1].replace("''", "'")
+    return value
+
+
+def split_items(written: str, quotes: str = "\"'") -> List[str]:
+    """The items of a comma-separated text, each as its text: one in
+    quotes (of ``quotes``) keeps its commas ('a, "b, c"' is two items)."""
+    return [_unquote(part) for part in _split_inline(written, quotes) if part.strip()]
+
+
+def _split_inline(inside: str, quotes: str = "\"'") -> List[str]:
+    """The items of an inline list, commas inside quotes kept. A quote
+    opens only as an item's first character, as YAML and TOML read it: the
+    apostrophe of "don't" is a letter."""
+    items, current, quote, at = [], "", "", 0
+    while at < len(inside):
+        char = inside[at]
+        if quote:
+            taken, quote = _in_quote(quote, inside, at)
+            current += taken
+            at += len(taken)
+            continue
+        if char in quotes and not current.strip():
+            quote = char
+            current += char
+        elif char == ",":
+            items.append(current)
+            current = ""
+        else:
+            current += char
+        at += 1
+    items.append(current)
+    return items
+
+
+def _in_quote(quote: str, text: str, at: int) -> Tuple[str, str]:
+    """Inside a quoted text opened with ``quote``, what is read at ``at`` of
+    ``text``, and the quote still open after it ("" once it closes): an
+    escaped character in "..." ("\\""), and '' in '...', are read whole and
+    close nothing. Every reader of quoted items reads them with this."""
+    char = text[at]
+    if quote == '"' and char == "\\":
+        return text[at:at + 2], quote
+    if char == quote and quote == "'" and text[at + 1:at + 2] == "'":
+        return "''", quote
+    return char, "" if char == quote else quote

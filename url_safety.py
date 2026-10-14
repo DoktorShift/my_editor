@@ -84,7 +84,11 @@ def same_origin(a: str, b: str) -> bool:
     return origin_a is not None and origin_a == origin_b
 
 
-def _is_loopback(host: str) -> bool:
+def is_loopback_host(host: str) -> bool:
+    """Whether a host name is this computer itself (``localhost``, or a
+    loopback address), where nobody on the way can read or change what is
+    sent."""
+    host = (host or "").lower()
     if host == "localhost":
         return True
     try:
@@ -110,7 +114,7 @@ def is_safe_media_url(url: str, *, allowed_origin: Optional[str] = None) -> bool
         return False
     scheme = (parts.scheme or "").lower()
     if scheme == "http":
-        if not _is_loopback(host):
+        if not is_loopback_host(host):
             return False
     elif scheme != "https":
         return False
@@ -138,12 +142,35 @@ def is_safe_external_url(url: str) -> bool:
     return bool((parts.hostname or "").strip())
 
 
-def is_safe_mirror_source(url: str) -> bool:
-    """Gate for third-party image URLs (mirror sources, avatars).
+# Names that only mean something on the person's own network (or need
+# Tor). One list for relays (nostr/outbox/policy.py) and for images.
+_LOCAL_NAMES = ("localhost",)
+_LOCAL_SUFFIXES = (".localhost", ".local", ".onion", ".internal", ".lan", ".home",
+                   ".home.arpa", ".localdomain", ".intranet", ".corp")
 
-    Named hosts pass: they cannot be resolved without a network call and
-    the fetching server owns that risk. An IP literal must be global, so
-    ``169.254.169.254``, ``10.0.0.1`` and link-local IPv6 are refused.
+
+def is_local_name(host: str) -> bool:
+    """Whether a host name points into the person's own network or
+    machine: ``localhost``, a single label (``router``), a local-only
+    suffix (``.local``, ``.lan``, ...), or a number dressed as a name
+    (``127.1``, ``0x7f.1``)."""
+    host = (host or "").lower().rstrip(".")
+    labels = host.split(".")
+    if len(labels) < 2 or host in _LOCAL_NAMES or host.endswith(_LOCAL_SUFFIXES):
+        return True
+    last = labels[-1]
+    return last.isdigit() or (last.startswith("0x")
+                              and all(c in "0123456789abcdef" for c in last[2:]))
+
+
+def is_safe_mirror_source(url: str) -> bool:
+    """Gate for third-party image URLs (mirror sources, avatars, covers).
+
+    A stranger's profile names these, so nothing may point into the
+    person's own network: an IP literal must be global (``169.254.169.254``,
+    ``10.0.0.1`` and link-local IPv6 are refused), and a name must not be
+    local-only (``localhost``, ``router``, ``nas.local``). Other names
+    pass: they cannot be resolved without a network call.
     """
     parts = _split(url)
     if parts is None:
@@ -158,4 +185,4 @@ def is_safe_mirror_source(url: str) -> bool:
     try:
         return ipaddress.ip_address(host).is_global
     except ValueError:
-        return True
+        return not is_local_name(host)

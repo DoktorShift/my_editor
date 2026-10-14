@@ -16,6 +16,9 @@ from PySide6.QtCore import QSize, Qt
 from PySide6.QtGui import QColor, QPixmap
 from PySide6.QtWidgets import QMenu, QToolButton
 
+from i18n import _
+from nostr.profiles import short_npub
+
 from .avatar import (
     AVATAR_SIZE,
     CHIP_TOTAL_WIDTH,
@@ -90,12 +93,13 @@ class ProfileChip(QToolButton):
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self._is_dark = True
+        self._disconnected = True
         self.setPopupMode(QToolButton.InstantPopup)
         self.setToolButtonStyle(Qt.ToolButtonIconOnly)
         # Icon-only, so the accessible name is the only thing VoiceOver
-        # and Full Keyboard Access have to announce this control by. It
-        # is also the control the drafts panel's empty state points at.
-        self.setAccessibleName("Nostr profile")
+        # and Full Keyboard Access have to announce this control by; the
+        # description says whose account it is.
+        self.setAccessibleName(_("Account"))
         self.setCursor(Qt.PointingHandCursor)
         self.setIconSize(QSize(CHIP_TOTAL_WIDTH, AVATAR_SIZE))
         self.setFixedHeight(32)
@@ -108,9 +112,11 @@ class ProfileChip(QToolButton):
     # -- state setters ------------------------------------------------------
 
     def set_disconnected(self) -> None:
+        self._disconnected = True
         avatar = make_disconnected_pixmap(is_dark=self._is_dark)
         self.setIcon(compose_chip_icon(avatar, self._chevron_color()))
-        self.setToolTip("Connect Nostr")
+        self.setToolTip(_("Account"))
+        self.setAccessibleDescription("")
 
     def set_profile(
         self,
@@ -118,11 +124,14 @@ class ProfileChip(QToolButton):
         user_pubkey_hex: str,
         avatar_pixmap: Optional[QPixmap] = None,
     ) -> None:
+        self._disconnected = False
         avatar = pixmap_for_profile(display_name, user_pubkey_hex, avatar_pixmap)
         self.setIcon(compose_chip_icon(avatar, self._chevron_color()))
 
-        short = f"{user_pubkey_hex[:8]}…{user_pubkey_hex[-4:]}"
-        self.setToolTip(f"{display_name} · {short}" if display_name else short)
+        # The name people know the account by; the key only for one without.
+        label = display_name or short_npub(user_pubkey_hex)
+        self.setToolTip(label)
+        self.setAccessibleDescription(label)
 
     # -- theme --------------------------------------------------------------
 
@@ -132,7 +141,7 @@ class ProfileChip(QToolButton):
         self._is_dark = is_dark
         self._apply_chip_style()
         self._apply_menu_style()
-        if self.toolTip() == "Connect Nostr":
+        if self._disconnected:
             self.set_disconnected()
 
     # -- internals ----------------------------------------------------------

@@ -1,6 +1,6 @@
 # MyEditor
 
-**A clean, distraction-free desktop text editor. Write locally, publish to Nostr, keep your keys in your own signer.**
+**A clean, distraction-free desktop text editor. Write locally, publish to Nostr, keep your key on this computer or in your own signer app.**
 
 <p align="center">
   <img src="assets/MyEditor_screenshot_v3.png" width="780" alt="MyEditor screenshot"/>
@@ -8,8 +8,9 @@
 
 MyEditor is a fast, local-first note editor for lecture notes, quick drafts, and
 long-form writing. Write in a calm, focused window, then publish straight to Nostr
-as a short note or a full article. Your files stay on your disk and your private
-key stays in your signer.
+as a short note or a full article. Your files stay on your disk, and your private
+key stays where you put it: protected on this computer, or in a signer app on your
+phone, where it can move any time.
 
 <p align="center">
   <a href="https://github.com/rinbal/my_editor/releases/latest"><b>Download for Windows, macOS, or Linux</b></a>
@@ -25,16 +26,20 @@ paper mode for a real sheet-of-paper feel.
 
 **Publish to Nostr.** Send notes or long-form articles signed on your phone via
 NIP-46, keep private encrypted drafts that sync across your devices, and manage
-media on your own Blossom servers.
+media on your own Blossom servers. New to Nostr? Create an account in the app,
+with a password-protected backup. EINUNDZWANZIG membership lives in the Nostr
+menu too, and members get the members' relay and media server.
 [Read the Nostr guide](docs/nostr.md).
 
-**Import from anywhere.** Pull content in as private drafts from RSS / Atom /
-JSON feeds, Nostr profiles and events, NostrHub NIPs, Bluesky threads, Markdown
-files and GitHub folders, sitemaps, WordPress and Ghost exports, Medium and
-Substack ZIPs, and podcast feeds (with chapters). Preview and pick items before
-anything is signed, recover full text for teaser-only feeds, mirror images to
-your Blossom server, and subscribe to sources (synced privately via your
-relays) to import "new since last visit" later. OPML lists bulk-subscribe.
+**Import from anywhere.** Nostr > Imports follows websites and keeps their new
+posts in an inbox on this computer until you make private drafts of the ones you
+want. It reads RSS / Atom / JSON feeds, Nostr authors and articles, NostrHub
+NIPs, Bluesky threads, Markdown files and GitHub folders, sitemaps, WordPress
+and Ghost exports, Medium and Substack ZIPs, and podcast feeds (with chapters).
+Read a post before anything is signed, fetch the whole article for feeds that
+send a summary, and copy images to your media server. Your sources are one
+private list on your relays, shared with EINUNDZWANZIG STANDUP; OPML lists come
+in and go out.
 
 **Reads PDFs, too.** A built-in distraction-free PDF viewer: open any PDF in a
 tab, find text, select and copy passages straight into your notes, follow links,

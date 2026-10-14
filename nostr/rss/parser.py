@@ -17,10 +17,11 @@ import calendar
 import json
 import re
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 from typing import Any, Callable, List, Mapping, Optional, Sequence, Tuple
+from urllib.parse import urljoin, urlsplit
 
 import feedparser
 
@@ -55,6 +56,10 @@ class FeedItem:
     # carries an audio enclosure. The import pipeline renders it as the
     # episode's Markdown body.
     podcast: Optional[object] = None
+    # True when only part of the text is kept (the Imports inbox keeps at
+    # most 256 KiB of a post, as EINUNDZWANZIG STANDUP does). Importing
+    # such a post reads its own page for the whole text.
+    partial: bool = False
 
 
 @dataclass(frozen=True)
@@ -66,6 +71,30 @@ class Feed:
     link: Optional[str]
     description: Optional[str]
     items: Tuple[FeedItem, ...] = field(default_factory=tuple)
+
+
+def with_whole_links(feed: Feed, address: Optional[str]) -> Feed:
+    """``feed`` with each item's relative link made whole against
+    ``address``, where the feed was read (without one, against the site
+    the feed names). A relative link left the post's own relative links
+    and images, its "Originally published at" line and Open Original
+    pointing nowhere (CP3 review L8). An item without a guid keeps the
+    link as written as its guid (the parser gives it one), so its draft
+    identifier stays what earlier imports gave (nostr/rss/dtag.py)."""
+    base = address if _is_web_address(address) else feed.link
+    if not _is_web_address(base):
+        return feed
+    items = []
+    for item in feed.items:
+        link = (item.link or "").strip()
+        if link and not link.startswith("#") and not urlsplit(link).scheme:
+            item = replace(item, link=urljoin(base, link))
+        items.append(item)
+    return replace(feed, items=tuple(items))
+
+
+def _is_web_address(url: Optional[str]) -> bool:
+    return urlsplit(url or "").scheme in ("http", "https")
 
 
 class RssError(Exception):

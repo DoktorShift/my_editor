@@ -72,8 +72,9 @@ import time as _time
 
 from PySide6.QtCore import QObject, Signal
 
+
 from ..bunker import BunkerClient, BunkerSessionPool
-from ..outbox import RelayListCache, select_draft_publish_relays
+from ..outbox import RelayDirectory, ask_private_relays
 from ..profiles import Profile
 from .assets import is_sha256
 from .visibility import PrivateBlob
@@ -215,21 +216,21 @@ def parse_file_record(plaintext: str, *, identifier: str) -> ParsedRecord:
 
     if is_sha256(filed_under) and filed_under != sha256:
         return ParsedRecord(
-            reason="This record does not match the file it is filed under, "
-                   "so it was skipped."
+            reason=("This record does not match the file it is filed under, "
+                     "so it was skipped.")
         )
 
     key_hex = str(payload.get("encryptionKey") or "").strip()
     if not key_hex:
         return ParsedRecord(
-            reason="This file has no key in your library, so it cannot be "
-                   "opened here."
+            reason=("This file has no key in your library, so it cannot be "
+                     "opened here.")
         )
     if not _is_file_key(key_hex):
         # The value itself never travels with the complaint.
         return ParsedRecord(
-            reason="This file's key is not in a form this app understands, "
-                   "so it cannot be opened."
+            reason=("This file's key is not in a form this app understands, "
+                     "so it cannot be opened.")
         )
 
     try:
@@ -338,11 +339,11 @@ def _safe_reason(reason: object, *, echo_of: str = "") -> str:
     """
     text = str(reason or "").strip()
     if not text:
-        return "the signer gave no reason"
+        return "the signer app gave no reason"
     if len(text) > _MAX_REASON_CHARS:
         text = text[:_MAX_REASON_CHARS].rstrip() + "..."
     if _echoes(text, echo_of):
-        return "the signer gave no reason this app can repeat"
+        return "the signer app gave no reason MyEditor can repeat"
     return _OPAQUE_RUN.sub(_REDACTED, text)
 
 
@@ -380,15 +381,19 @@ class PrivateLibrary(QObject):
         self,
         *,
         session_pool: BunkerSessionPool,
-        relay_list_cache: RelayListCache,
+        relay_directory: RelayDirectory,
         query: AddressableQuery,
         clock: Optional[Callable[[], int]] = None,
+        entitled_relays: Optional[Callable[[], Sequence[str]]] = None,
         parent: Optional[QObject] = None,
     ) -> None:
         super().__init__(parent)
         self._session_pool = session_pool
-        self._relay_list_cache = relay_list_cache
+        self._relay_directory = relay_directory
         self._query = query
+        # Relays this account has standing on beyond its own list; private
+        # records are written there too, so they are read there too.
+        self._entitled_relays = entitled_relays
         self._clock = clock or (lambda: int(_time.time()))
 
         self._profile: Optional[Profile] = None
@@ -591,12 +596,9 @@ class PrivateLibrary(QObject):
         gen = self._generation
         self._emit_status("Opening your private library...")
 
-        def _on_relay_list(relay_list) -> None:
+        def _on_relays(relays) -> None:
             if not self._is_current(gen):
                 return
-            relays = select_draft_publish_relays(
-                relay_list, bunker_relays=profile.bunker_relays,
-            )
             self._query.addressable(
                 relays,
                 [{
@@ -606,11 +608,10 @@ class PrivateLibrary(QObject):
                 lambda events, g=gen: self._on_events(g, events),
             )
 
-        self._relay_list_cache.fetch(
-            profile.user_pubkey,
-            relays=list(dict.fromkeys(profile.bunker_relays)),
-            on_done=_on_relay_list,
-        )
+        # The account's private relays, where other private records are
+        # written (and read), so files saved on any device are found.
+        ask_private_relays(self._relay_directory, profile, _on_relays,
+                           entitled=self._entitled_relays, reading=True)
 
     # -- internal: cancellation -------------------------------------------
 
@@ -641,8 +642,8 @@ class PrivateLibrary(QObject):
                 # so the count the user sees adds up.
                 self._failures.append(LibraryFailure(
                     identifier=identifier,
-                    reason="This file's details are missing from your "
-                           "library, so it was skipped.",
+                    reason=("This file's details are missing from your "
+                             "library, so it was skipped."),
                 ))
         self._batch_active = True
         if not self._queue:
@@ -674,8 +675,8 @@ class PrivateLibrary(QObject):
         self._batch_active = False
         self._loading = False
         self._emit_status(
-            f"Couldn't reach your signer, so your private library stayed "
-            f"closed: {_safe_reason(reason)}"
+            ("Couldn't reach your signer app, so your private library "
+              "stayed closed: {reason}").format(reason=_safe_reason(reason))
         )
         self.library_changed.emit()
 
@@ -748,8 +749,8 @@ class PrivateLibrary(QObject):
             return
         self._failures.append(LibraryFailure(
             identifier=identifier,
-            reason="Your signer could not open this file: "
-                   + _safe_reason(reason, echo_of=ciphertext),
+            reason="Your signer app could not open this file: {reason}".format(
+                reason=_safe_reason(reason, echo_of=ciphertext)),
         ))
         self._settle()
 
@@ -767,10 +768,10 @@ class PrivateLibrary(QObject):
         failed = len(self._failures)
         if not count and not failed:
             return "Your private library is empty."
-        line = f"{count} file{'' if count == 1 else 's'} in your private library"
+        files = "file" if count == 1 else "files"
         if failed:
-            line += f", {failed} could not be opened"
-        return line + "."
+            return f"{count} {files} in your private library, {failed} could not be opened."
+        return f"{count} {files} in your private library."
 
 
 # --------------------------------------------------------------------------- #

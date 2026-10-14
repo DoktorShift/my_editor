@@ -2,9 +2,9 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 """Shared avatar + chevron rendering helpers.
 
-Used by both ``profile_chip`` (header) and ``publish_note_dialog``
-(in-dialog "Publishing as …" switcher). Keeping these in one place
-guarantees the chip looks identical wherever it's drawn.
+Used by both ``profile_chip`` (header) and ``publish_sheet`` (the
+publish sheets' "Publishing as …" switcher and people). Keeping these in
+one place guarantees the chip looks identical wherever it's drawn.
 """
 
 from __future__ import annotations

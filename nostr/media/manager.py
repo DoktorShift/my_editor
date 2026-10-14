@@ -20,6 +20,7 @@ import base64
 import binascii
 import hashlib
 import re
+import threading
 import time
 from collections import deque
 from dataclasses import dataclass
@@ -28,15 +29,20 @@ from typing import Callable, Deque, Dict, Iterable, List, Optional, Protocol, Tu
 
 from PySide6.QtCore import QObject, Signal
 
+import media_files
 import url_safety
 
 from export_html import sniff_image_mime
+
+from ..blossom import BLOSSOM_MAX_FILE_SIZE
 
 # The one BUD-03 hash-from-URL rule, imported rather than repeated: a
 # third copy of it is how the copies drift apart. ``blob_url`` builds the
 # canonical address BUD-01 guarantees, which is what makes a recovery
 # attempt against a sibling server honest rather than a guess.
+from ..blossom.errors import friendly_message
 from ..blossom.hashes import blob_url, hash_from_url
+from ..imports.workers import run_for_size
 from .assets import (
     LEGAL_TRANSITIONS,
     AssetIndex,
@@ -59,6 +65,8 @@ ADOPTABLE_MIMES = frozenset(
 # Matches the blob cache's own download cap so both halves of the cache
 # agree on what can exist in it.
 MAX_ASSET_BYTES = 25 * 1024 * 1024
+# Audio and video: as large as a media server takes at most.
+MAX_MEDIA_BYTES = BLOSSOM_MAX_FILE_SIZE
 
 _DATA_URI_RE = re.compile(r"^data:([^,]*),(.*)$", re.DOTALL)
 
@@ -81,13 +89,6 @@ class AssetErrorCodes:
     UPLOAD_FAILED = "UPLOAD_FAILED"
 
 
-# Prefixes MediaStore produces today when the signer is the reason an
-# upload never started. Temporary until the store reports structured
-# codes; pinned by a test so a copy change fails loudly instead of
-# silently reclassifying every signer failure.
-_SIGNER_REASON_PREFIXES = ("signer rejected", "Connect a Nostr signer")
-
-
 class BlobStore(Protocol):
     """The content-addressed byte cache (``ThumbnailLoader`` in the app).
 
@@ -107,7 +108,8 @@ class Uploader(Protocol):
     Exposes ``files``: a sha256 to media-record map whose records carry
     ``hash``, ``url``, ``urls``, ``mime_type`` and ``size``. Also emits
     ``upload_status(name, status)``, ``upload_finished(name, media)`` and
-    ``upload_failed(name, reason)``.
+    ``upload_failed_code(name, code)``, the stable code of a failure
+    (``nostr/blossom/errors.py``).
     """
 
     def upload_bytes(self, body: bytes, *, name: str, mime_type: str) -> None: ...
@@ -161,6 +163,10 @@ class AssetManager(QObject):
 
         self._queue: Deque[str] = deque()
         self._inflight: Optional[str] = None
+        # Copies of audio and video kept by reads still going on, by sha256
+        # (store_media_file, release_stored), and the lock that keeps them.
+        self._keeping = threading.Lock()
+        self._kept_for: Dict[str, int] = {}
         self._jobs: Dict[str, Tuple[str, int]] = {}   # job name -> (sha, attempts)
         self._fetching: set = set()
         self._recovery: Dict[str, List[str]] = {}    # sha -> candidates left
@@ -168,7 +174,7 @@ class AssetManager(QObject):
 
         uploader.upload_status.connect(self._on_upload_status)
         uploader.upload_finished.connect(self._on_upload_finished)
-        uploader.upload_failed.connect(self._on_upload_failed)
+        uploader.upload_failed_code.connect(self._on_upload_failed)
         blob_store.ready.connect(self._on_blob_ready)
         blob_store.failed.connect(self._on_blob_failed)
 
@@ -322,6 +328,87 @@ class AssetManager(QObject):
         self.asset_added.emit(sha)
         return asset
 
+    def adopt_media(self, data: bytes, *, mime: str, name: str) -> Optional[DocumentAsset]:
+        """Take ownership of an audio or video file's bytes (``mime`` from
+        media_files' table of the types accepted, ``name`` the file's, kept
+        as its alternative text). The same record, upload queue and index
+        as a picture's, so the text holds it as an object named by its
+        key, and it outlives a crash or a restart. None when refused."""
+        if not data or media_files.kind_of(mime) is None or len(data) > MAX_MEDIA_BYTES:
+            return None
+        try:
+            sha = self._blob_store.put_bytes(data)
+        except OSError:
+            return None
+        return self.adopt_stored_media(sha, size=len(data), mime=mime, name=name)
+
+    def store_media_file(self, path: str, keeping: Callable[[], bool] = lambda: True,
+                         kept: Callable[[Optional[str]], None] = lambda sha: None
+                         ) -> Optional[Tuple[str, int]]:
+        """Keep the file at ``path`` in the local store and answer its
+        ``(sha256, size)``, for adopt_stored_media. ``keeping()`` is asked
+        once it is read, and None answered when it says it is not wanted
+        any more; ``kept(sha256)`` is told when its copy is kept (None when
+        that failed). Files only, so a large one can be read and hashed on
+        a worker thread. Raises OSError."""
+        data = Path(path).read_bytes()
+        if not data:
+            raise OSError("empty file")
+        if not keeping():
+            return None
+        sha = None
+        try:
+            # Counted before it is written (release_stored): another read's
+            # release then never takes this copy out, and the lock is held
+            # only for the counting, never for a hash or a write.
+            known = hashlib.sha256(data).hexdigest()
+            with self._keeping:
+                self._kept_for[known] = self._kept_for.get(known, 0) + 1
+            try:
+                sha = self._blob_store.put_bytes(data)
+            except BaseException:
+                self.release_stored(known)
+                raise
+        finally:
+            kept(sha)
+        return sha, len(data)
+
+    def release_stored(self, sha: str, *, taken: bool = False) -> None:
+        """A read that kept a copy (store_media_file) is done with it:
+        ``taken`` by its document (adopted), else dropped. The copy goes out
+        of the local store again only when no other read still holds it,
+        and no asset or the media library has it."""
+        with self._keeping:
+            left = self._kept_for.get(sha, 0) - 1
+            if left > 0:
+                self._kept_for[sha] = left
+                return
+            self._kept_for.pop(sha, None)
+            if taken or self._index.get(sha) is not None \
+                    or sha in getattr(self._uploader, "files", {}):
+                return
+            try:
+                self._blob_store.cache_path(sha).unlink(missing_ok=True)
+            except OSError:
+                pass
+
+    def adopt_stored_media(self, sha: str, *, size: int, mime: str,
+                           name: str) -> Optional[DocumentAsset]:
+        """Take ownership of an audio or video file already in the local
+        store (store_media_file). None when refused."""
+        if media_files.kind_of(mime) is None or not 0 < size <= MAX_MEDIA_BYTES \
+                or not self._blob_store.has(sha):
+            return None
+        existing = self._index.get(sha)
+        if existing is not None:
+            return existing
+        now = int(time.time())
+        asset = DocumentAsset(sha256=sha, mime=mime, size=size, alt=name,
+                              upload_state=AssetState.LOCAL, created_at=now, updated_at=now)
+        self._index.put(asset)
+        self.asset_added.emit(sha)
+        return asset
+
     def adopt_file(
         self, path: str, *, alt: str = "", caption: str = ""
     ) -> Optional[DocumentAsset]:
@@ -362,12 +449,21 @@ class AssetManager(QObject):
         size: int = 0,
         alt: str = "",
     ) -> Optional[DocumentAsset]:
-        """Adopt a blob that is already hosted, e.g. a library pick."""
+        """Adopt a blob that is already hosted, e.g. a library pick (an
+        image, or audio or video, which a document shows as its card).
+
+        Recorded as an upload of it would be: hash, address, type, size,
+        name, and the servers that hold it (from the library's record, else
+        the address's own), so it publishes the same imeta. Nothing is
+        downloaded or sent: it is there already.
+        """
         sha = (sha256 or "").lower()
         if not is_sha256(sha):
             return None
         if not _acceptable_remote_url(remote_url, sha):
             return None
+        servers = _servers_of(self._library_record(sha)) or \
+            [origin for origin in [url_safety.origin_of(remote_url)] if origin]
 
         existing = self._index.get(sha)
         if existing is not None:
@@ -378,7 +474,7 @@ class AssetManager(QObject):
                     # Learning the blob is already hosted is an ingest
                     # fact, not a queue transition: it re-enters at
                     # COMPLETE exactly as a fresh library adopt would.
-                    self._enter_complete(existing, remote_url, existing.servers)
+                    self._enter_complete(existing, remote_url, existing.servers or servers)
             if alt and not existing.alt:
                 existing.alt = alt
             existing.updated_at = int(time.time())
@@ -393,6 +489,7 @@ class AssetManager(QObject):
             alt=alt,
             upload_state=AssetState.COMPLETE,
             remote_url=remote_url,
+            servers=servers,
             created_at=now,
             updated_at=now,
         )
@@ -512,17 +609,29 @@ class AssetManager(QObject):
             asset = self._index.get(sha)
             if asset is None or asset.upload_state is not AssetState.QUEUED:
                 continue
-            body = self.resolve_bytes(asset.key)
-            if not body:
-                self._fail(asset, AssetErrorCodes.UPLOAD_FAILED, "cached bytes missing")
-                return
             self._inflight = sha
-            self._jobs[asset.key] = (sha, asset.attempts)
-            self._set_state(asset, AssetState.SIGNING)
-            # The uploader may fail synchronously and re-enter the slots
-            # below, so nothing may be touched after this call returns.
-            self._uploader.upload_bytes(body, name=asset.key, mime_type=asset.mime)
+            # A large file is read off the UI thread; the upload goes on
+            # from _send once its bytes are there.
+            run_for_size(asset.size, lambda key=asset.key: self.resolve_bytes(key),
+                         lambda body, sha=sha: self._send(sha, body), parent=self)
             return
+
+    def _send(self, sha: str, body: Optional[bytes]) -> None:
+        asset = self._index.get(sha)
+        if asset is None or self._inflight != sha or asset.upload_state is not AssetState.QUEUED:
+            if self._inflight == sha:
+                self._inflight = None
+                self._pump()
+            return
+        if not body:
+            self._inflight = None
+            self._fail(asset, AssetErrorCodes.UPLOAD_FAILED, "cached bytes missing")
+            return
+        self._jobs[asset.key] = (sha, asset.attempts)
+        self._set_state(asset, AssetState.SIGNING)
+        # The uploader may fail synchronously and re-enter the slots
+        # below, so nothing may be touched after this call returns.
+        self._uploader.upload_bytes(body, name=asset.key, mime_type=asset.mime)
 
     def _job_asset(self, name: str) -> Optional[DocumentAsset]:
         """The asset behind a job name, or None when it is not ours.
@@ -569,17 +678,15 @@ class AssetManager(QObject):
         self._enter_complete(asset, url, _servers_of(media))
         self._pump()
 
-    def _on_upload_failed(self, name: str, reason: str) -> None:
+    def _on_upload_failed(self, name: str, code: str) -> None:
+        """The store's code, passed on as it is: what the person is told
+        depends on it (no connection, a full server, a declined signer),
+        so it is never guessed from a sentence."""
         asset = self._job_asset(name)
         if asset is None:
             return
-        text = str(reason or "")
-        code = (
-            AssetErrorCodes.SIGNER_REJECTED
-            if text.startswith(_SIGNER_REASON_PREFIXES)
-            else AssetErrorCodes.UPLOAD_FAILED
-        )
-        self._fail(asset, code, text)
+        code = str(code or AssetErrorCodes.UPLOAD_FAILED)
+        self._fail(asset, code, friendly_message(code))
 
     def _on_blob_ready(self, sha256: str, path: str, pixmap: object) -> None:
         sha = (sha256 or "").lower()

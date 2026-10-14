@@ -30,6 +30,7 @@ from __future__ import annotations
 import hashlib
 import os
 import sys
+from contextlib import contextmanager
 from types import SimpleNamespace
 
 import pytest
@@ -52,12 +53,12 @@ from nostr.ui.publish_copy_dialog import (
     WORKING,
     PickResolution,
     PublishCopyDialog,
-    _storage_line,
     resolution_from,
     resolve_pick,
 )
 
 from tests.media_fakes import PNG_BYTES, make_media, sha_of
+from tests.outbox_fakes import settle
 
 
 KEY = "7e" * 32
@@ -199,62 +200,41 @@ def build(tmp_path, blobs, *, fetcher=None, uploader=None, ledger=None):
     )
 
 
-def rows(dialog) -> list:
-    return [dialog._list.item(i).text() for i in range(dialog._list.count())]
-
-
 # --------------------------------------------------------------------- #
-# What the user is told before anything moves                            #
+# What the person is asked before anything moves                         #
 # --------------------------------------------------------------------- #
 
-def test_the_four_promises_are_all_made(tmp_path):
-    world = build(tmp_path, [private()])
-    text = world.dialog._promises.text()
-    assert "public copy" in text and "anyone" in text.lower()
-    assert "not changed" in text and "stays private" in text
-    assert "Camera and location" in text and "removed" in text
-    assert "revoke" in text
+def test_the_question_names_the_image_and_says_who_will_see_it(tmp_path):
+    world = build(tmp_path, [private(name="beach.jpg")])
+    assert world.dialog._heading.text() == "Share “beach.jpg”?"
+    assert world.dialog._message.text() == (
+        "Anyone with the link will be able to see it. Camera and location "
+        "details are removed first.")
 
 
-def test_the_promises_are_shown_before_the_choice_and_not_during(tmp_path):
-    world = build(tmp_path, [private()], uploader=FakeUploader(auto=False))
+def test_an_image_with_no_name_is_this_image(tmp_path):
+    world = build(tmp_path, [private(name="")])
+    assert world.dialog._heading.text() == "Share this image?"
+
+
+def test_several_images_are_asked_about_together(tmp_path):
+    world = build(tmp_path, [private(), private(OTHER)])
+    assert world.dialog._heading.text() == "Share 2 images?"
+    assert "see them" in world.dialog._message.text()
+
+
+def test_the_question_is_shown_before_the_choice_and_not_during(tmp_path):
+    world = build(tmp_path, [private(name="beach.jpg")], uploader=FakeUploader(auto=False))
     assert world.dialog.state == EXPLAIN
-    assert world.dialog._promises.isVisibleTo(world.dialog)
+    assert world.dialog._message.isVisibleTo(world.dialog)
     world.dialog._on_create_clicked()
     assert world.dialog.state == WORKING
-    assert not world.dialog._promises.isVisibleTo(world.dialog)
-
-
-def test_the_storage_cost_is_stated(tmp_path):
-    world = build(tmp_path, [private(size=2 * 1024 * 1024)])
-    line = world.dialog._storage.text()
-    assert "2.0 MiB" in line
-    # A copy sits beside the original rather than replacing it, which is
-    # the part a quota makes expensive.
-    assert "original" in line
-
-
-def test_the_storage_line_adds_the_whole_set_up():
-    total = _storage_line([private(size=1024), private(OTHER, size=3 * 1024)])
-    assert "4.0 KiB" in total
-    assert "copies" in total
+    assert not world.dialog._message.isVisibleTo(world.dialog)
+    assert world.dialog._heading.text() == "Sharing “beach.jpg”…"
 
 
 def test_the_action_button_says_what_it_does(tmp_path):
-    one = build(tmp_path, [private()])
-    assert one.dialog._create_btn.text() == "Create public copy"
-    many = build(tmp_path, [private(), private(OTHER)])
-    assert many.dialog._create_btn.text() == "Create 2 public copies"
-
-
-def test_each_file_is_listed_by_name_and_size(tmp_path):
-    world = build(tmp_path, [private(name="beach.jpg", size=4096)])
-    assert rows(world.dialog) == ["beach.jpg  ·  4.0 KiB  ·  Waiting"]
-
-
-def test_a_file_with_no_name_is_listed_by_its_hash(tmp_path):
-    world = build(tmp_path, [private(name="")])
-    assert CIPHER_SHA[:8] in rows(world.dialog)[0]
+    assert build(tmp_path, [private()]).dialog._create_btn.text() == "Share"
 
 
 def test_a_file_that_already_has_a_copy_is_not_offered_again(tmp_path):
@@ -317,23 +297,12 @@ def test_the_bytes_uploaded_are_the_scrubbed_ones(tmp_path):
     assert hashlib.sha256(sent).hexdigest() == SCRUBBED_SHA
 
 
-def test_each_stage_reaches_the_row_it_belongs_to(tmp_path):
-    world = build(tmp_path, [private()], uploader=FakeUploader(auto=False))
-    world.dialog._on_create_clicked()
-    # Parked at the upload, so the row shows the stage it is actually at.
-    assert "Uploading the copy" in rows(world.dialog)[0]
-    world.uploader.finish()
-    assert "Public copy created" in rows(world.dialog)[0]
-
-
-def test_the_scrub_stage_names_what_it_removes(tmp_path):
+def test_the_scrub_runs_before_the_upload(tmp_path):
     seen = []
     world = build(tmp_path, [private()], uploader=FakeUploader(auto=False))
     world.maker.copy_progress.connect(lambda _s, stage: seen.append(stage))
     world.dialog._on_create_clicked()
-    assert CopyStage.PREPARING in seen
-    world.dialog._on_copy_progress(CIPHER_SHA, CopyStage.PREPARING)
-    assert "Removing camera and location data" in rows(world.dialog)[0]
+    assert seen.index(CopyStage.PREPARING) < seen.index(CopyStage.UPLOADING)
 
 
 def test_progress_is_determinate_and_counts_settled_copies(tmp_path):
@@ -344,7 +313,6 @@ def test_progress_is_determinate_and_counts_settled_copies(tmp_path):
     assert world.dialog._progress.isVisibleTo(world.dialog)
     world.uploader.finish()
     assert world.dialog._progress.value() == 1
-    assert "1 of 2" in world.dialog._status.text()
 
 
 # --------------------------------------------------------------------- #
@@ -358,8 +326,7 @@ def test_a_failure_stops_the_run_and_names_a_reason(tmp_path):
 
     assert world.dialog.state == FAILED
     assert world.dialog.publish_set.blobs is None
-    assert "Nothing was published" in world.dialog._status.text()
-    assert "could not be downloaded" in world.dialog._status.text()
+    assert "couldn’t be downloaded" in world.dialog._status.text()
     # Still open: reporting a partial set as done is the failure mode.
     assert world.dialog.result() != QDialog.Accepted
 
@@ -373,8 +340,8 @@ def test_the_copies_made_before_a_failure_are_named_not_hidden(tmp_path):
 
     assert len(world.dialog.publish_set.minted) == 1
     status = world.dialog._status.text()
-    assert "1 copy made before this" in status
-    assert "revoked" in status
+    assert "1 other image was shared already" in status
+    assert "Stop Sharing in the Media Library" in status
 
 
 def test_a_failed_run_offers_a_retry_and_not_a_second_create(tmp_path):
@@ -416,7 +383,7 @@ def test_a_failed_set_never_reports_a_public_address(tmp_path):
     resolution = resolution_from(world.dialog.publish_set)
     assert not resolution.ok
     assert resolution.url == ""
-    assert "could not be downloaded" in resolution.reason
+    assert "couldn’t be downloaded" in resolution.reason
 
 
 # --------------------------------------------------------------------- #
@@ -435,7 +402,7 @@ def test_cancelling_before_an_upload_leaves_nothing_behind(tmp_path):
     assert world.uploader.calls == []
     assert len(world.ledger) == 0
     assert world.dialog.publish_set.cancelled
-    assert "Nothing was uploaded" in world.dialog._status.text()
+    assert world.dialog._status.text() == "Cancelled. Nothing was shared."
 
 
 def test_a_copy_that_is_already_uploading_is_carried_through(tmp_path):
@@ -474,8 +441,8 @@ def test_a_copy_already_minted_is_named_when_the_rest_is_cancelled(tmp_path):
 
     status = world.dialog._status.text()
     assert "Cancelled" in status
-    assert "1 public copy had already been created" in status
-    assert "revoked" in status
+    assert "1 image was shared before that" in status
+    assert "Stop Sharing in the Media Library" in status
     assert len(world.ledger) == 1
     assert len(world.uploader.calls) == 1
 
@@ -628,6 +595,14 @@ class _Window:
         self.assets.append((asset, alt))
 
 
+class _Editor:
+    """The editor a pick goes into: it only counts as one step of Undo."""
+
+    @contextmanager
+    def undo_step(self, name):
+        yield
+
+
 @pytest.fixture
 def gated(monkeypatch):
     """Patch the gate at the name main_window imported it under."""
@@ -651,7 +626,7 @@ def test_an_insert_goes_through_the_gate(gated):
     ))
     media = make_media(CIPHER_SHA, servers=(SERVER,))
 
-    window._insert_media_at_cursor(media, object(), "a beach")
+    window._insert_media_at_cursor(media, _Editor(), "a beach")
 
     assert len(window.asked) == 1
     asked_media, kwargs = window.asked[0]
@@ -667,7 +642,7 @@ def test_the_address_inserted_is_the_copy_and_never_the_original(gated):
     ))
     media = make_media(CIPHER_SHA, servers=(SERVER,))
 
-    window._insert_media_at_cursor(media, object(), "")
+    window._insert_media_at_cursor(media, _Editor(), "")
 
     assert window.adopted[0]["sha256"] == SCRUBBED_SHA
     assert window.adopted[0]["remote_url"] == f"{CDN}/{SCRUBBED_SHA}"
@@ -676,7 +651,7 @@ def test_the_address_inserted_is_the_copy_and_never_the_original(gated):
 
 def test_a_refused_pick_inserts_nothing_at_all(gated):
     window = gated(PickResolution(reason="This picture is private."))
-    window._insert_media_at_cursor(make_media(CIPHER_SHA), object(), "")
+    window._insert_media_at_cursor(make_media(CIPHER_SHA), _Editor(), "")
 
     assert window.adopted == []
     assert window.assets == []
@@ -687,7 +662,7 @@ def test_a_refused_pick_inserts_nothing_at_all(gated):
 def test_a_cancelled_pick_says_nothing_and_inserts_nothing(gated):
     # The user already knows what they did; a message would be a scold.
     window = gated(PickResolution(cancelled=True))
-    window._insert_media_at_cursor(make_media(CIPHER_SHA), object(), "")
+    window._insert_media_at_cursor(make_media(CIPHER_SHA), _Editor(), "")
     assert window.adopted == [] and window.urls == []
     assert window.messages == []
 
@@ -697,69 +672,73 @@ def test_a_public_pick_still_inserts_the_way_it_always_did(gated):
     window = gated(PickResolution(
         sha256=media.hash, url=media.url, mime="image/png", size=9, ok=True,
     ))
-    window._insert_media_at_cursor(media, object(), "alt words")
+    window._insert_media_at_cursor(media, _Editor(), "alt words")
     assert window.adopted[0]["sha256"] == media.hash
     assert window.assets[0][1] == "alt words"
 
 
-def test_a_non_image_copy_falls_back_to_a_link(gated):
+def test_a_video_where_no_card_can_go_falls_back_to_a_link(gated):
+    """In a document that holds no audio or video card (plain text, or
+    with no Nostr account in use), a library video is its link; where a
+    card can go, it is the card (test_media_entry)."""
     window = gated(PickResolution(
         sha256="e" * 64, url=f"{CDN}/{'e' * 64}", mime="video/mp4", ok=True,
     ))
-    window._insert_media_at_cursor(make_media("e" * 64), object(), "")
+    window._may_insert_audio_video = lambda editor: False
+    window._insert_media_at_cursor(make_media("e" * 64), _Editor(), "")
     assert window.urls == [f"{CDN}/{'e' * 64}"]
     assert window.adopted == []
 
 
-class _CoverDialog:
-    """PublishArticleDialog's cover-pick path over a stub."""
+class _CoverField:
+    """The article's Cover Image field (nostr/ui/cover_field.py), the one
+    the publish window and Article Details share, with its complaints
+    kept."""
 
-    from nostr.ui.publish_article_dialog import PublishArticleDialog as _Dialog
-
-    _on_cover_image_picked = _Dialog._on_cover_image_picked
-
-    def __init__(self) -> None:
-        self._is_dark = True
-        self._media_visibility = MediaVisibility()
-        self._copy_maker = object()
-        self._cover_thumb_hash = ""
-        self._cover_loader = None
-        self.text = ""
+    def __init__(self, visibility=None) -> None:
+        from nostr.ui.cover_field import CoverImageField
+        self.field = CoverImageField(media_visibility=visibility or MediaVisibility(),
+                                     copy_maker=object(), is_dark=True)
         self.errors: list = []
-        self._image_edit = SimpleNamespace(setText=self._set_text)
+        self.field.problem.connect(self.errors.append)
 
-    def _set_text(self, value) -> None:
-        self.text = value
+    def pick(self, media) -> None:
+        self.field.picked(media, "")
 
-    def _set_status(self, text, *, error=False) -> None:
-        self.errors.append((text, error))
+    @property
+    def text(self) -> str:
+        return self.field.text()
+
+    @property
+    def thumb_hash(self) -> str:
+        return self.field._thumb_hash
 
 
 def test_the_cover_field_takes_the_copy_not_the_private_address(monkeypatch):
-    import nostr.ui.publish_article_dialog as module
+    import nostr.ui.cover_field as module
 
     monkeypatch.setattr(module, "resolve_pick", lambda media, **kw: PickResolution(
         sha256=SCRUBBED_SHA, url=f"{CDN}/{SCRUBBED_SHA}", mime="image/png", ok=True,
     ))
-    dialog = _CoverDialog()
-    dialog._on_cover_image_picked(make_media(CIPHER_SHA, servers=(SERVER,)), "")
+    cover = _CoverField()
+    cover.pick(make_media(CIPHER_SHA, servers=(SERVER,)))
 
-    assert dialog.text == f"{CDN}/{SCRUBBED_SHA}"
-    assert dialog._cover_thumb_hash == SCRUBBED_SHA
+    assert cover.text == f"{CDN}/{SCRUBBED_SHA}"
+    assert cover.thumb_hash == SCRUBBED_SHA
 
 
 def test_a_refused_cover_leaves_the_field_alone(monkeypatch):
-    import nostr.ui.publish_article_dialog as module
+    import nostr.ui.cover_field as module
 
     monkeypatch.setattr(module, "resolve_pick", lambda media, **kw: PickResolution(
         reason="No public copy was created.",
     ))
-    dialog = _CoverDialog()
-    dialog._on_cover_image_picked(make_media(CIPHER_SHA, servers=(SERVER,)), "")
+    cover = _CoverField()
+    cover.pick(make_media(CIPHER_SHA, servers=(SERVER,)))
 
-    assert dialog.text == ""
-    assert dialog._cover_thumb_hash == ""
-    assert dialog.errors == [("No public copy was created.", True)]
+    assert cover.text == ""
+    assert cover.thumb_hash == ""
+    assert cover.errors == ["No public copy was created."]
 
 
 def test_a_pick_that_is_already_public_asks_nothing(tmp_path):
@@ -806,7 +785,7 @@ def test_a_dialog_with_nothing_pending_still_settles(tmp_path):
     ))
     world = build(tmp_path, [private()], ledger=ledger)
     assert world.dialog.pending == []
-    assert world.dialog._create_btn.text() == "Use the existing copies"
+    assert world.dialog._create_btn.text() == "Continue"
 
     world.dialog._on_create_clicked()
 
@@ -850,7 +829,7 @@ def test_an_unchecked_pick_is_refused_rather_than_passed_through():
     # ``ok`` still has nothing to embed.
     assert resolution.url == ""
     assert resolution.sha256 == ""
-    assert "not been checked" in resolution.reason
+    assert "couldn’t check yet whether this image is private" in resolution.reason
 
 
 def test_an_unchecked_pick_is_refused_even_with_a_maker_available(tmp_path):
@@ -921,7 +900,7 @@ def _private_event():
 def _real_library(*, signer):
     """The real PrivateLibrary, wired the way ``MainWindow`` wires it."""
     from nostr.media.private_library import PrivateLibrary
-    from tests.imports_fakes import FakeRelayListCache
+    from tests.outbox_fakes import FakeRelayDirectory
 
     class Query:
         def addressable(self, relays, filters, on_done):
@@ -929,9 +908,10 @@ def _real_library(*, signer):
 
     return PrivateLibrary(
         session_pool=signer,
-        relay_list_cache=FakeRelayListCache(),
+        relay_directory=FakeRelayDirectory(),
         query=Query(),
         clock=lambda: 1_700_000_000,
+        entitled_relays=lambda: [],      # MainWindow's answer for a non-member
     )
 
 
@@ -979,14 +959,14 @@ def test_an_insert_while_the_signer_prompt_is_open_embeds_nothing(tmp_path):
     ledger = PublicLedger(path=tmp_path / "public.json")
     window = _insert_window(library, ledger)
     window._insert_media_at_cursor(
-        make_media(CIPHER_SHA, servers=(SERVER,)), object(), "a photo")
+        make_media(CIPHER_SHA, servers=(SERVER,)), _Editor(), "a photo")
 
     # The private blob's own address and content hash reach nothing.
     assert window.adopted == []
     assert window.assets == []
     assert window.urls == []
     assert CIPHER_SHA not in str(window.adopted + window.assets + window.urls)
-    assert window.messages and "not been checked" in window.messages[0]
+    assert window.messages and "couldn’t check yet whether this image is private" in window.messages[0]
 
 
 def test_the_same_pick_is_gated_normally_once_the_signer_answers(tmp_path):
@@ -999,7 +979,7 @@ def test_the_same_pick_is_gated_normally_once_the_signer_answers(tmp_path):
     ledger = PublicLedger(path=tmp_path / "public.json")
     window = _insert_window(library, ledger)
     window._insert_media_at_cursor(
-        make_media(CIPHER_SHA, servers=(SERVER,)), object(), "a photo")
+        make_media(CIPHER_SHA, servers=(SERVER,)), _Editor(), "a photo")
 
     # Still nothing embedded, but now for the reason the user can act on.
     assert window.urls == [] and window.adopted == []
@@ -1012,6 +992,7 @@ def test_a_signer_that_never_answers_does_not_make_private_files_public(tmp_path
     library.status_changed.connect(seen.append)
     library.bind_profile(SimpleNamespace(
         user_pubkey="ab" * 32, bunker_relays=["wss://bunker.example"]))
+    settle()
 
     # The library is done trying, for the whole session.
     assert library.loading is False
@@ -1021,7 +1002,7 @@ def test_a_signer_that_never_answers_does_not_make_private_files_public(tmp_path
     ledger = PublicLedger(path=tmp_path / "public.json")
     window = _insert_window(library, ledger)
     window._insert_media_at_cursor(
-        make_media(CIPHER_SHA, servers=(SERVER,)), object(), "a photo")
+        make_media(CIPHER_SHA, servers=(SERVER,)), _Editor(), "a photo")
 
     assert window.adopted == [] and window.urls == [] and window.assets == []
     assert PRIVATE_URL not in str(window.messages)
@@ -1034,11 +1015,12 @@ def test_a_public_file_still_inserts_while_the_library_is_unreadable(tmp_path):
     library = _real_library(signer=_AbsentSigner())
     library.bind_profile(SimpleNamespace(
         user_pubkey="ab" * 32, bunker_relays=["wss://bunker.example"]))
+    settle()
 
     ledger = PublicLedger(path=tmp_path / "public.json")
     window = _insert_window(library, ledger)
     ordinary = make_media("d" * 64, servers=(CDN,), mime="image/png", size=17)
-    window._insert_media_at_cursor(ordinary, object(), "alt words")
+    window._insert_media_at_cursor(ordinary, _Editor(), "alt words")
 
     assert window.adopted[0]["sha256"] == "d" * 64
     assert window.messages == []
@@ -1048,28 +1030,27 @@ def test_a_public_file_still_inserts_while_the_library_is_unreadable(tmp_path):
 # The article's cover picker is the second way into the same choice      #
 # --------------------------------------------------------------------- #
 
-class _Chooser:
-    """PublishArticleDialog's cover-picker path over a stub.
+def _chooser(library):
+    """The Cover Image field's picker path, over the Media Library stub.
 
     This picker's library is bound nowhere else in the app, so before
     this it was never read at all and every private file in it looked
-    like an ordinary public blob for the life of the dialog.
-    """
+    like an ordinary public blob for the life of the window."""
+    from nostr.ui.cover_field import CoverImageField
+    profile = SimpleNamespace(user_pubkey="ab" * 32, bunker_relays=["wss://bunker.example"])
+    field = CoverImageField(media_store=_Store(), media_visibility=MediaVisibility(),
+                            private_library=library, profile=lambda: profile, is_dark=True)
+    field.profile_used = profile
+    return field
 
-    from nostr.ui.publish_article_dialog import PublishArticleDialog as _Dialog
 
-    _on_choose_cover_image = _Dialog._on_choose_cover_image
+class _Store(QObject):
+    """A media store that holds nothing and uploads nothing."""
 
-    def __init__(self, library) -> None:
-        self._is_dark = True
-        self._media_store = object()
-        self._media_visibility = MediaVisibility()
-        self._private_library = library
-        self._current_profile = SimpleNamespace(
-            user_pubkey="ab" * 32, bunker_relays=["wss://bunker.example"])
-
-    def _on_cover_image_picked(self, media, alt) -> None:
-        pass
+    upload_finished = Signal(str, object)
+    upload_failed = Signal(str, str)
+    upload_progress = Signal(str, int, int)
+    files: dict = {}
 
 
 class _StubPicker:
@@ -1092,7 +1073,7 @@ class _StubPicker:
 
 
 def test_the_cover_picker_opens_the_private_library_and_follows_it(monkeypatch):
-    import nostr.ui.publish_article_dialog as module
+    import nostr.ui.cover_field as module
 
     class Library:
         def __init__(self) -> None:
@@ -1108,37 +1089,63 @@ def test_the_cover_picker_opens_the_private_library_and_follows_it(monkeypatch):
         lambda **kw: (made.append(_StubPicker(**kw)) or made[-1]),
     )
 
-    chooser = _Chooser(library)
-    chooser._on_choose_cover_image()
+    chooser = _chooser(library)
+    chooser.choose()
 
-    # The read is started here rather than on the way into the dialog,
+    # The read is started here rather than on the way into the window,
     # so an article published without a cover costs no signer prompts.
-    assert library.bound == [chooser._current_profile]
+    assert library.bound == [chooser.profile_used]
     assert made[0].bound == [library]
     assert made[0].executed == 1
 
 
 def test_a_cover_picker_with_no_library_still_opens(monkeypatch):
-    import nostr.ui.publish_article_dialog as module
+    import nostr.ui.cover_field as module
 
     made: list = []
     monkeypatch.setattr(
         module, "MediaLibraryDialog",
         lambda **kw: (made.append(_StubPicker(**kw)) or made[-1]),
     )
-    chooser = _Chooser(None)
-    chooser._on_choose_cover_image()
+    chooser = _chooser(None)
+    chooser.choose()
 
     assert made[0].executed == 1
     assert made[0].bound == []
 
 
 def test_an_unchecked_cover_pick_leaves_the_field_alone():
-    dialog = _CoverDialog()
-    dialog._media_visibility = MediaVisibility(library=_UncheckedLibrary())
+    cover = _CoverField(MediaVisibility(library=_UncheckedLibrary()))
 
-    dialog._on_cover_image_picked(make_media(CIPHER_SHA, servers=(SERVER,)), "")
+    cover.pick(make_media(CIPHER_SHA, servers=(SERVER,)))
 
-    assert dialog.text == ""
-    assert dialog._cover_thumb_hash == ""
-    assert "not been checked" in dialog.errors[0][0]
+    assert cover.text == ""
+    assert cover.thumb_hash == ""
+    assert "couldn’t check yet whether this image is private" in cover.errors[0]
+
+
+class _ReadLibrary(_UncheckedLibrary):
+    def vouches_for(self, sha):
+        return True
+
+
+@pytest.mark.parametrize("mime", ["video/mp4", "audio/mpeg", "image/heic", "application/pdf"])
+def test_a_private_file_whose_details_cannot_be_removed_is_not_offered(tmp_path, mime, monkeypatch):
+    """The question promises "camera and location details are removed
+    first"; for a kind of file that cannot be cleaned here it would be
+    untrue, so it is not asked: the file is refused, saying why."""
+    import nostr.ui.publish_copy_dialog as module
+    asked = []
+    monkeypatch.setattr(module, "PublishCopyDialog",
+                        lambda **kw: asked.append(kw) or pytest.fail("asked"))
+    blob = private(mime=mime, name="clip")
+    media = make_media(blob.sha256, servers=(SERVER,), mime="application/octet-stream")
+    maker = PublicCopyMaker(ledger=PublicLedger(path=tmp_path / "public.json"),
+                            fetcher=FakeFetcher({}), uploader=FakeUploader())
+    resolution = resolve_pick(media, visibility=MediaVisibility(library=_ReadLibrary([blob])),
+                              maker=maker)
+    assert not resolution.ok and not resolution.cancelled
+    assert resolution.reason == (
+        "MyEditor can’t share this kind of private file yet, because it can’t remove "
+        "its camera and location details.")
+    assert asked == []

@@ -35,6 +35,8 @@ from __future__ import annotations
 
 from typing import Final, Iterable, List, Optional, Protocol, Sequence
 
+
+from .filecrypto import FileCryptoError, decrypt_file
 from .private_preview import PreviewOutcome, preview_from_envelope
 from .visibility import PrivateBlob, PublicBlob
 
@@ -136,6 +138,18 @@ class MediaVisibility:
         blob = self._private(sha256)
         return (blob.mime or "") if blob is not None else ""
 
+    def name_of(self, sha256: str) -> str:
+        """A private file's own name, from its record, or ""."""
+        blob = self._private(sha256)
+        return (blob.name or "") if blob is not None else ""
+
+    def copy_source(self, sha256: str) -> str:
+        """The private original this file is the public copy of, or ""."""
+        if self._ledger is None:
+            return ""
+        copy = self._ledger.get(sha256)
+        return copy.source_hash if copy is not None else ""
+
     def public_copy_of(self, sha256: str) -> Optional[PublicBlob]:
         """The live public copy minted from this private file, or None.
 
@@ -208,6 +222,17 @@ class MediaVisibility:
         if blob is None:
             return PreviewOutcome(reason="this file is not in your private library")
         return preview_from_envelope(envelope, blob.key_hex)
+
+    def open_private(self, sha256: str, envelope: bytes) -> Optional[bytes]:
+        """A private file's own bytes, for Save As, or None when they
+        cannot be opened. As with ``preview``, the key is spent here."""
+        blob = self._private(sha256)
+        if blob is None:
+            return None
+        try:
+            return decrypt_file(bytes(envelope), blob.key_hex)
+        except FileCryptoError:
+            return None
 
     # -- internals ---------------------------------------------------------
 

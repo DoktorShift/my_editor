@@ -35,6 +35,8 @@ from __future__ import annotations
 
 from typing import List, Optional
 
+from i18n import _
+
 from ...rss.discovery import (
     candidate_feed_urls,
     extract_feeds_from_html,
@@ -42,17 +44,18 @@ from ...rss.discovery import (
     looks_like_html,
     normalize_user_url,
 )
-from ...rss.parser import RssError, parse_feed
+from ...rss.parser import RssError, parse_feed, with_whole_links
 from ..errors import ERROR_CODES, SourceError
 from ..registry import ResolveContext, ResolveInput, ResolveResult, SourceResolver
 from ..sources.podcast import enrich_feed_with_podcast
 
 
-def _parse_feed_enriched(body: str):
-    """Parse a feed body and recover the Podcasting 2.0 layer (audio
-    enclosures + podcast/itunes namespaces) the shared parser drops.
-    A no-op for feeds without audio enclosures."""
-    return enrich_feed_with_podcast(parse_feed(body), body)
+def _parse_feed_enriched(body: str, address: str):
+    """Parse a feed body read from ``address`` and recover the Podcasting
+    2.0 layer (audio enclosures + podcast/itunes namespaces) the shared
+    parser drops (a no-op for feeds without audio enclosures). Relative
+    item links are made whole once the episodes are matched to them."""
+    return with_whole_links(enrich_feed_with_podcast(parse_feed(body), body), address)
 
 
 def _detect(input_: ResolveInput) -> bool:
@@ -80,9 +83,10 @@ def _resolve(input_: ResolveInput, ctx: ResolveContext) -> None:
                 ctx.on_failure(SourceError(str(exc), ERROR_CODES.NOT_A_FEED))
             else:
                 ctx.on_failure(SourceError(
-                    f"Unexpected parse error: {exc}", ERROR_CODES.UNKNOWN))
+                    _("Unexpected parse error: {error}").format(error=exc),
+                    ERROR_CODES.UNKNOWN))
 
-        ctx.blocking(lambda: _parse_feed_enriched(body), _parsed, _parse_failed)
+        ctx.blocking(lambda: _parse_feed_enriched(body, url), _parsed, _parse_failed)
         return
 
     if not input_.url:
@@ -158,7 +162,8 @@ class _Discovery:
             self._try_next()
             return
         self._ctx.on_failure(SourceError(
-            f"Unexpected parse error: {exc}", ERROR_CODES.UNKNOWN))
+            _("Unexpected parse error: {error}").format(error=exc),
+            ERROR_CODES.UNKNOWN))
 
     def _on_body(self, url: str, body: str) -> None:
         if self._ctx.is_cancelled():
@@ -170,7 +175,7 @@ class _Discovery:
             # Parsing can be CPU-heavy (a 16 MiB feed); the context's
             # executor keeps it off the UI thread when one is wired.
             self._ctx.blocking(
-                lambda: _parse_feed_enriched(body),
+                lambda: _parse_feed_enriched(body, url),
                 lambda feed: self._on_parsed(url, feed),
                 self._on_parse_failed,
             )
@@ -208,7 +213,7 @@ class _Discovery:
         # Nothing was ever fetched: surface the transport reason.
         self._ctx.on_failure(
             self._first_fetch_error
-            or SourceError("No URL could be fetched", ERROR_CODES.FETCH_ERROR)
+            or SourceError(_("No URL could be fetched"), ERROR_CODES.FETCH_ERROR)
         )
 
     def _try_sitemap_fallback(self) -> None:

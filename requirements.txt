@@ -6,7 +6,16 @@ coincurve>=20.0.0      # libsecp256k1 bindings, schnorr sign/verify, ECDH
 cryptography>=42.0.0   # ChaCha20 + HMAC-SHA256 for NIP-44 v2
 segno>=1.6.0           # QR code rendering for nostrconnect:// pairing
 
+# A Markdown file's front matter: what MyEditor reads and writes in it is
+# checked against a YAML parser (front_matter.parsed)
+PyYAML>=6.0
+
 # RSS to NIP-37 draft import
 feedparser>=6.0.10     # RSS 2.0 + Atom parsing
 markdownify>=0.11.6    # HTML to Markdown for feed bodies
 readability-lxml>=0.8.1  # full-text recovery for teaser-only feeds
+
+# Spell checking with the system's own checker. macOS: NSSpellChecker,
+# through a small pure-Python Objective-C bridge. Windows and Linux reach
+# theirs (ISpellChecker, Enchant) through ctypes and need no package.
+rubicon-objc>=0.5.0; sys_platform == "darwin"

@@ -47,6 +47,9 @@ import urllib.request
 import zipfile
 from dataclasses import dataclass
 
+from atomic_file import read_json, write_json
+from i18n import _
+
 TOOLCHAIN_DIR = os.path.expanduser("~/.config/my_editor/rmd_toolchain")
 _STATE_PATH = os.path.join(TOOLCHAIN_DIR, "state.json")
 _LIBRARY_DIR = os.path.join(TOOLCHAIN_DIR, "library")
@@ -105,18 +108,11 @@ class ComponentStatus:
 # --------------------------------------------------------------------------- #
 
 def _load_state() -> dict:
-    try:
-        with open(_STATE_PATH, "r", encoding="utf-8") as f:
-            data = json.load(f)
-        return data if isinstance(data, dict) else {}
-    except (OSError, json.JSONDecodeError):
-        return {}
+    return read_json(_STATE_PATH, dict)
 
 
 def _save_state(state: dict) -> None:
-    os.makedirs(TOOLCHAIN_DIR, exist_ok=True)
-    with open(_STATE_PATH, "w", encoding="utf-8") as f:
-        json.dump(state, f, indent=2)
+    write_json(_STATE_PATH, state, indent=2)
 
 
 # --------------------------------------------------------------------------- #
@@ -171,10 +167,38 @@ def find_pandoc() -> tuple[str | None, str]:
     return None, "missing"
 
 
+def program_environment() -> dict[str, str]:
+    """The environment for a program of the system (R, pandoc, LaTeX): the
+    person's own, as the app was given it.
+
+    A packaged Linux build (PyInstaller) puts its own libraries first in
+    LD_LIBRARY_PATH and keeps what was there in LD_LIBRARY_PATH_ORIG. A
+    system program started with that would load the bundle's copies of
+    libz, libssl or libstdc++ instead of its own, so, as PyInstaller's
+    documentation asks, the original comes back, or the variable goes when
+    there was none. Run from source, nothing is changed.
+    """
+    env = os.environ.copy()
+    if getattr(sys, "frozen", False):
+        original = env.pop("LD_LIBRARY_PATH_ORIG", None)
+        if original is not None:
+            env["LD_LIBRARY_PATH"] = original
+        else:
+            env.pop("LD_LIBRARY_PATH", None)
+    return env
+
+
+def r_environment() -> dict[str, str]:
+    """R's environment: the person's own (program_environment), with the
+    app's private library, where rmarkdown and tinytex are installed."""
+    env = program_environment()
+    env["R_LIBS_USER"] = _LIBRARY_DIR
+    return env
+
+
 def _run_r(rscript: str, expr: str, timeout: int = 60,
            extra_env: dict | None = None) -> subprocess.CompletedProcess:
-    env = os.environ.copy()
-    env["R_LIBS_USER"] = _LIBRARY_DIR
+    env = r_environment()
     if extra_env:
         env.update(extra_env)
     kwargs = {}
@@ -241,14 +265,16 @@ def ready_to_knit(to_pdf: bool = False) -> bool:
     return base and (s["latex"].present if to_pdf else True)
 
 
-def knit_environment(env):
-    """Augment a QProcessEnvironment for KnitRunner."""
+def knit_environment() -> dict[str, str]:
+    """R's environment for a knit (KnitRunner): r_environment, with the
+    pandoc found first on PATH and handed to rmarkdown, the way RStudio
+    hands it its own."""
+    env = r_environment()
     pandoc_dir, _source = find_pandoc()
     if pandoc_dir:
-        env.insert("RSTUDIO_PANDOC", pandoc_dir)
-        env.insert("PATH", pandoc_dir + os.pathsep + env.value("PATH", ""))
+        env["RSTUDIO_PANDOC"] = pandoc_dir
+        env["PATH"] = pandoc_dir + os.pathsep + env.get("PATH", "")
     os.makedirs(_LIBRARY_DIR, exist_ok=True)
-    env.insert("R_LIBS_USER", _LIBRARY_DIR)
     return env
 
 
@@ -260,7 +286,7 @@ def _check_host(url: str) -> None:
     from urllib.parse import urlparse
     parsed = urlparse(url)
     if parsed.scheme != "https" or parsed.hostname not in _ALLOWED_HOSTS:
-        raise ToolchainError(f"refusing non-official download URL: {url}")
+        raise ToolchainError(_("refusing non-official download URL: {url}").format(url=url))
 
 
 def _fetch_text(url: str, timeout: int = 30) -> str:
@@ -301,8 +327,8 @@ def _download(url: str, dest: str, progress=None, cancel=None,
     if sha256 is not None and hasher.hexdigest().lower() != sha256.lower():
         os.unlink(tmp)
         raise ToolchainError(
-            f"checksum mismatch for {os.path.basename(dest)}; download "
-            "discarded. Try again, or install manually.",
+            _("checksum mismatch for {name}; download discarded. Try again, "
+              "or install manually.").format(name=os.path.basename(dest)),
             page=R_DOWNLOAD_PAGE)
     os.replace(tmp, dest)
     return dest
@@ -343,7 +369,7 @@ def r_installer_url(version: str) -> str:
         arch = "arm64" if platform.machine() == "arm64" else "x86_64"
         return (f"{CRAN}/bin/macosx/big-sur-{arch}/base/"
                 f"R-{version}-{arch}.pkg")
-    raise ToolchainError("Linux installs use the distro package manager")
+    raise ToolchainError(_("Linux installs use the distro package manager"))
 
 
 def pandoc_archive_url(version: str) -> str:
@@ -372,13 +398,13 @@ def install_r(progress=None, log=None, cancel=None) -> str:
 
     version = discover_r_version()
     url = r_installer_url(version)
-    log(f"Downloading R {version} from CRAN\n  {url}")
+    log(_("Downloading R {version} from CRAN").format(version=version) + f"\n  {url}")
     dest = os.path.join(_DOWNLOADS_DIR, os.path.basename(url))
     _download(url, dest, progress=progress, cancel=cancel,
               sha256=PINNED_SHA256.get(url))
 
     if sys.platform == "darwin":
-        log("Installing R (macOS will ask for your password)...")
+        log(_("Installing R (macOS will ask for your password)..."))
         script = (f'do shell script "installer -pkg '
                   f'{_sh_quote_applescript(dest)} -target /" '
                   'with administrator privileges')
@@ -386,29 +412,29 @@ def install_r(progress=None, log=None, cancel=None) -> str:
                               capture_output=True, text=True)
         if proc.returncode != 0:
             raise ToolchainError(
-                "The R installer did not finish.",
-                instructions=f"Open the downloaded package manually:\n{dest}",
+                _("The R installer did not finish."),
+                instructions=_("Open the downloaded package manually:") + f"\n{dest}",
                 page=R_DOWNLOAD_PAGE)
     else:  # win32
-        log("Running the R installer (silent, per-user)...")
+        log(_("Running the R installer (silent, per-user)..."))
         proc = subprocess.run([dest, "/SILENT", "/CURRENTUSER", "/SP-"])
         if proc.returncode != 0:
-            log("Silent install refused; launching the interactive installer.")
+            log(_("Silent install refused; launching the interactive installer."))
             proc = subprocess.run([dest])
             if proc.returncode != 0:
                 raise ToolchainError(
-                    "The R installer did not finish.",
-                    instructions=f"Run the downloaded installer manually:\n{dest}",
+                    _("The R installer did not finish."),
+                    instructions=_("Run the downloaded installer manually:") + f"\n{dest}",
                     page=R_DOWNLOAD_PAGE)
 
     rscript = find_rscript()
     if not rscript:
         raise ToolchainError(
-            "R was installed but Rscript was not found afterwards.",
-            instructions="Restart the editor; if that does not help, "
-                         f"install R manually from {R_DOWNLOAD_PAGE}",
+            _("R was installed but Rscript was not found afterwards."),
+            instructions=_("Restart the editor; if that does not help, "
+                           "install R manually from {page}").format(page=R_DOWNLOAD_PAGE),
             page=R_DOWNLOAD_PAGE)
-    log(f"R ready: {rscript}")
+    log(_("R ready: {path}").format(path=rscript))
     return rscript
 
 
@@ -434,21 +460,21 @@ def _install_r_linux(log, cancel=None) -> str:
             break
     if pm_cmd is None:
         raise ToolchainError(
-            "No supported package manager was found.",
-            instructions="Install R with your distribution's package "
-                         "manager (package name: r-base or R).",
+            _("No supported package manager was found."),
+            instructions=_("Install R with your distribution's package "
+                           "manager (package name: r-base or R)."),
             page=R_DOWNLOAD_PAGE)
 
     if not shutil.which("pkexec"):
         raise ToolchainError(
-            "Administrator rights are needed to install R.",
-            instructions=f"Run this in a terminal:\n  sudo sh -c '{pm_cmd}'",
+            _("Administrator rights are needed to install R."),
+            instructions=_("Run this in a terminal:") + f"\n  sudo sh -c '{pm_cmd}'",
             page=R_DOWNLOAD_PAGE)
 
-    log(f"Installing R via the system package manager:\n  {pm_cmd}")
+    log(_("Installing R via the system package manager:") + f"\n  {pm_cmd}")
     proc = subprocess.Popen(["pkexec", "sh", "-c", pm_cmd],
                             stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                            text=True)
+                            text=True, env=program_environment())
     for line in proc.stdout:
         if cancel is not None and cancel.is_set():
             proc.kill()
@@ -457,15 +483,15 @@ def _install_r_linux(log, cancel=None) -> str:
     proc.wait()
     if proc.returncode != 0:
         raise ToolchainError(
-            "The package manager could not install R.",
-            instructions=f"Run this in a terminal:\n  sudo sh -c '{pm_cmd}'",
+            _("The package manager could not install R."),
+            instructions=_("Run this in a terminal:") + f"\n  sudo sh -c '{pm_cmd}'",
             page=R_DOWNLOAD_PAGE)
 
     rscript = find_rscript()
     if not rscript:
-        raise ToolchainError("R was installed but Rscript was not found.",
+        raise ToolchainError(_("R was installed but Rscript was not found."),
                              page=R_DOWNLOAD_PAGE)
-    log(f"R ready: {rscript}")
+    log(_("R ready: {path}").format(path=rscript))
     return rscript
 
 
@@ -475,7 +501,7 @@ def install_pandoc(progress=None, log=None, cancel=None) -> str:
     log = log or (lambda s: None)
     version = discover_pandoc_version()
     url = pandoc_archive_url(version)
-    log(f"Downloading pandoc {version}\n  {url}")
+    log(_("Downloading pandoc {version}").format(version=version) + f"\n  {url}")
     archive = os.path.join(_DOWNLOADS_DIR, os.path.basename(url))
     _download(url, archive, progress=progress, cancel=cancel,
               sha256=PINNED_SHA256.get(url))
@@ -484,16 +510,16 @@ def install_pandoc(progress=None, log=None, cancel=None) -> str:
     if os.path.isdir(target):
         shutil.rmtree(target)
     os.makedirs(target, exist_ok=True)
-    log("Extracting...")
+    log(_("Extracting..."))
     binary = extract_pandoc_archive(archive, target)
     if binary is None:
-        raise ToolchainError("pandoc archive had an unexpected layout.",
+        raise ToolchainError(_("pandoc archive had an unexpected layout."),
                              page=PANDOC_DOWNLOAD_PAGE)
 
     state = _load_state()
     state["pandoc"] = {"version": version, "bin": binary}
     _save_state(state)
-    log(f"pandoc ready: {binary}")
+    log(_("pandoc ready: {path}").format(path=binary))
     return binary
 
 
@@ -526,19 +552,20 @@ def install_rmarkdown(log=None, cancel=None) -> None:
     log = log or (lambda s: None)
     rscript = find_rscript()
     if not rscript:
-        raise ToolchainError("R must be installed first.")
+        raise ToolchainError(_("R must be installed first."))
     os.makedirs(_LIBRARY_DIR, exist_ok=True)
     lib = _LIBRARY_DIR.replace("\\", "/")
     expr = (f"install.packages('rmarkdown', repos='{CRAN_PKG_REPO}', "
             f"lib='{lib}')")
-    log(f"Installing rmarkdown from {CRAN_PKG_REPO} into the app library...")
+    log(_("Installing rmarkdown from {repository} into the app library...").format(
+        repository=CRAN_PKG_REPO))
     _stream_r(rscript, expr, log, cancel)
     if not _r_package_present(rscript, "rmarkdown"):
         raise ToolchainError(
-            "rmarkdown did not install cleanly.",
-            instructions="In an R console, run:\n"
+            _("rmarkdown did not install cleanly."),
+            instructions=_("In an R console, run:") + "\n"
                          f"  install.packages('rmarkdown', repos='{CRAN_PKG_REPO}')")
-    log("rmarkdown ready.")
+    log(_("rmarkdown ready."))
 
 
 def install_tinytex(log=None, cancel=None) -> None:
@@ -546,10 +573,10 @@ def install_tinytex(log=None, cancel=None) -> None:
     log = log or (lambda s: None)
     rscript = find_rscript()
     if not rscript:
-        raise ToolchainError("R must be installed first.")
+        raise ToolchainError(_("R must be installed first."))
     os.makedirs(_LIBRARY_DIR, exist_ok=True)
     lib = _LIBRARY_DIR.replace("\\", "/")
-    log("Installing TinyTeX (this downloads roughly 100 MB)...")
+    log(_("Installing TinyTeX (this downloads roughly 100 MB)..."))
     expr = (f"if (!nzchar(system.file(package='tinytex'))) "
             f"install.packages('tinytex', repos='{CRAN_PKG_REPO}', lib='{lib}'); "
             f"tinytex::install_tinytex(force = TRUE)")
@@ -557,15 +584,14 @@ def install_tinytex(log=None, cancel=None) -> None:
     has_latex, _where = _latex_available()
     if not has_latex:
         raise ToolchainError(
-            "TinyTeX did not install cleanly.",
-            instructions="In an R console, run:\n"
+            _("TinyTeX did not install cleanly."),
+            instructions=_("In an R console, run:") + "\n"
                          "  install.packages('tinytex'); tinytex::install_tinytex()")
-    log("TinyTeX ready.")
+    log(_("TinyTeX ready."))
 
 
 def _stream_r(rscript: str, expr: str, log, cancel=None) -> None:
-    env = os.environ.copy()
-    env["R_LIBS_USER"] = _LIBRARY_DIR
+    env = r_environment()
     kwargs = {}
     if sys.platform == "win32":
         kwargs["creationflags"] = getattr(subprocess, "CREATE_NO_WINDOW", 0)
@@ -579,4 +605,4 @@ def _stream_r(rscript: str, expr: str, log, cancel=None) -> None:
         log(line.rstrip())
     proc.wait()
     if proc.returncode != 0:
-        raise ToolchainError("R exited with an error; see the log above.")
+        raise ToolchainError(_("R exited with an error; see the log above."))

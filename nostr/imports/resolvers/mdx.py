@@ -23,6 +23,8 @@ import re
 from typing import Callable, List, Optional
 from urllib.parse import quote, urlparse
 
+from i18n import _
+
 from ...rss.parser import Feed, FeedItem
 from ..errors import ERROR_CODES, SourceError
 from ..registry import ResolveContext, ResolveInput, ResolveResult, SourceResolver
@@ -199,7 +201,8 @@ def _resolve_single(url: str, ctx: ResolveContext) -> None:
                 body, fallback_name=_basename(url), link=url, guid=url),
             lambda item: _deliver(item),
             lambda exc: ctx.on_failure(SourceError(
-                f"Could not read that document: {exc}", ERROR_CODES.UNKNOWN)),
+                _("Could not read that document: {error}").format(error=exc),
+                ERROR_CODES.UNKNOWN)),
         )
 
     def _deliver(item: FeedItem) -> None:
@@ -230,15 +233,15 @@ def _resolve_folder(url: str, tree, ctx: ResolveContext) -> None:
             entries = json.loads(body)
         except (ValueError, TypeError):
             ctx.on_failure(SourceError(
-                "GitHub returned an unexpected folder listing",
+                _("GitHub returned an unexpected folder listing"),
                 ERROR_CODES.SOURCE_ERROR,
             ))
             return
         if not isinstance(entries, list):
             message = (
-                f"GitHub: {entries.get('message')}"
+                _("GitHub: {message}").format(message=entries.get("message"))
                 if isinstance(entries, dict) and entries.get("message")
-                else "That GitHub path is not a folder"
+                else _("That GitHub path is not a folder")
             )
             ctx.on_failure(SourceError(message, ERROR_CODES.SOURCE_ERROR))
             return
@@ -251,7 +254,7 @@ def _resolve_folder(url: str, tree, ctx: ResolveContext) -> None:
         files.sort(key=lambda e: _numeric_sort_key(str(e.get("name") or "")))
         if not files:
             ctx.on_failure(SourceError(
-                "No .md or .mdx files in that folder",
+                _("No .md or .mdx files in that folder"),
                 ERROR_CODES.SOURCE_ERROR,
             ))
             return
@@ -293,7 +296,8 @@ def _resolve_folder(url: str, tree, ctx: ResolveContext) -> None:
             _build,
             lambda items: _deliver(items, total),
             lambda exc: ctx.on_failure(SourceError(
-                f"Could not convert that folder: {exc}", ERROR_CODES.UNKNOWN)),
+                _("Could not convert that folder: {error}").format(error=exc),
+                ERROR_CODES.UNKNOWN)),
         )
 
     def _deliver(items: List[FeedItem], total: int) -> None:
@@ -306,7 +310,8 @@ def _resolve_folder(url: str, tree, ctx: ResolveContext) -> None:
             link=url,
             # Surface the cap rather than silently importing a subset.
             description=(
-                f"Showing the first {MDX_FOLDER_MAX} of {total} files"
+                _("Showing the first {shown} of {total} files").format(
+                    shown=MDX_FOLDER_MAX, total=total)
                 if total > MDX_FOLDER_MAX else None
             ),
             items=tuple(items),

@@ -223,7 +223,7 @@ def test_bytes_that_do_not_match_the_hash_are_refused(tmp_path):
     loader.load("a" * 64, BLOB_URL)
     nam.issued[0].finish()
     assert ready == []
-    assert failed[0][1] == "downloaded bytes do not match sha256"
+    assert failed[0][1] == "a server returned the wrong file"
 
 
 def test_a_corrupt_cache_entry_is_replaced(tmp_path):
@@ -359,3 +359,131 @@ def test_the_fetch_reports_a_transport_failure_rather_than_empty_bytes(tmp_path)
     got, refused = _fetch(loader, _nam, BLOB_URL)
     assert got == []
     assert refused == ["host not found"]
+
+
+# --------------------------------------------------------------------------- #
+# An address that names its file
+# --------------------------------------------------------------------------- #
+
+def test_an_address_naming_another_file_is_refused(tmp_path):
+    """BUD-03: the last 64-hex run in a blob address is the file's hash.
+    Bytes that hash to something else are not that file, whoever served
+    them, and must not be shown or remembered as it."""
+    named = "e" * 64
+    url = f"https://blossom.example/{named}.png?size=small"
+    loader, nam = _loader(tmp_path, [FakeReply(status=200, body=_png()),
+                                     FakeReply(status=200, body=_png())])
+    ready, failed = [], []
+    loader.url_ready.connect(lambda *args: ready.append(args))
+    loader.url_failed.connect(lambda *args: failed.append(args))
+    loader.load_url(url)
+    nam.issued[0].finish()
+    assert ready == []
+    assert failed == [(url, "a server returned the wrong file")]
+    loader.load_url(url)               # not remembered as that file
+    assert len(nam.calls) == 2
+
+
+def test_an_address_naming_its_own_file_is_shown(tmp_path):
+    data = _png()
+    url = f"https://blossom.example/{_sha(data)}.png"
+    loader, nam = _loader(tmp_path, [FakeReply(status=200, body=data)])
+    ready = []
+    loader.url_ready.connect(lambda *args: ready.append(args))
+    loader.load_url(url)
+    nam.issued[0].finish()
+    assert [r[1] for r in ready] == [_sha(data)]
+
+
+# --------------------------------------------------------------------------- #
+# Save As: a download to a file the person chose
+# --------------------------------------------------------------------------- #
+
+def _download(tmp_path, reply, *, data_sha, size, transform=None):
+    loader, nam = _loader(tmp_path / "cache", [reply])
+    target = tmp_path / "out" / "Talk.mp4"
+    target.parent.mkdir()
+    done, progress = [], []
+    job = loader.download_to(f"https://blossom.example/{data_sha}.mp4", data_sha, target,
+                             size=size, transform=transform)
+    job.finished.connect(done.append)
+    job.progress.connect(lambda a, b: progress.append((a, b)))
+    job.loader = loader          # the download is the loader's child: keep it alive
+    return job, nam.issued[0], target, done, progress
+
+
+def test_save_as_takes_a_file_larger_than_any_thumbnail(tmp_path):
+    """Videos are commonly larger than the thumbnail cap (25 MiB): Save As
+    is bounded by the file's own size instead, and checked by its hash."""
+    body = b"v" * (26 * 1024 * 1024)
+    sha = _sha(body)
+    job, reply, target, done, progress = _download(
+        tmp_path, FakeReply(status=200, body=body), data_sha=sha, size=len(body))
+    reply.progress(len(body), len(body))
+    assert not reply.aborted
+    reply.finish()
+    assert done == [""]
+    assert target.read_bytes() == body
+    assert progress[-1] == (len(body), len(body))
+    assert sorted(p.name for p in target.parent.iterdir()) == ["Talk.mp4"]
+
+
+@pytest.mark.parametrize("status, error, reason", [
+    (200, "NoError", "wrong_file"),
+    (404, "ContentNotFoundError", "missing"),
+    (0, "HostNotFoundError", "network"),
+    (500, "InternalServerError", "server"),
+])
+def test_save_as_says_what_went_wrong_and_leaves_nothing(tmp_path, status, error, reason):
+    from PySide6.QtNetwork import QNetworkReply
+    reply = FakeReply(status=status, body=b"not the file",
+                      error=getattr(QNetworkReply.NetworkError, error))
+    sha = _sha(b"the real file")
+    _job, issued, target, done, _progress = _download(tmp_path, reply, data_sha=sha, size=13)
+    issued.finish()
+    assert done == [reason]
+    assert list(target.parent.iterdir()) == []
+
+
+def test_save_as_stops_a_server_that_sends_more_than_the_file(tmp_path):
+    sha = _sha(b"x" * 10)
+    _job, reply, target, done, _progress = _download(
+        tmp_path, FakeReply(status=200, body=b"x" * 50), data_sha=sha, size=10)
+    reply.progress(50, 50)
+    assert reply.aborted
+    reply.finish()
+    assert done == ["too_large"]
+    assert list(target.parent.iterdir()) == []
+
+
+def test_save_as_can_be_cancelled(tmp_path):
+    sha = _sha(b"y" * 10)
+    job, reply, target, done, _progress = _download(
+        tmp_path, FakeReply(status=200, body=b"y" * 10), data_sha=sha, size=10)
+    job.cancel()
+    assert reply.aborted
+    reply.finish()
+    assert done == ["cancelled"]
+    assert list(target.parent.iterdir()) == []
+
+
+def test_save_as_of_a_private_file_writes_what_the_transform_opens(tmp_path):
+    envelope = b"sealed bytes"
+    sha = _sha(envelope)
+    _job, reply, target, done, _progress = _download(
+        tmp_path, FakeReply(status=200, body=envelope), data_sha=sha, size=len(envelope),
+        transform=lambda data: b"opened " + data)
+    reply.finish()
+    assert done == [""]
+    assert target.read_bytes() == b"opened sealed bytes"
+
+
+def test_save_as_of_a_private_file_its_key_does_not_open_says_so(tmp_path):
+    envelope = b"sealed bytes"
+    sha = _sha(envelope)
+    _job, reply, target, done, _progress = _download(
+        tmp_path, FakeReply(status=200, body=envelope), data_sha=sha, size=len(envelope),
+        transform=lambda data: None)
+    reply.finish()
+    assert done == ["key"]
+    assert list(target.parent.iterdir()) == []

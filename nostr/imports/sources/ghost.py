@@ -25,6 +25,8 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import List, Optional, Tuple
 
+from i18n import _
+
 from ...rss.parser import FeedItem
 
 
@@ -105,4 +107,4 @@ def parse_ghost_export(text: str) -> GhostExport:
             image=str(post.get("feature_image") or "") or None,
             author=None,
         ))
-    return GhostExport(title="Ghost export", items=tuple(items))
+    return GhostExport(title=_("Ghost export"), items=tuple(items))

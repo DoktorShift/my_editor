@@ -2,30 +2,33 @@
 # SPDX-FileCopyrightText: 2026 rinbal
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
-import json
 import os
+
+from atomic_file import read_json, write_json
+from file_paths import normalize, same_file
 
 _RECENT_FILE = os.path.expanduser("~/.cache/my_editor/recent_files.json")
 _MAX_ENTRIES = 10
 
 
 def load_recent() -> list[str]:
-    """Return the stored list of recent file paths (all entries, including missing files)."""
-    try:
-        with open(_RECENT_FILE, "r", encoding="utf-8") as f:
-            data = json.load(f)
-        if isinstance(data, list):
-            return [p for p in data if isinstance(p, str)]
-    except (FileNotFoundError, json.JSONDecodeError):
-        pass
-    return []
+    """Return the stored recent file paths, newest first, missing files
+    included, each in the app's one spelling (an older version may have
+    written another) and each once."""
+    entries: list[str] = []
+    for path in read_json(_RECENT_FILE, list):
+        if isinstance(path, str) and path:
+            path = normalize(path)
+            if path not in entries:
+                entries.append(path)
+    return entries
 
 
 def add_recent(path: str) -> None:
-    """Add path to the top of the recent list, removing duplicates, capped at _MAX_ENTRIES."""
-    entries = load_recent()
-    if path in entries:
-        entries.remove(path)
+    """Put path at the top of the recent list, once, however it was spelled
+    before, capped at _MAX_ENTRIES."""
+    path = normalize(path)
+    entries = [p for p in load_recent() if not same_file(p, path)]
     entries.insert(0, path)
     _save(entries[:_MAX_ENTRIES])
 
@@ -35,6 +38,4 @@ def clear_recent() -> None:
 
 
 def _save(entries: list[str]) -> None:
-    os.makedirs(os.path.dirname(_RECENT_FILE), exist_ok=True)
-    with open(_RECENT_FILE, "w", encoding="utf-8") as f:
-        json.dump(entries, f, indent=2)
+    write_json(_RECENT_FILE, entries, indent=2)

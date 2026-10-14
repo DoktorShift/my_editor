@@ -12,10 +12,19 @@ from PySide6.QtCore import QEvent
 from PySide6.QtWidgets import QApplication
 from PySide6.QtGui import QIcon
 from PySide6.QtNetwork import QLocalSocket
-from main_window import MainWindow
 import constants
+import diagnostics
+import file_paths
+import i18n
+from main_thread_gc import GuiThreadCollector
+import theme
 
-_IPC_SERVER_NAME = "minimal-texteditor-ipc"
+# The language is chosen before any module that holds texts is imported:
+# many texts are constants, read once when their module loads. A change
+# of the setting applies on the next start.
+i18n.install(i18n.chosen_language())
+
+from main_window import MainWindow  # noqa: E402
 
 
 class EditorApplication(QApplication):
@@ -67,7 +76,7 @@ def _forward_to_running_instance(path: str) -> bool:
     """Send a file path to an already-running instance via a local socket.
     Returns True if a running instance was found and the path was forwarded."""
     socket = QLocalSocket()
-    socket.connectToServer(_IPC_SERVER_NAME)
+    socket.connectToServer(constants.IPC_SERVER_NAME)
     if not socket.waitForConnected(300):
         return False
     socket.write((path + "\n").encode("utf-8"))
@@ -77,7 +86,14 @@ def _forward_to_running_instance(path: str) -> bool:
 
 
 def main():
+    # First, so even a failure while starting up is in the log.
+    diagnostics.install(constants.APP_VERSION)
     app = EditorApplication(sys.argv)
+    # Garbage is collected on this thread only, never on a worker's: Qt
+    # objects must be destroyed on the thread they belong to.
+    GuiThreadCollector(app)
+    # Qt's own words (file dialogs, standard buttons) in the same language.
+    i18n.install_qt_translations(app)
     app.setApplicationName(constants.APP_DISPLAY_NAME)
     # Deliberately NOT setting applicationDisplayName: Qt's Linux platform
     # plugins (xcb, wayland) append it to every window title via
@@ -98,9 +114,20 @@ def main():
     # in-app light/dark theme instead of the native platform look. The
     # authoritative palette is set from MainWindow._apply_theme during
     # startup and on every toggle; see theme.apply_app_theme.
-    app.setStyle("Fusion")
+    app.setStyle(theme.AppStyle("Fusion"))
+    # Every widget given a style sheet is polished at once, so Qt forgets
+    # its style sheet with it (theme.install_style_sheet_guard).
+    theme.install_style_sheet_guard(app)
 
-    initial_path = sys.argv[1] if len(sys.argv) > 1 else None
+    # A build proving it is whole (the release workflow runs this on every
+    # bundle): no window, no other instance contacted, just the checks.
+    if "--self-test" in sys.argv[1:]:
+        import self_test
+        sys.exit(self_test.run())
+
+    # Absolute before it is handed on: the running window started in
+    # another folder, so a relative path would mean another file there.
+    initial_path = file_paths.normalize(sys.argv[1]) if len(sys.argv) > 1 else None
 
     if initial_path and _forward_to_running_instance(initial_path):
         sys.exit(0)

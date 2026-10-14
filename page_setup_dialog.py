@@ -21,6 +21,8 @@ from PySide6.QtWidgets import (
 )
 
 from export_pdf import PAGE_SIZES, load_page_setup, save_page_setup
+from alerts import answer_return_as_the_system_does
+from i18n import _
 
 _DARK_CSS = """
 QDialog { background: #1E1E1E; }
@@ -90,7 +92,7 @@ class PageSetupDialog(QDialog):
 
     def __init__(self, is_dark: bool = True, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("Page Setup")
+        self.setWindowTitle(_("Page Setup"))
         self.setModal(True)
         self.setStyleSheet(_DARK_CSS if is_dark else _LIGHT_CSS)
 
@@ -100,7 +102,7 @@ class PageSetupDialog(QDialog):
         root.setContentsMargins(20, 18, 20, 16)
         root.setSpacing(12)
 
-        title = QLabel("Page Setup")
+        title = QLabel(_("Page Setup"))
         title.setObjectName("page_setup_title")
         root.addWidget(title)
 
@@ -110,12 +112,15 @@ class PageSetupDialog(QDialog):
         self._size_combo = QComboBox()
         self._size_combo.addItems(list(PAGE_SIZES.keys()))
         self._size_combo.setCurrentText(setup["page_size"])
-        form.addRow("Paper size:", self._size_combo)
+        form.addRow(_("Paper size:"), self._size_combo)
 
+        # Each item carries the value page_setup.json stores; its text is
+        # only what the reader sees.
         self._orient_combo = QComboBox()
-        self._orient_combo.addItems(["Portrait", "Landscape"])
-        self._orient_combo.setCurrentText(setup["orientation"].capitalize())
-        form.addRow("Orientation:", self._orient_combo)
+        self._orient_combo.addItem(_("Portrait"), "portrait")
+        self._orient_combo.addItem(_("Landscape"), "landscape")
+        self._orient_combo.setCurrentIndex(self._orient_combo.findData(setup["orientation"]))
+        form.addRow(_("Orientation:"), self._orient_combo)
 
         self._margin_spin = QDoubleSpinBox()
         self._margin_spin.setRange(5.0, 50.0)
@@ -123,11 +128,12 @@ class PageSetupDialog(QDialog):
         self._margin_spin.setSingleStep(5.0)
         self._margin_spin.setSuffix(" mm")
         self._margin_spin.setValue(setup["margins_mm"])
-        form.addRow("Margins:", self._margin_spin)
+        form.addRow(_("Margins:"), self._margin_spin)
 
         root.addLayout(form)
 
         buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        answer_return_as_the_system_does(buttons.buttons())
         buttons.accepted.connect(self._save_and_accept)
         buttons.rejected.connect(self.reject)
         root.addWidget(buttons)
@@ -135,7 +141,7 @@ class PageSetupDialog(QDialog):
     def current_setup(self) -> dict:
         return {
             "page_size": self._size_combo.currentText(),
-            "orientation": self._orient_combo.currentText().lower(),
+            "orientation": self._orient_combo.currentData(),
             "margins_mm": float(self._margin_spin.value()),
         }
 

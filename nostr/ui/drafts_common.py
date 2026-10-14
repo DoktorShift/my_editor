@@ -18,12 +18,13 @@ of the app scaled around it.
 
 from __future__ import annotations
 
-import time
 from urllib.parse import urlparse
 
+from PySide6.QtCore import QDateTime, QLocale
 from PySide6.QtGui import QFont, QFontInfo
 from PySide6.QtWidgets import QApplication
 
+import i18n
 from constants import (
     DARK_BG,
     DARK_BORDER,
@@ -170,6 +171,16 @@ def secondary_font() -> QFont:
     return font
 
 
+# The rows of the panel's lists: two stacked lines from one gutter, with
+# a leading bar on the selected row as well as a fill (``accessibility.md``:
+# "Offer visual indicators, like distinct shapes or icons, in addition to
+# color"). The vertical values add up to the row height.
+LIST_GUTTER: int = 12
+ROW_PAD_V: int = 7
+ROW_LINE_GAP: int = 2
+SELECTION_BAR_W: int = 3
+
+
 def scaled(base: int) -> int:
     """``base`` px at the macOS default point size, scaled to this app's.
 
@@ -237,29 +248,49 @@ def source_host(record: DraftRecord) -> str:
     return f"{host[:head]}…{host[head - keep:]}"
 
 
-def format_absolute_time(ts: int) -> str:
-    """The exact save time, in words, for tooltips and screen readers.
+def display_locale() -> QLocale:
+    """The locale dates and numbers are written in: the language MyEditor
+    speaks (i18n.display_locale, the one place that decides it)."""
+    return i18n.display_locale()
 
-    It was previously unavailable to every user by any means.
-    """
+
+def format_count(n: int) -> str:
+    """A number with the language's thousands separator: 1,240 or 1.240."""
+    return display_locale().toString(int(n))
+
+
+def _moment(ts: int):
+    """``ts`` as a local QDateTime, or None when it is no time."""
     if ts <= 0:
-        return ""
+        return None
     try:
-        return time.strftime("%d %B %Y at %H:%M", time.localtime(int(ts)))
-    except (ValueError, OverflowError, OSError):
-        return ""
+        moment = QDateTime.fromSecsSinceEpoch(int(ts))
+    except (ValueError, OverflowError):
+        return None
+    return moment if moment.isValid() else None
+
+
+def format_absolute_time(ts: int) -> str:
+    """The exact save time, in words, for tooltips and screen readers:
+    the language's own way of writing a day and a time ("January 6, 2027
+    at 2:05 PM", "6. Januar 2027 um 14:05")."""
+    moment = _moment(ts)
+    return i18n.format_moment(moment) if moment is not None else ""
 
 
 def format_absolute_date(ts: int) -> str:
     """The day only, for a publication date that has no useful clock time.
 
-    Same ``strftime`` family as :func:`format_absolute_time` so the two
-    dates on the preview's origin line cannot be formatted differently
-    from one another.
+    Same day as :func:`format_absolute_time` writes, so the two dates on
+    the preview's origin line cannot be formatted differently from one
+    another.
     """
-    if ts <= 0:
-        return ""
-    try:
-        return time.strftime("%d %B %Y", time.localtime(int(ts)))
-    except (ValueError, OverflowError, OSError):
-        return ""
+    moment = _moment(ts)
+    return i18n.format_day(moment) if moment is not None else ""
+
+
+def format_short_date(ts: int) -> str:
+    """The day with a short month, for a list row with little room
+    ("Jan 6, 2027", "6. Jan. 2027")."""
+    moment = _moment(ts)
+    return i18n.format_day(moment, short_month=True) if moment is not None else ""

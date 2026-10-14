@@ -72,6 +72,7 @@ from typing import (
 from PySide6.QtCore import QObject, Signal
 
 import url_safety
+from i18n import _
 
 from ..blossom.hashes import blob_url, url_agrees_with_hash
 from .filecrypto import FileCryptoError, decrypt_file
@@ -355,7 +356,7 @@ class PublicCopyMaker(QObject):
             # Two copies at once would race for the ledger and the
             # signer. Refusing is honest; queueing behind an operation
             # the caller cannot see is not.
-            self._refuse(blob, on_done, "Another copy is already being made.")
+            self._refuse(blob, on_done, _("Another image is being shared right now. Try again in a moment."))
             return
 
         existing = self.existing_copy(blob)
@@ -375,8 +376,8 @@ class PublicCopyMaker(QObject):
             self._refuse(
                 blob,
                 on_done,
-                "This file does not say where it is stored, so no public "
-                "copy could be made.",
+                _("MyEditor can’t tell where this image is stored, so it "
+                  "can’t be shared."),
             )
             return
 
@@ -417,7 +418,7 @@ class PublicCopyMaker(QObject):
             self._settle(active, CopyResult(
                 source_hash=active.blob.sha256,
                 cancelled=True,
-                reason="This copy was cancelled before anything was uploaded.",
+                reason=_("Sharing was cancelled before anything was uploaded."),
             ))
             return
         if run is not None:
@@ -455,7 +456,7 @@ class PublicCopyMaker(QObject):
                 blobs=None,
                 failures=[CopyResult(
                     source_hash="",
-                    reason="Public copies are already being made.",
+                    reason=_("Another image is being shared right now. Try again in a moment."),
                 )],
             ))
             return
@@ -593,8 +594,8 @@ class PublicCopyMaker(QObject):
                     minted=list(minted),
                     failures=[CopyResult(
                         source_hash=blob.sha256,
-                        reason="This file's public copy is not listed, so it "
-                               "was not published.",
+                        reason=_("This image’s shared copy couldn’t be found, so it "
+                                 "wasn’t used."),
                     )],
                 )
             rewritten.append(copy)
@@ -612,12 +613,9 @@ class PublicCopyMaker(QObject):
         if self._active is not copy:
             return
         if not copy.urls:
-            detail = _short(earlier)
-            self._fail(
-                copy,
-                "This file could not be downloaded from any of your servers"
-                + (f" ({detail})." if detail else "."),
-            )
+            # Why the last server failed is a diagnostic, not news for
+            # the person: what they can act on is that none had it.
+            self._fail(copy, _("This image couldn’t be downloaded from your media servers."))
             return
         url = copy.urls.pop(0)
         self.copy_progress.emit(copy.blob.sha256, CopyStage.FETCHING)
@@ -634,7 +632,7 @@ class PublicCopyMaker(QObject):
             # Content addressing is the only reason it is safe to ask a
             # server the user did not choose. Bytes that are not the
             # ones asked for are that server failing, not this file.
-            self._fetch_next(copy, "a server returned the wrong file")
+            self._fetch_next(copy, _("a server returned the wrong file"))
             return
 
         self.copy_progress.emit(copy.blob.sha256, CopyStage.DECRYPTING)
@@ -646,18 +644,19 @@ class PublicCopyMaker(QObject):
             # that would be silent and unrecoverable.
             self._fail(
                 copy,
-                "This file could not be opened with the key in your library, "
-                "so no public copy was made.",
+                _("This image couldn’t be opened, so it wasn’t shared."),
             )
             return
 
         self.copy_progress.emit(copy.blob.sha256, CopyStage.PREPARING)
         try:
             scrubbed = scrub_for_publication(plaintext, copy.blob.mime)
-        except ScrubError as exc:
+        except ScrubError:
             # Step 4 refusing is the feature. There is no branch from
-            # here that uploads the bytes anyway.
-            self._fail(copy, f"This file was not published: {exc}.")
+            # here that uploads the bytes anyway. The scrub's own reason
+            # is a diagnostic, not news for the person.
+            self._fail(copy, _("This image couldn’t be prepared for sharing, so it "
+                               "wasn’t shared."))
             return
         finally:
             # The plaintext of a private file has no business outliving
@@ -689,8 +688,8 @@ class PublicCopyMaker(QObject):
             # that a revoke cannot reach, which is worse than saying so.
             self._fail(
                 copy,
-                "The server did not give this copy an address this app can "
-                "record, so it was not published.",
+                _("Your media server didn’t answer as expected, so the image "
+                  "wasn’t shared."),
             )
             return
 
@@ -703,8 +702,8 @@ class PublicCopyMaker(QObject):
             # rather than adding a second one.
             self._fail(
                 copy,
-                "Your record of what is public could not be saved, so this "
-                "copy was not published. It may already be on your server.",
+                _("MyEditor couldn’t save its list of shared images, so the image "
+                  "wasn’t shared. It may be on your media server already."),
             )
             return
 
@@ -714,12 +713,10 @@ class PublicCopyMaker(QObject):
         copy = self._active
         if copy is None or name != copy.job:
             return
+        # ``reason`` is already a plain sentence (the store's).
         detail = _short(reason)
-        self._fail(
-            copy,
-            "This file's public copy could not be uploaded"
-            + (f": {detail}" if detail else "."),
-        )
+        self._fail(copy, _("This image couldn’t be shared. {reason}").format(reason=detail)
+                   if detail else _("This image couldn’t be shared."))
 
     # -- step 7: the pointer, which is only ever a hint ---------------------
 

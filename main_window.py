@@ -3,20 +3,25 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
 
+import bisect
 import hashlib
 import itertools
-import json
+import logging
 import os
 import platform
 import re
 import sys
+import threading
 import time
 from dataclasses import dataclass
+from types import SimpleNamespace
 from typing import List, Optional, Tuple
 
 from send2trash import send2trash
+import shiboken6
 from PySide6.QtCore import (
-    QBuffer, QByteArray, QIODevice, Qt, QMarginsF, QTimer, QUrl, QFileSystemWatcher,
+    QBuffer, QByteArray, QDateTime, QEvent, QIODevice, QObject, Qt, QLocale, QMarginsF, QTimer,
+    QUrl, QFileSystemWatcher,
 )
 from PySide6.QtNetwork import QLocalServer
 from PySide6.QtGui import (
@@ -26,40 +31,86 @@ from PySide6.QtGui import (
 )
 from PySide6.QtPrintSupport import QPrintDialog, QPrintPreviewDialog
 from PySide6.QtWidgets import (
-    QMainWindow, QFileDialog, QInputDialog, QMenu, QWidget,
-    QVBoxLayout, QTextEdit, QTabWidget, QToolButton, QHBoxLayout, QStatusBar,
-    QPushButton, QTabBar, QWidgetAction, QLabel, QDialog, QSplitter,
-    QProgressDialog
+    QAbstractItemView, QApplication, QMainWindow, QFileDialog, QInputDialog, QLineEdit, QMenu,
+    QWidget, QVBoxLayout, QPlainTextEdit, QTextEdit, QTabWidget, QToolButton, QHBoxLayout, QStatusBar,
+    QPushButton, QTabBar, QLabel, QDialog, QSplitter,
+    QProgressDialog, QToolTip
 )
 
 from constants import (
     DARK_BG, DARK_FG, LIGHT_BG, LIGHT_FG, DARK_SELECTION, LIGHT_SELECTION,
     DARK_MENU_BG, DARK_MENU_FG, LIGHT_MENU_BG, LIGHT_MENU_FG,
-    DARK_BORDER, LIGHT_BORDER, MONO_FONT, APP_DISPLAY_NAME, APP_VERSION, APP_URL
+    DARK_BORDER, LIGHT_BORDER, APP_DISPLAY_NAME, APP_VERSION, APP_URL, TEXT_COLORS,
+    DARK_MUTED_FG, LIGHT_MUTED_FG, IPC_SERVER_NAME,
 )
-from widgets import FindBar, HeaderWidget, LineNumberGutter, FileChangedBar, UpdateBar
+from widgets import ElidedLabel, FindBar, LineNumberGutter, FileChangedBar, UpdateBar
+from format_toolbar import FormatToolbar
+from selection_bar import SelectionBar
+from atomic_file import (
+    newline_of, read_json, read_text_as_written, save_document, save_text_document,
+    with_newlines, write_json,
+)
+import diagnostics
+import file_paths
+import i18n
+from i18n import N_, _, ngettext, pgettext
+from commands import (
+    EDIT, FILE, FORMAT, HELP, INSERT, NAVIGATION, NOSTR, SEARCH, VIEW, WINDOW, Command,
+    CommandRegistry,
+    all_key_texts, platform_keys, redo_words, standard_and, undo_words,
+)
+import front_matter
+import tab_details
+import media_files
+import slash_menu
+from slash_menu import SlashItem
+from table_picker import TablePicker
+import spelling
+import preview_pane
+from preview_pane import (
+    ARTICLE, DOCUMENT, NOTE, PREVIEW, SPLIT, SPLIT_MIN_WIDTH, WRITE, PreviewContent, PreviewPane,
+    ViewSwitch,
+)
+from nostr.preview import Article as PreviewArticle
 from doc_walk import iter_blocks, iter_image_names, serialize_plain_with_images
-from editor import HtmlEditor
+from markdown_writer import (
+    document_to, document_to_markdown, has_local_only_formatting, holds_faithfully,
+    image_markdown, read_markdown,
+)
+from editor import CARET_STYLES, DEFAULT_CARET_STYLE, HtmlEditor
+import link_url
+import paste
+import rich_text
 import image_safety
 import url_safety
-from highlighter import SyntaxHighlighter, detect_language, detect_language_from_content, LANGUAGE_DISPLAY_NAMES
-from settings import load_settings, save_setting
-from welcome import welcome_html
+from highlighter import (
+    LANGUAGE_DISPLAY_NAMES, RichTextLook, SyntaxHighlighter, canonical_language, detect_language,
+    detect_language_from_content,
+)
+from settings import load_settings, save_setting, save_settings
+from welcome import DEFAULT_KEYS as WELCOME_KEYS, is_pristine_welcome, welcome_html
 from update_check import UpdateChecker
-from updater import detect_install_kind, supports_in_app_update, select_asset, UpdateInstaller
+from updater import (
+    UpdateInstaller, detect_install_kind, select_asset, supports_in_app_update,
+    sweep_stale_downloads,
+)
 from alerts import (
     CANCEL, DEFAULT, DESTRUCTIVE, NORMAL, Button, ask, ask_with_checkbox,
     confirm_destructive, inform,
 )
-from update_dialog import UpdateDialog
+from update_dialog import UpdateDialog, WhatsNewDialog
+from settings_window import SettingsWindow
 from update_flow import AUTOMATIC, guide_url, plan_for
 import theme
-from export_html import document_to_html, normalize_lists_after_set_html, sniff_image_ext
+from export_html import (
+    document_to_html, image_data_uri, normalize_after_set_html, sniff_image_ext)
+from find_replace import find_all, replace_all, replace_match, visible_matches
+from word_count import count_words, reading_minutes
 from export_pdf import export_pdf, load_page_setup
 from page_setup_dialog import PageSetupDialog
 import printing
-from pdf_viewer import PdfViewerTab
-from rmarkdown import KnitRunner, derive_title, document_to_rmd, media_dir_for
+from pdf_viewer import PdfViewerTab, reader_keys as pdf_reader_keys
+from rmarkdown import KnitRunner, MediaLink, derive_title, document_to_rmd, media_dir_for
 from rmd_setup_dialog import RmdSetupDialog
 import rmd_toolchain
 
@@ -75,7 +126,8 @@ _SUPPORTED_EXTS = {'.md', '.html', '.htm', '.txt', '.rmd', '.pdf'}
 # _SUPPORTED_EXTS so the dispatcher stays simple. SVG is absent: it is
 # not decoded anywhere in this process, so a dropped .svg gets the
 # ordinary "unsupported" bar message instead of a silent nothing.
-_IMAGE_EXTS = {'.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp'}
+_IMAGE_EXTS = image_safety.IMAGE_FILE_SUFFIXES
+
 
 # Persisted answer to the paste-upload prompt: "ask" | "always" | "never".
 _PASTE_UPLOAD_SETTING = "upload_pasted_images"
@@ -94,18 +146,57 @@ def _extension_from_filter(selected_filter: str) -> Optional[str]:
     """
     m = re.search(r'\(\*(\.[0-9A-Za-z]+)', selected_filter)
     return m.group(1) if m else None
-from recovery import BACKUP_VERSION, EditorBackup, classify_backup, find_all_backups
+from recovery import (
+    KEPT, TOO_LARGE, EditorBackup, classify_backup, find_all_backups, is_restorable,
+    load_backup_content,
+)
+import workspace
+import workspace_restore
+from workspace import Workspace
 from recent_files import load_recent, add_recent, clear_recent
 
 from nostr.avatar_store import AvatarBatchLoader, AvatarStore
-from nostr.bech32 import encode_note
+from nostr.bech32 import encode_nprofile, encode_npub
+from nostr.nip05_check import Nip05Check
+from nostr.ui.mention_picker import MentionPicker
+from nostr.ui import media_card
+from nostr.ui.reference_popover import ReferencePopover
+from nostr.ui.article_details_panel import ArticleDetailsPanel, DEFAULT_WIDTH as ARTICLE_DETAILS_WIDTH
+from nostr import refs
 from nostr.blossom.errors import friendly_message
-from nostr.blossom.settings import BlossomSettings
+from nostr.blossom.names import MediaNames
+from nostr.blossom.hashes import hash_from_url
+from nostr.imports.workers import run_for_size
+from nostr.media_server_list import publish_server_list, server_list_tags
+from nostr.outbox import writer as outbox_writer
+from nostr.profile_editing import ProfileEditing
+from nostr.relay import NOT_CHOSEN
+from nostr.relay_auth import DECLINED, AccountSignIn
+from nostr.state import NostrState
+from nostr.ui.cover_field import MediaServices
+from nostr.ui.profile_window import ProfileWindow
+from nostr.blossom import BLOSSOM_MAX_FILE_SIZE
+from nostr.blossom.plan import get_effective_max_file
+from nostr.blossom.server_list import UserServerList
 from nostr.blossom.store import MediaFile, MediaStore
 from nostr.bunker import BunkerSessionPool
 from nostr.contacts import ContactListFetcher
 from nostr.draft_store import DraftState, DraftStore
+from nostr.draft_deletions import DraftDeletions
 from nostr.draft_sync import DraftSync
+from nostr.imports.favicons import FaviconCache
+from nostr.ui.imports_badge import COMMAND_TITLE as IMPORTS_BADGE_TITLE
+from nostr.ui.imports_badge import SETTINGS_KEY as IMPORTS_BADGE_KEY
+from nostr.ui.imports_badge import AppIconBadge
+from nostr.imports_controller import ImportsController
+from nostr.ui.imports_activity import activity_line
+from nostr.ui.imports_window import SETTINGS_KEY as IMPORTS_SETTINGS_KEY
+from nostr.ui.imports_window import ImportsWindow
+from nostr.imports.constants import IDENTIFIER_PREFIX as IMPORT_IDENTIFIER_PREFIX
+from nostr.imports.constants import SOURCE_TAG as IMPORT_SOURCE_TAG
+from nostr.article_details import (
+    ArticleDetails, default_title, front_matter_with)
+from nostr.first_publications import FirstPublications
 from nostr.drafts import (
     INNER_KIND_LONG_FORM,
     INNER_KIND_SHORT_NOTE,
@@ -115,28 +206,41 @@ from nostr.drafts import (
     serialize_inner_event,
 )
 from nostr.known_people import KnownPeople, Person
-from nostr.media.assets import ASSET_SCHEME, asset_key, parse_asset_key
+from nostr.media.assets import ASSET_SCHEME, AssetState, asset_key, parse_asset_key
 from nostr.imports.sources.nostr import RelayQueryAdapter
 from nostr.media.manager import AssetManager
 from nostr.media.media_visibility import MediaVisibility
 from nostr.media.private_library import PrivateLibrary
 from nostr.media.publish_copy import PublicCopyMaker
 from nostr.media.visibility import PublicLedger
-from nostr.metadata import AvatarLoader, ProfileMetadataFetcher
-from nostr.outbox import RelayListCache
-from nostr.profiles import Profile, ProfileStore
+from nostr.metadata import AvatarLoader, ProfileMetadataFetcher, can_receive_zaps
+from nostr.outbox.directory import RelayDirectory
+from nostr.profiles import Profile, ProfileStore, short_npub
 from nostr.publisher import (
     DraftBulkDeleteJob,
     DraftPublishJob,
     PublishedMedia,
+    file_link_names,
+    library_audio_video_in,
+    slugify,
 )
 from nostr.relay import RelayPool
 from nostr.search import Nip50SearchClient
 from nostr.ui.connect_dialog import ConnectDialog
+from nostr.ui.profile_chip import ProfileChip
 from nostr.ui.draft_conflict_banner import DraftConflictBanner
 from nostr.ui.drafts_panel import DEFAULT_PANEL_WIDTH, DraftsPanel
-from nostr.einundzwanzig import NO_BENEFITS, Benefits, MembershipDirectory
-from nostr.ui.media_library_dialog import MediaLibraryDialog
+from nostr.draft_relays import PrivateDraftRelays
+from nostr.published import PublishedList
+from nostr.ui.draft_relays_sheet import DraftRelaysSheet
+from nostr.ui.published_view import PANEL_VIEW as PUBLISHED_VIEW
+from nostr.ui.published_view import PublishedView, add_to_panel as add_published_view
+from nostr.membership_controller import MembershipController
+from nostr.key_vault import KeyVault
+from nostr.account_controller import AccountController
+from nostr.ui.media_library_dialog import MediaLibraryDialog, format_size
+from nostr.ui.media_saver import MediaSaver, save_failure, saves_failure
+from nostr.ui.media_servers_dialog import MediaServersDialog
 from nostr.ui.publish_article_dialog import PublishArticleDialog
 from nostr.ui.publish_copy_dialog import resolve_pick
 from nostr.ui.publish_note_dialog import PublishNoteDialog
@@ -144,15 +248,19 @@ from nostr.ui.save_destination_dialog import SaveDestination, SaveDestinationDia
 from nostr.ui.stash_kind_dialog import StashChoice, StashKind, StashKindDialog
 from nostr.ui.thumbnail_loader import ThumbnailLoader
 
-_IPC_SERVER_NAME = "minimal-texteditor-ipc"
-
 # Monotonic counter for clipboard / drop upload job names. Pairs with
 # the dialog-side helper but lives here too because main_window also
 # originates paste-to-upload jobs (editor Ctrl+V).
 _paste_job_counter = itertools.count(1)
 
 # Second line of every "Couldn't save" alert: what to do next.
-_SAVE_FAILED_HINT = "Your document is still open. Use Save As to choose another place."
+_SAVE_FAILED_HINT = _("Your document is still open. Use Save As to choose another place.")
+
+
+def _number(n: int) -> str:
+    """``n`` with the digit grouping of the reader's language (70,000 in
+    English, 70.000 in German)."""
+    return i18n.display_locale().toString(n)
 
 
 # --------------------------------------------------------------------------- #
@@ -181,19 +289,112 @@ class DraftBinding:
     profile_pubkey: str = ""
 
 
-def _ask_save_changes(parent, title: str, *, save_label: str = "Save",
-                      message: str = "Your changes will be lost if you don't save them.") -> str:
+def _ask_save_changes(parent, title: str, *, save_label: str = "",
+                      message: str = "") -> str:
     """Save, Don't Save or Cancel, in Apple's standard wording.
 
     Returns "save", "discard" or "cancel". Don't Save is destructive (red,
     and placed apart from the other two on macOS); Save is the default.
     """
+    message = message or _("Your changes will be lost if you don’t save them.")
     return ask(parent, title=title, message=message, buttons=(
-        Button("Don't Save", "discard", DESTRUCTIVE),
-        Button("Cancel", "cancel", CANCEL),
-        Button(save_label, "save", DEFAULT),
+        Button(_("Don’t Save"), "discard", DESTRUCTIVE),
+        Button(_("Cancel"), "cancel", CANCEL),
+        Button(save_label or _("Save"), "save", DEFAULT),
     ))
 
+
+# How long quitting waits for unsent changes to the list of sources.
+QUIT_SYNC_WAIT_MS = 5_000
+
+
+def _text_field(widget):
+    """``widget`` when it is a text field other than a document (a find
+    field, a sheet's or a dialog's field, the Imports window's article):
+    while it has the focus, the Edit menu acts on it. Else None."""
+    if isinstance(widget, (QLineEdit, QTextEdit, QPlainTextEdit)) and not isinstance(
+            widget, HtmlEditor):
+        return widget
+    return None
+
+
+def _field_history(field) -> tuple:
+    """Whether ``field`` has something to undo, and to redo."""
+    if isinstance(field, QLineEdit):
+        return field.isUndoAvailable(), field.isRedoAvailable()
+    if field.isReadOnly():
+        return False, False
+    return field.document().isUndoAvailable(), field.document().isRedoAvailable()
+
+
+def _field_signals(field) -> list:
+    """What changes in a text field that the Edit menu shows: its text
+    (what Undo undoes), its selection (what Cut and Copy act on)."""
+    signals = [field.textChanged, field.selectionChanged]
+    if not isinstance(field, QLineEdit):
+        signals += [field.undoAvailable, field.redoAvailable]
+    return signals
+
+class _MessageTip(QObject):
+    """A tooltip for one status bar message: shown over the message alone
+    (not the word count or a button beside it), and gone with it."""
+
+    def __init__(self, bar) -> None:
+        super().__init__(bar)
+        self._bar = bar
+        self._message = self._tip = ""
+        bar.installEventFilter(self)
+        bar.messageChanged.connect(self._changed)
+
+    def set(self, message: str, tip: str) -> None:
+        """``tip`` for ``message``, which the bar shows now."""
+        self._message, self._tip = message, tip
+
+    def _changed(self, message: str) -> None:
+        if message != self._message:
+            self._message = self._tip = ""
+
+    def eventFilter(self, obj, event) -> bool:
+        if event.type() != QEvent.Type.ToolTip or not self._tip:
+            return False
+        beside = [child.geometry().left() for child in self._bar.findChildren(
+                      QWidget, options=Qt.FindChildOption.FindDirectChildrenOnly)
+                  if child.isVisible() and child.width() > 0]
+        if event.pos().x() < min(beside, default=self._bar.width()):
+            QToolTip.showText(event.globalPos(), self._tip, self._bar)
+            return True
+        return False
+
+
+class _WidthWatcher(QObject):
+    """Calls ``changed()`` when a widget's width changes (a tab's Split
+    needs room for two readable columns)."""
+
+    def __init__(self, widget, changed) -> None:
+        super().__init__(widget)
+        self._changed = changed
+        widget.installEventFilter(self)
+
+    def eventFilter(self, obj, event) -> bool:
+        if event.type() == QEvent.Type.Resize and event.size().width() != event.oldSize().width():
+            self._changed()
+        return False
+
+
+
+def spelling_language_names(tags) -> list:
+    """(tag, name) of the languages a spell checker offers, by name: the
+    language as its speakers write it, with its country where several
+    are offered ("Deutsch (Deutschland)", "English (United States)")."""
+    named = []
+    for tag in tags:
+        locale = QLocale(tag.replace("-", "_"))
+        name = locale.nativeLanguageName() or tag
+        name = name[:1].upper() + name[1:]
+        if "-" in tag and locale.nativeTerritoryName():
+            name = f"{name} ({locale.nativeTerritoryName()})"
+        named.append((tag, name))
+    return sorted(named, key=lambda pair: pair[1].casefold())
 
 class MainWindow(QMainWindow):
     def __init__(self, initial_path: str | None = None):
@@ -208,9 +409,8 @@ class MainWindow(QMainWindow):
             self.is_dark_theme = False
         else:
             self.is_dark_theme = self._detect_os_dark_theme()
-        # While True, the app follows OS color scheme changes live. Set to
-        # False the moment the user picks a theme explicitly (checkbox or
-        # Ctrl+Shift+T) so their choice sticks.
+        # While True (View > Appearance > Automatic), the app follows the
+        # system's light or dark appearance live; Light or Dark sticks.
         self._follow_os_theme = theme_pref is None
         QGuiApplication.styleHints().colorSchemeChanged.connect(self._on_os_color_scheme_changed)
 
@@ -241,36 +441,130 @@ class MainWindow(QMainWindow):
         self.plus_btn = QToolButton()
         self.plus_btn.setText("+")
         self.plus_btn.setAutoRaise(True)
+        self.plus_btn.setToolTip(_("New Tab"))
+        self.plus_btn.setAccessibleName(_("New Tab"))
         self.plus_btn.clicked.connect(self.new_tab)
-        self.tabs.setCornerWidget(self.plus_btn, Qt.TopRightCorner)
+        # The account in use, at the end of the tab row (where browsers
+        # show theirs); there only while Nostr is in use.
+        self.profile_chip = ProfileChip()
+        corner = QWidget()
+        corner_row = QHBoxLayout(corner)
+        corner_row.setContentsMargins(0, 0, 4, 0)
+        corner_row.setSpacing(6)
+        corner_row.addWidget(self.plus_btn)
+        corner_row.addWidget(self.profile_chip)
+        self.tabs.setCornerWidget(corner, Qt.TopRightCorner)
 
         self.status = QStatusBar()
         self.setStatusBar(self.status)
+        # Silent while backups succeed; when the document's backup cannot be
+        # kept, it says so here until it is kept again (decision Q-J).
+        self._backup_problem = ElidedLabel()
+        self._backup_problem.setObjectName("BackupProblem")
+        self._backup_retry = QToolButton()
+        self._backup_retry.setObjectName("BackupRetry")
+        self._backup_retry.setText(_("Try Again"))
+        self._backup_retry.setAccessibleName(_("Try Backing Up Again"))
+        self._backup_retry.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._backup_retry.clicked.connect(self._retry_backup)
+        for widget in (self._backup_problem, self._backup_retry):
+            widget.setVisible(False)
+            self.status.addPermanentWidget(widget)
+        # Files added in the Media Library that didn't upload once its
+        # window was closed (name -> reason): counted here, as a backup
+        # problem is, until the library, which shows each with Retry, is
+        # opened.
+        self._library_failures: dict = {}
+        self._library_problem = ElidedLabel()
+        self._library_problem.setObjectName("LibraryProblem")
+        self._library_open = QToolButton()
+        self._library_open.setObjectName("LibraryOpen")
+        self._library_open.setText(_("Open Media Library"))
+        self._library_open.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._library_open.clicked.connect(lambda: self._on_nostr_media_library())
+        for widget in (self._library_problem, self._library_open):
+            widget.setVisible(False)
+            self.status.addPermanentWidget(widget)
+        # How long the document is, quietly: words and reading time, or
+        # the words of the selection while there is one.
+        self._words_label = QLabel()
+        self._words_label.setObjectName("WordCount")
+        self._words_label.setContentsMargins(0, 0, 12, 0)
+        self.status.addPermanentWidget(self._words_label)
+        # A message keeps its room in a narrow window: the word count gives
+        # way first, then the library failure line shortens, and steps
+        # aside while not even a few letters of it fit.
+        self.status.messageChanged.connect(lambda _message: self._fit_status_bar())
+        _WidthWatcher(self.status, self._fit_status_bar)
+        _WidthWatcher(self._words_label, self._fit_status_bar)
+        self._word_count_timer = QTimer(self)
+        self._word_count_timer.setSingleShot(True)
+        self._word_count_timer.setInterval(300)
+        self._word_count_timer.timeout.connect(self._update_word_count)
+        self._selection_words_timer = QTimer(self)
+        self._selection_words_timer.setSingleShot(True)
+        self._selection_words_timer.setInterval(150)
+        self._selection_words_timer.timeout.connect(
+            lambda: self._show_word_count(self.current_editor()))
+        self._document_words = 0
         self._line_label = QLabel()
         self._line_label.setContentsMargins(0, 0, 8, 0)
         self.status.addPermanentWidget(self._line_label)
+        # The mention picker at the caret, made on its first use.
+        self._mention_picker = None
+        # Article Details' co-author picker, and who it answers.
+        self._coauthor_picker = None
+        self._coauthor_chosen = None
 
         self._apply_theme()
-
-        self.header_widget = HeaderWidget()
-        self.header_widget.theme_checkbox.toggled.connect(self._toggle_theme)
-        self.header_widget.line_numbers_checkbox.toggled.connect(self._toggle_line_numbers)
-        self.header_widget.syntax_highlight_checkbox.toggled.connect(self._toggle_syntax_highlighting)
-        self.header_widget.undo_btn.clicked.connect(self._undo)
-        self.header_widget.redo_btn.clicked.connect(self._redo)
-        self.header_widget.bold_btn.clicked.connect(lambda: self._toggle_format('bold'))
-        self.header_widget.italic_btn.clicked.connect(lambda: self._toggle_format('italic'))
-        self.header_widget.underline_btn.clicked.connect(lambda: self._toggle_format('underline'))
 
         # Nostr publishing infrastructure. All pieces are process-wide
         # singletons living on the window; they are cheap to create and stay
         # alive for the lifetime of the editor.
         self._relay_pool = RelayPool(parent=self)
         self._profile_store = ProfileStore()
-        self._relay_list_cache = RelayListCache(self._relay_pool, parent=self)
-        self._session_pool = BunkerSessionPool(self._relay_pool, parent=self)
+        # Whether Nostr is in use (an account is active): the one signal the
+        # editor's Nostr features follow (nostr/state.py).
+        self.nostr_state = NostrState(lambda: self._profile_store.default(), parent=self)
+        self.profile_chip.setVisible(self.nostr_state.active)
+        self.nostr_state.changed.connect(self.profile_chip.setVisible)
+        # The preview shows what will be published only while Nostr is in use.
+        self.nostr_state.changed.connect(lambda _active: self._redraw_preview())
+        # Where everyone reads and writes (NIP-65): verified, cached, and the
+        # user's own lists remembered across launches. Every job and panel
+        # that touches relays asks it where to go.
+        self._relay_directory = RelayDirectory(
+            self._relay_pool,
+            own_pubkeys=lambda: [p.user_pubkey for p in self._profile_store.list()],
+            parent=self)
+        # Keys kept on this computer, for accounts that chose that over a
+        # signer app (Create Account, Restore Account).
+        self._key_vault = KeyVault()
+        self._session_pool = BunkerSessionPool(self._relay_pool, parent=self,
+                                               vault=self._key_vault)
+        # A relay of the account's own that asks for a sign-in (NIP-42)
+        # gets one, signed by the account's signer; no other relay does.
+        self._relay_pool.sign_in = AccountSignIn(
+            profile=lambda: self._profile_store.default(),
+            session_pool=self._session_pool, directory=self._relay_directory,
+            entitled=self._entitled_relays)
+        self._relay_pool.signing_in.connect(self._on_relay_signing_in)
+        self._relay_pool.sign_in_failed.connect(self._on_relay_sign_in_failed)
+        # Creating, restoring, backing up and signing out of accounts, and
+        # telling the network about a new one (nostr/account_controller.py).
+        self._accounts = AccountController(
+            relay_pool=self._relay_pool, directory=self._relay_directory,
+            vault=self._key_vault, session_pool=self._session_pool,
+            store=self._profile_store, window=self,
+            is_dark=lambda: self.is_dark_theme, parent=self)
+        self._accounts.activate.connect(self._on_nostr_profile_connected)
+        self._accounts.profile_changed.connect(self._on_metadata_updated)
+        self._accounts.status.connect(
+            lambda text, ms: self.status.showMessage(text, ms))
+        self._accounts.link_activated.connect(self._open_external)
         self._metadata_fetcher = ProfileMetadataFetcher(
-            self._relay_pool, self._profile_store, parent=self
+            self._relay_pool, self._profile_store, parent=self,
+            relay_directory=self._relay_directory,
         )
         self._metadata_fetcher.updated.connect(self._on_metadata_updated)
         self._avatar_loader = AvatarLoader(parent=self)
@@ -286,12 +580,15 @@ class MainWindow(QMainWindow):
         # Mentions infrastructure: cached known people, NIP-50 search,
         # background contact-list fetcher. All process-wide singletons.
         self._known_people = KnownPeople()
+        # A person's Nostr address shows only once their domain confirmed it.
+        self._address_check = Nip05Check(parent=self)
         self._search_client = Nip50SearchClient(
             self._relay_pool, self._known_people, parent=self
         )
         self._search_client.results.connect(self._on_search_results)
         self._contact_fetcher = ContactListFetcher(
-            self._relay_pool, self._known_people, parent=self
+            self._relay_pool, self._known_people, parent=self,
+            relay_directory=self._relay_directory,
         )
         self._contact_fetcher.person_updated.connect(self._on_person_updated)
 
@@ -301,11 +598,15 @@ class MainWindow(QMainWindow):
         # user-facing surface. All three stay alive for the session.
         self._draft_store = DraftStore(parent=self)
         self._draft_store.record_changed.connect(self._on_draft_record_changed)
+        # When the articles published from here first went out, for when
+        # the relays cannot tell (an edit keeps that date).
+        self._first_publications = FirstPublications()
         self._draft_sync = DraftSync(
             relay_pool=self._relay_pool,
-            relay_list_cache=self._relay_list_cache,
+            relay_directory=self._relay_directory,
             session_pool=self._session_pool,
             store=self._draft_store,
+            entitled_relays=self._entitled_relays,
             parent=self,
         )
         self._draft_sync.status_changed.connect(self._on_draft_sync_status)
@@ -313,6 +614,35 @@ class MainWindow(QMainWindow):
         self._draft_sync.signer_unreachable.connect(
             self._on_draft_sync_signer_unreachable
         )
+        # Deletions other apps announce as NIP-09 requests (STANDUP does),
+        # which the wraps alone would not show (nostr/draft_deletions.py).
+        self._draft_deletions = DraftDeletions(
+            relay_pool=self._relay_pool,
+            relay_directory=self._relay_directory,
+            store=self._draft_store,
+            entitled_relays=self._entitled_relays,
+            parent=self,
+        )
+        # Imports: the sources shared with STANDUP, the inbox, the checks
+        # while the app runs, the import jobs and the Imports window, for
+        # the account in use (nostr/imports_controller.py). It binds only
+        # while Nostr is in use (see _update_account_actions).
+        self._imports = ImportsController(
+            relay_pool=self._relay_pool,
+            relay_directory=self._relay_directory,
+            session_pool=self._session_pool,
+            draft_store=self._draft_store,
+            entitled_relays=self._entitled_relays,
+            blossom_primary=lambda: self._media_store.settings.primary,
+            window_factory=self._make_imports_window,
+            # The sources' site icons, found once and kept (C12).
+            icons=FaviconCache(parent=self),
+            parent=self,
+        )
+        # The Inbox count on the app icon, when the person wants it (Q-7).
+        self._imports_badge = AppIconBadge(
+            self._imports, load=lambda: load_settings().get(IMPORTS_BADGE_KEY),
+            save=lambda value: save_setting(IMPORTS_BADGE_KEY, value), parent=self)
         # Created lazily inside ``_build_findbar`` so its parent is the
         # central widget rather than ``self`` - keeps Qt's geometry
         # reasoning straightforward.
@@ -330,21 +660,64 @@ class MainWindow(QMainWindow):
         # auth event through the existing bunker pool. It seeds the same
         # cache on the way out, so an upload never has to be downloaded
         # back to be shown.
+        self._media_library_dialog = None
+        # The Insert Image picker while it is open (it is modal).
+        self._media_picker = None
+        # Save As from either: it goes on when the window that asked
+        # closes, and is said in the status bar then.
+        self._media_saver = MediaSaver(self._media_image_loader, parent=self)
+        # What this bar last said about a save ("Saving “x”…" to be followed
+        # by its end), and the message its tooltip of reasons belongs to.
+        self._media_save_said = ""
+        self._message_tip = _MessageTip(self.status)
+        self._media_saver.batch_finished.connect(self._on_media_saves_finished)
+        self._media_saver.started.connect(self._on_media_save_started)
+        self._media_saver.finished.connect(self._on_media_save_finished)
+        # The Media Servers sheet while it is open (it is modal).
+        self._media_servers_sheet = None
         # Association membership, which grants a relay and a media server.
         # Resolved in the background; until it answers the account simply
         # has no benefits, which is the same state as not being a member.
-        self._membership = MembershipDirectory(parent=self)
-        self._membership.resolved.connect(self._on_membership_resolved)
-        # An account that was already signed in when the app opened never
-        # passes through the connect flow, so resolve it here too.
-        self._refresh_membership(self._profile_store.default())
+        # The controller owns the roster, its refresh, the membership
+        # window and its client; this window only hands its providers on
+        # (see _entitled_relays and the three below it).
+        self._membership = MembershipController(
+            profile_provider=lambda: self._profile_store.default(),
+            relay_pool=self._relay_pool,
+            session_pool=self._session_pool,
+            relay_directory=self._relay_directory,
+            is_dark=lambda: self.is_dark_theme,
+            open_link=self._open_external,
+            connect_signer=self._on_nostr_connect,
+            show_status=self.status.showMessage,
+            parent=self,
+        )
+        self._membership.benefits_changed.connect(self._on_membership_benefits_changed)
+        self._membership.profile_published.connect(self._on_own_profile_published)
         self._media_store = MediaStore(
             session_pool=self._session_pool,
             profile_provider=lambda: self._profile_store.default(),
             blob_cache=self._media_image_loader,
             entitled_servers=self._entitled_blossom_servers,
+            server_quota=self._entitled_quota,
+            names=MediaNames(),
             parent=self,
         )
+        # An account that was already signed in when the app opened never
+        # passes through the connect flow, so it is resolved here too, and
+        # the roster is refreshed while the app is open. Started once the
+        # store its answer may concern exists.
+        self._membership.start()
+        # The media servers the account publishes (its kind 10063 list):
+        # adopted only when nothing is configured here yet, otherwise
+        # offered in the Media Library, and always tried when an image's
+        # stored address stops answering. It shares the store's settings,
+        # so what it adopts is what the store uploads to.
+        self._server_list = UserServerList(
+            self._relay_pool, relay_directory=self._relay_directory,
+            settings=self._media_store.settings, parent=self)
+        self._server_list.adopted.connect(self._on_media_servers_adopted)
+        self._server_list.suggestions_changed.connect(self._on_media_server_suggestions)
         # The one object the editor side talks to about images. Every
         # boundary it crosses is injected here, so nothing below this
         # line knows anything about Blossom.
@@ -353,10 +726,19 @@ class MainWindow(QMainWindow):
             uploader=self._media_store,
             profile_provider=lambda: self._profile_store.default(),
             decoder=image_safety.decode_image_bytes,
+            recovery_provider=self._server_list.recovery_servers,
             parent=self,
         )
         self._asset_manager.asset_changed.connect(self._refresh_asset_in_documents)
+        self._asset_manager.asset_changed.connect(self._on_media_uploaded)
         self._asset_manager.asset_upload_failed.connect(self._on_asset_upload_failed)
+        # How far each audio or video file's upload has got (sha256 ->
+        # percent), shown on its card in the text.
+        self._media_progress: dict = {}
+        self._media_store.upload_progress.connect(self._on_media_upload_progress)
+        # A file added in the Media Library is the store's job, not the
+        # window's: a failure after that window closed is said here.
+        self._media_store.upload_failed.connect(self._on_library_upload_failed)
 
         # Private media. The ledger is the record of everything this app
         # has deliberately made public and is the only way to revoke any
@@ -368,8 +750,9 @@ class MainWindow(QMainWindow):
         self._public_ledger = PublicLedger()
         self._private_library = PrivateLibrary(
             session_pool=self._session_pool,
-            relay_list_cache=self._relay_list_cache,
+            relay_directory=self._relay_directory,
             query=RelayQueryAdapter(self._relay_pool, parent=self),
+            entitled_relays=self._entitled_relays,
             parent=self,
         )
         self._media_visibility = MediaVisibility(
@@ -395,28 +778,47 @@ class MainWindow(QMainWindow):
         active = self._profile_store.default()
         if active is not None:
             self._metadata_fetcher.fetch(active)
-            self._contact_fetcher.fetch(active.user_pubkey, active.bunker_relays)
+            self._contact_fetcher.fetch(active.user_pubkey)
+            self._server_list.refresh(active)
             # Start the draft sync in the background. It's idempotent -
             # if the panel is never opened, this still keeps the store
             # warm so opening the panel later is instant.
             self._draft_sync.start_for(active)
+            self._draft_deletions.start_for(active)
+            # An account created here whose setup was left for later is
+            # finished now, once the window is up.
+            QTimer.singleShot(0, lambda: self._accounts.profile_activated(
+                self._profile_store.default()))
 
         self._build_actions()
         self._build_menu()
-        self._build_status_bar_view_toggle()
+        # The app icon setting as kept (not a choice made now), and as
+        # changed where Imports offers it.
+        self._on_imports_badge_changed(self._imports_badge.on)
+        self._imports_badge.changed.connect(self._on_imports_badge_changed)
         self._build_findbar()
+        self.nostr_state.changed.connect(self._on_nostr_in_use_changed)
 
-        # header_widget and findbar always construct themselves in dark
+        # The find bar and the account chip construct themselves in dark
         # mode; bring them in line with a light theme detected above.
         if not self.is_dark_theme:
-            self._set_theme(self.is_dark_theme, announce=False)
+            self._set_theme(self.is_dark_theme)
 
+        # Startup order: the tabs an update restart wrote down come back
+        # first, in their own order; then the file named on the command
+        # line; then any crash leftovers. The crash sweep skips only the
+        # backups the update restore took over. A file tab's backup is
+        # named after its path, so skipping "every open tab's backup" would
+        # also skip the crash backup of the very file named on the command
+        # line, and the clean tab would later overwrite it.
+        resumed, adopted = self._resume_workspace()
         if initial_path and os.path.isfile(initial_path):
             self.open_path(initial_path)
 
-        restored = self._restore_backups()
-        session = self._restore_session() if not initial_path and not restored else False
-        if not initial_path and not restored and not session:
+        restored = self._restore_backups(skip=adopted)
+        session = (self._restore_session()
+                   if not initial_path and not restored and resumed is None else False)
+        if not initial_path and not restored and not session and not self.tabs.count():
             if "welcome_shown" not in load_settings():
                 self.show_welcome_tab()
                 save_setting("welcome_shown", True)
@@ -425,9 +827,20 @@ class MainWindow(QMainWindow):
 
         self.tabs.currentChanged.connect(self._on_tab_changed)
         self._update_undo_redo_buttons()
+        # Edit > Undo follows the window in front (the Imports window has
+        # its own Undo Skip), and the document's own commands are dimmed
+        # while another window is in front.
+        QApplication.instance().focusChanged.connect(self._update_undo_redo_buttons)
+        # Paste follows what is on the clipboard, as it follows the focus.
+        QApplication.clipboard().dataChanged.connect(self._update_clipboard_commands)
+        QApplication.instance().focusChanged.connect(self._update_window_commands)
         self._update_status_bar()
         self._start_ipc_server()
+        QTimer.singleShot(0, lambda ws=resumed: self._announce_version_change(ws))
         QTimer.singleShot(3000, self._maybe_auto_check_for_updates)
+        # Downloads an earlier update could not delete (the Windows
+        # installer runs from its folder after MyEditor has quit).
+        QTimer.singleShot(5000, sweep_stale_downloads)
 
 
     # ----------------------------------------------------------------------
@@ -436,14 +849,15 @@ class MainWindow(QMainWindow):
     def _start_ipc_server(self):
         """Start a local socket server so that a second launch can forward a
         file path here instead of opening a new window."""
-        QLocalServer.removeServer(_IPC_SERVER_NAME)  # remove stale socket if any
+        QLocalServer.removeServer(IPC_SERVER_NAME)  # remove stale socket if any
         self._ipc_server = QLocalServer(self)
         self._ipc_server.newConnection.connect(self._on_ipc_connection)
-        self._ipc_server.listen(_IPC_SERVER_NAME)
+        self._ipc_server.listen(IPC_SERVER_NAME)
 
     def _on_ipc_connection(self):
         conn = self._ipc_server.nextPendingConnection()
         conn.waitForReadyRead(300)
+        # An absolute path: the second launch made it so in its own folder.
         path = conn.readAll().data().decode("utf-8").strip()
         conn.deleteLater()
         if path and os.path.isfile(path):
@@ -473,6 +887,11 @@ class MainWindow(QMainWindow):
         menu_bg = DARK_MENU_BG if self.is_dark_theme else LIGHT_MENU_BG
         menu_fg = DARK_MENU_FG if self.is_dark_theme else LIGHT_MENU_FG
         border = DARK_BORDER if self.is_dark_theme else LIGHT_BORDER
+        muted = DARK_MUTED_FG if self.is_dark_theme else LIGHT_MUTED_FG
+        # A dimmed menu item is still read (it says what a command needs, as
+        # the Nostr menu's do without an account): dimmer than the rest, as
+        # in the editor's context menu, not the border color it vanished in.
+        dimmed = "#6A6A6A" if self.is_dark_theme else "#999999"
 
         self.setStyleSheet(f"""
             QMainWindow {{ background: {bg}; }}
@@ -504,6 +923,11 @@ class MainWindow(QMainWindow):
                 border: 1px solid {border};
             }}
             QTabBar QToolButton:hover {{ background: {bg}; }}
+            QPushButton#TabClose {{
+                color: {muted}; background: transparent; border: none;
+                border-radius: 4px; font-size: 18px; padding: 0px;
+            }}
+            QPushButton#TabClose:hover {{ color: {fg}; background: {border}; }}
             QStatusBar {{
                 background: {menu_bg};
                 color: {menu_fg};
@@ -521,7 +945,7 @@ class MainWindow(QMainWindow):
                 border: 1px solid {border};
             }}
             QMenu::item:selected {{ background: {bg}; }}
-            QMenu::item:disabled {{ color: {border}; }}
+            QMenu::item:disabled {{ color: {dimmed}; }}
             QScrollBar:vertical {{
                 background: {menu_bg};
                 width: 12px;
@@ -581,6 +1005,13 @@ class MainWindow(QMainWindow):
 
         label_color = DARK_MENU_FG if self.is_dark_theme else LIGHT_FG
         self._line_label.setStyleSheet(f"color: {label_color}; font-size: 12px;")
+        muted = DARK_MUTED_FG if self.is_dark_theme else LIGHT_MUTED_FG
+        self._words_label.setStyleSheet(f"color: {muted}; font-size: 12px;")
+        self._show_backup_status()
+        self._show_library_failures()
+        for picker in (self._mention_picker, getattr(self, "_coauthor_picker", None)):
+            if picker is not None:
+                picker.set_dark(self.is_dark_theme)
 
         for i in range(self.tabs.count()):
             ed = self._editor_from_widget(self.tabs.widget(i))
@@ -595,26 +1026,188 @@ class MainWindow(QMainWindow):
         lang = detect_language_from_content(editor.toPlainText())
         if lang and self.syntax_highlighting:
             editor._language = lang
+            self._drop_highlighter(editor)
             editor._highlighter = SyntaxHighlighter(
                 editor.document(), lang, self.is_dark_theme
             )
+            self._update_editor_font(editor)     # code: the monospace font
+            self._attach_spelling(editor)        # code is not checked
             self._update_status_bar()
 
-    def _attach_highlighter(self, editor, path: str | None):
-        """Detect language from path and attach / replace syntax highlighter."""
-        lang = detect_language(path)
-        editor._language = lang
-        # Remove existing highlighter if any
+    @staticmethod
+    def _drop_highlighter(editor) -> None:
         if hasattr(editor, '_highlighter'):
             editor._highlighter.setDocument(None)
             del editor._highlighter
+
+    def _attach_highlighter(self, editor, path: str | None):
+        """Detect language from path and attach / replace the highlighter:
+        syntax colors for a code file (while Syntax Highlighting is on),
+        the look of inline code and code blocks for a document with
+        Markdown structure. One per document: two would undo each other."""
+        lang = detect_language(path)
+        editor._language = lang
+        self._drop_highlighter(editor)
         # Only highlight plain-text source files, not rendered rich documents
         if lang and path and not path.lower().endswith(_RICH_DOC_EXTS) and self.syntax_highlighting:
             editor._highlighter = SyntaxHighlighter(
                 editor.document(), lang, self.is_dark_theme
             )
+        elif self._editor_kind(editor) == "rich":
+            editor._highlighter = RichTextLook(editor.document(), self.is_dark_theme)
+        self._update_editor_font(editor)
+        self._attach_spelling(editor)
+
+    # -- spelling (Edit > Spelling; the system's own checker, spelling/) ---------
+
+    def _spell_checker(self):
+        """The app's one link to the system spell checker, made at first
+        use (it reaches the system checker only when it checks)."""
+        if getattr(self, "_checker", None) is None:
+            self._checker = spelling.SpellChecker(parent=self)
+            self._checker.availabilityChanged.connect(self._spelling_available)
+        return self._checker
+
+    def _spell_checked(self, ed) -> bool:
+        """Whether a tab's text is checked: prose (a document with Markdown
+        structure, Markdown or plain text, not code), editable, not the
+        welcome page (the app's own words, names like Nostr among them),
+        while Check Spelling While Typing is on."""
+        if (ed is None or not self.check_spelling or ed.isReadOnly()
+                or getattr(ed, "_is_welcome", False)):
+            return False
+        kind = self._editor_kind(ed)
+        return kind == "rich" or (kind == "source"
+                                  and getattr(ed, "_language", None) in (None, "markdown"))
+
+    def _attach_spelling(self, ed) -> None:
+        """Start or stop checking a tab's spelling, as it should be now."""
+        if ed is None or not hasattr(ed, "set_spelling"):
+            return
+        current = ed.spelling()
+        if self._spell_checked(ed):
+            if current is None:
+                ed.set_spelling(spelling.DocumentSpelling(
+                    self._spell_checker(), ed.document(),
+                    language=self._usable_spelling_language()))
+        elif current is not None:
+            current.close()
+            ed.set_spelling(None)
+
+    def _all_editors(self) -> list:
+        found = []
+        for i in range(self.tabs.count()):
+            ed = self._editor_from_widget(self.tabs.widget(i))
+            if ed is not None:
+                found.append(ed)
+        return found
+
+    def _usable_spelling_language(self):
+        """The language chosen in Edit > Spelling > Language while the
+        system has its dictionary, else None (the system's language): a
+        choice carried to a computer without it never stops the checking."""
+        chosen = self.spelling_language or None
+        if chosen is None:
+            return None
+        checker = self._spell_checker()
+        return chosen if chosen in checker.languages() else None
+
+    def _set_check_spelling(self, on: bool) -> None:
+        """Edit > Spelling > Check Spelling While Typing, remembered."""
+        self.check_spelling = bool(on)
+        save_setting("check_spelling", self.check_spelling)
+        for ed in self._all_editors():
+            self._attach_spelling(ed)
+
+    def _spelling_available(self, available: bool) -> None:
+        self.act_check_spelling.setEnabled(available)
+
+    def _update_spelling_menu(self) -> None:
+        """Edit > Spelling as it opens: dimmed where the system has no
+        checker; on Windows and Linux, the languages it can check."""
+        checker = self._spell_checker()
+        available = checker.is_available()
+        self.act_check_spelling.setEnabled(available)
+        menu = getattr(self, "m_spelling_language", None)
+        if menu is None:
+            return
+        menu.clear()
+        menu.setEnabled(available and self.check_spelling)
+        group = QActionGroup(menu)
+        chosen = self._usable_spelling_language() or ""
+        for tag, name in [("", _("System Language"))] + spelling_language_names(
+                checker.languages()):
+            action = menu.addAction(name)
+            action.setCheckable(True)
+            action.setChecked(tag == chosen)
+            action.triggered.connect(lambda _c=False, t=tag: self._set_spelling_language(t))
+            group.addAction(action)
+            if not tag:
+                menu.addSeparator()
+
+    def _set_spelling_language(self, tag: str) -> None:
+        """Edit > Spelling > Language (Windows and Linux), remembered: every
+        document is checked in it ("" for the system's language)."""
+        self.spelling_language = tag
+        save_setting("spelling_language", tag)
+        for ed in self._all_editors():
+            current = ed.spelling()
+            if current is not None:
+                current.set_language(tag or None)
+
+    def _spelling_context(self, menu, editor, pos) -> None:
+        """A misspelled word under the pointer: what it might be, and
+        Ignore Spelling and Learn Spelling (Ignore All and Add to
+        Dictionary on Windows and Linux, as Word and LibreOffice say)."""
+        checks = editor.spelling() if hasattr(editor, "spelling") else None
+        if checks is None or editor.textCursor().hasSelection():
+            return
+        position = editor.cursorForPosition(pos).position()
+        word = checks.misspelling_at(position)
+        mac = sys.platform == "darwin"
+        if word is None:
+            # A word learned (by mistake, perhaps): it can be unlearned.
+            under = editor.cursorForPosition(pos)
+            under.select(QTextCursor.SelectionType.WordUnderCursor)
+            learned = under.selectedText().strip()
+            checker = self._spell_checker()
+            if learned and checker.has_learned(learned, checks.language()):
+                menu.addAction(_("Unlearn Spelling") if mac else _("Remove from Dictionary"),
+                               lambda: checker.unlearn(learned, checks.language()))
+                menu.addSeparator()
+            return
+        block = editor.document().findBlock(position)
+        checker = self._spell_checker()
+        guesses = checker.suggestions(word.word, word.language)[:5]
+        bold = menu.font()
+        bold.setBold(True)
+        for guess in guesses:
+            action = menu.addAction(guess)
+            action.setFont(bold)
+            action.triggered.connect(
+                lambda _c=False, g=guess, b=block.position(): editor.replace_misspelling(word, b, g))
+        if not guesses:
+            menu.addAction(_("No Guesses Found")).setEnabled(False)
+        menu.addSeparator()
+        menu.addAction(_("Ignore Spelling") if mac else _("Ignore All"),
+                       lambda: checker.ignore(word.word, word.language))
+        menu.addAction(_("Learn Spelling") if mac else _("Add to Dictionary"),
+                       lambda: checker.learn(word.word, word.language))
+        menu.addSeparator()
+
+    def _update_editor_font(self, editor) -> None:
+        """Writing in the system's text font, code and plain text in the
+        monospace font (View > Use Monospace Font for Writing sets all
+        writing in monospace too)."""
+        writing = (not self.monospace_writing
+                   and (self._editor_kind(editor) == "rich"
+                        or getattr(editor, "_markdown_source", False)))
+        editor.set_writing_font(writing)
 
     def _update_editor_theme(self, editor):
+        pane = getattr(editor, "_preview_pane", None)
+        if pane is not None:
+            pane.set_dark(self.is_dark_theme)
         bg = DARK_BG if self.is_dark_theme else LIGHT_BG
         fg = DARK_FG if self.is_dark_theme else LIGHT_FG
         selection = DARK_SELECTION if self.is_dark_theme else LIGHT_SELECTION
@@ -628,9 +1221,6 @@ class MainWindow(QMainWindow):
                 border: none;
                 selection-background-color: {selection};
                 selection-color: {fg};
-                font-family: {MONO_FONT};
-                font-size: 14px;
-                line-height: 1.5;
                 padding: 8px;
             }}
             QScrollBar:vertical {{
@@ -688,18 +1278,66 @@ class MainWindow(QMainWindow):
         """
         ed = HtmlEditor()
         ed.document().contentsChanged.connect(self._update_tab_title)
+        # Saved or not, the window's title shows it (a Mac: the close button).
+        ed.document().modificationChanged.connect(self._update_window_title)
         ed.document().undoAvailable.connect(self._update_undo_redo_buttons)
         ed.document().redoAvailable.connect(self._update_undo_redo_buttons)
+        # What Undo and Redo are called changes with every step.
+        ed.document().contentsChanged.connect(self._update_undo_redo_buttons)
+        ed.undo_named.connect(self._update_undo_redo_buttons)
         ed.cursorPositionChanged.connect(self._update_status_bar)
-        ed.currentCharFormatChanged.connect(self._update_format_buttons)
-        ed.selectionChanged.connect(self._update_format_buttons)
+        ed.document().contentsChanged.connect(
+            lambda e=ed: self._on_document_changed_for_find(e))
+        ed.document().contentsChanged.connect(
+            lambda e=ed: self._on_document_changed_for_words(e))
+        ed.selectionChanged.connect(lambda e=ed: self._on_selection_changed_for_words(e))
+        ed.currentCharFormatChanged.connect(self._schedule_format_buttons)
+        ed.selectionChanged.connect(self._schedule_format_buttons)
+        ed.selectionChanged.connect(self._update_clipboard_commands)
         self._update_editor_theme(ed)
         self._apply_view_prefs_to_editor(ed)
-        ed.set_resource_resolver(self._asset_manager.resolve_image, ASSET_SCHEME)
+        ed.set_resource_resolver(self._resolve_asset_image, ASSET_SCHEME)
+        ed.set_object_lookup(self._outside_of)
         ed.set_local_image_resolver(lambda name, e=ed: self._resolve_local_image(e, name))
         ed.image_pasted.connect(lambda img, e=ed: self._handle_pasted_image(e, img))
+        ed.notice.connect(lambda text: self.status.showMessage(text, 8000))
+        ed.visible_area_changed.connect(lambda e=ed: self._on_visible_area_changed(e))
         ed.urls_dropped.connect(self._handle_dropped_urls)
+        ed.set_context_menu_filler(self._fill_editor_context_menu)
+        ed.set_structure_check(lambda e=ed: self._editor_kind(e) == "rich")
+        ed.set_local_formats_check(lambda e=ed: self._keeps_underline(e))
+        ed.set_pictures_check(lambda e=ed: self._keeps_pictures(e))
+        ed.set_paste_guard(lambda text, e=ed: self._guard_paste(e, text))
+        ed.mention_requested.connect(lambda at, e=ed: self._ask_mention(e, at))
+        # Mentions read back from Markdown get their names (rich_text.link_references).
+        ed._mention_label = self._mention_label
+        ed.set_markdown_shortcuts_check(lambda: self.markdown_shortcuts)
+        ed.set_caret_style(self.caret_style)
+        ed.set_slash_items(self._slash_items)
+        ed.set_link_opener(self._open_link)
+        ed.set_nostr_check(lambda: self.nostr_state.active)
+        ed.selection_bar = SelectionBar(
+            ed, {"bold": self.act_bold, "italic": self.act_italic, "strike": self.act_strike,
+                 "code": self.act_code, "link": self.act_link},
+            self.m_style, dark=lambda: self.is_dark_theme,
+            wanted=lambda e=ed: self._wants_selection_bar(e))
         return ed
+
+    def _wants_selection_bar(self, ed) -> bool:
+        """Whether the format bar may show over ``ed``'s selection: chosen
+        in Settings, in the tab in front, where formatting applies (a
+        document that holds Markdown), while it is being written."""
+        return (self.format_bar_on_selection and ed is self.current_editor()
+                and self._editor_kind(ed) == "rich" and not self._shows_preview_only(ed)
+                and not ed.isReadOnly())
+
+    def _set_format_bar_on_selection(self, on: bool) -> None:
+        """Settings' Show the Format Bar When Selecting Text, remembered."""
+        self.format_bar_on_selection = bool(on)
+        save_setting("format_bar_on_selection", self.format_bar_on_selection)
+        ed = self.current_editor()
+        if not on and ed is not None:
+            ed.selection_bar.hide()
 
     def _resolve_local_image(self, editor, name: str):
         """QImage for an image named relative to the editor's own file.
@@ -739,13 +1377,22 @@ class MainWindow(QMainWindow):
         ed = self.current_editor()
         if not ed:
             return
-        self.tabs.setTabText(self.tabs.currentIndex(), self._compose_tab_title(ed))
+        index = self.tabs.currentIndex()
+        self.tabs.setTabText(index, self._compose_tab_title(ed))
+        # Where the file is, for whoever wonders: on the tab, where it does
+        # not take room from the text.
+        self.tabs.setTabToolTip(index, getattr(ed, "_file_path", None) or "")
+        # A screen reader announces the text area by its document's name.
+        ed.setAccessibleName(self._document_name(ed))
+        self._update_window_title()
         self._update_status_bar()
 
     def _compose_tab_title(self, ed) -> str:
         """Compute the display title for a tab.
 
         Precedence:
+          - "Welcome" for the welcome tab as MyEditor opened it (never
+            saved and not edited; see welcome.is_pristine_welcome).
           - File path basename if the tab is backed by a local file.
           - Draft title if the tab is purely a draft (opened from the
             drafts panel without a local file).
@@ -755,52 +1402,140 @@ class MainWindow(QMainWindow):
         can tell at a glance that contents are encrypted at rest on
         the relays.
         """
-        path = getattr(ed, "_file_path", None)
+        if is_pristine_welcome(ed):
+            return _("Welcome")
         binding = getattr(ed, "_draft_binding", None)
         dirty = "*" if ed.document().isModified() else ""
-        if path:
-            base = os.path.basename(path)
-        elif binding and binding.title:
-            base = binding.title
-        elif binding:
-            base = "Untitled draft"
-        else:
-            base = "Untitled"
         prefix = "⚿ " if binding is not None else ""
-        return f"{prefix}{base}{dirty}"
+        return f"{prefix}{self._document_name(ed)}{dirty}"
+
+    @staticmethod
+    def _document_name(ed) -> str:
+        """The document's own name: the file's, the draft's title, or
+        Untitled."""
+        if is_pristine_welcome(ed):
+            return _("Welcome")
+        path = getattr(ed, "_file_path", None)
+        binding = getattr(ed, "_draft_binding", None)
+        recovered = getattr(ed, "_recovered_title", "")
+        if recovered:
+            return recovered
+        if path:
+            return os.path.basename(path)
+        if binding and binding.title:
+            return binding.title
+        published = getattr(ed, "_published_article", None)
+        if published is not None and published.title:
+            return published.title
+        if binding:
+            return _("Untitled draft")
+        return _("Untitled")
 
     def _update_status_bar(self):
-        viewer = self.current_pdf_viewer()
-        if viewer is not None:
-            self.status.showMessage(viewer._file_path)
-            self._line_label.setText(viewer.page_display())
+        """The status bar's lasting part: the words (beside, see
+        _show_word_count) and, in code and plain text, where lines are
+        lines, the language and the line the caret is on. Its message
+        area is left to what just happened (saved, published): the file's
+        place is the tab's tooltip, and a PDF's page is in its own
+        toolbar, so neither is repeated here."""
+        self._update_editor_commands()
+        ed = self.current_editor()
+        if self.current_pdf_viewer() is not None or not ed:
+            self._line_label.setText("")
+            if not ed:
+                self._words_label.setText("")
             self._update_format_buttons()
             return
-        ed = self.current_editor()
-        if not ed:
-            self._line_label.setText("")
-            return
-        path = getattr(ed, "_file_path", None)
-        file_info = path if path else "(Untitled)"
-        lang = getattr(ed, "_language", None)
-        lang_label = LANGUAGE_DISPLAY_NAMES.get(lang, '') if lang else ''
-        current_line = ed.textCursor().blockNumber() + 1
-        total_lines = ed.document().blockCount()
-        parts = [file_info]
-        if lang_label:
-            parts.append(lang_label)
-        page_count = ed.document().pageCount()
-        if page_count > 1:
-            parts.append(f"Page {page_count}")
-        self.status.showMessage(" | ".join(parts))
-        self._line_label.setText(f"Ln {current_line} / {total_lines}")
-        self._update_format_buttons()
+        parts = []
+        if self._editor_kind(ed) == "source":
+            lang = getattr(ed, "_language", None)
+            if lang and LANGUAGE_DISPLAY_NAMES.get(lang):
+                parts.append(LANGUAGE_DISPLAY_NAMES[lang])
+            parts.append(_("Ln {line} / {total}").format(
+                line=ed.textCursor().blockNumber() + 1, total=ed.document().blockCount()))
+        self._line_label.setText(" \u00b7 ".join(parts))
+        self._schedule_format_buttons()
 
-    def _update_window_title(self, *_):
-        self.setWindowTitle("")
+    def _update_window_title(self, *_args):
+        """The document in front names the window, as in every document
+        app: the title bar, the Window and Dock menus on a Mac, the
+        taskbar and Alt+Tab elsewhere, and what a screen reader says
+        when the window comes to the front. Windows and Linux add the
+        app's name after it; a Mac shows unsaved changes in the close
+        button ([*] is Qt's placeholder for them)."""
+        ed = self.current_editor()
+        viewer = self.current_pdf_viewer()
+        if ed is not None:
+            name, modified = self._document_name(ed), ed.document().isModified()
+        elif viewer is not None:
+            name, modified = os.path.basename(viewer._file_path), False
+        else:
+            self.setWindowModified(False)
+            self.setWindowTitle(APP_DISPLAY_NAME)
+            return
+        if sys.platform == "darwin":
+            self.setWindowTitle(f"{name}[*]")
+        else:
+            self.setWindowTitle(_("{document}[*] - {app}").format(document=name,
+                                                                   app=APP_DISPLAY_NAME))
+        self.setWindowModified(modified)
+
+    def _show_tab(self, index: int, *, wrap: bool = True) -> None:
+        """The tab at ``index`` in front, its document taking the keys: from
+        the last tab the next one is the first, as in Safari; a tab number
+        past the last one does nothing."""
+        count = self.tabs.count()
+        if not count or not wrap and index >= count:
+            return
+        self.tabs.setCurrentIndex(index % count)
+        target = self._pane_focus_target(self._central_splitter.widget(0))
+        if target is not None:
+            target.setFocus(Qt.FocusReason.TabFocusReason)
+
+    def _panes(self) -> list:
+        """The panes shown, in the order F6 visits them: the document,
+        Article Details, the Drafts panel."""
+        panes = [self._central_splitter.widget(0)]
+        return panes + [pane for pane in (self._article_details_panel, self._drafts_panel)
+                        if pane is not None and pane.isVisible()]
+
+    def _move_to_pane(self, step: int) -> None:
+        """F6 (Shift+F6): the keyboard focus to the next (previous) pane."""
+        panes = self._panes()
+        focus = QApplication.focusWidget()
+        here = next((i for i, pane in enumerate(panes)
+                     if focus is not None and pane.isAncestorOf(focus)), 0)
+        for offset in range(1, len(panes) + 1):
+            target = self._pane_focus_target(panes[(here + step * offset) % len(panes)])
+            if target is not None:
+                target.setFocus(Qt.FocusReason.OtherFocusReason)
+                return
+
+    def _pane_focus_target(self, pane):
+        """Where the keys go in ``pane``: the document of the tab in front;
+        else the pane's list, or its first control reached with Tab."""
+        if pane is self._central_splitter.widget(0):
+            viewer = self.current_pdf_viewer()
+            return viewer.view if viewer is not None else self.current_editor()
+        for view in pane.findChildren(QAbstractItemView):
+            if view.isVisible() and view.focusPolicy() & Qt.FocusPolicy.TabFocus:
+                return view
+        first = widget = pane.nextInFocusChain()
+        while widget is not None and widget is not pane:
+            if (pane.isAncestorOf(widget) and widget.isVisible() and widget.isEnabled()
+                    and widget.focusPolicy() & Qt.FocusPolicy.TabFocus):
+                return widget
+            widget = widget.nextInFocusChain()
+            if widget is first:
+                break
+        return None
 
     def _on_tab_changed(self, index=None):
+        self._show_backup_status()
+        self._fill_article_details_panel()
+        self._apply_view(self.current_editor())
         self._update_window_title()
+        self._update_word_count()
         self._update_undo_redo_buttons()
         self._update_status_bar()  # also calls _update_format_buttons
         self._update_knit_actions()
@@ -817,18 +1552,200 @@ class MainWindow(QMainWindow):
                 if i != index:
                     ed = self._editor_from_widget(self.tabs.widget(i))
                     if ed:
-                        ed.setExtraSelections([])
+                        ed.set_highlights("find", [])
             self._search_matches = []
             self._current_match_index = -1
             self._last_search_text = ""
             self._on_search_text_changed()
 
-    def _update_undo_redo_buttons(self):
+    # -- words --------------------------------------------------------------
+
+    def _on_document_changed_for_words(self, ed) -> None:
+        if ed is self.current_editor():
+            self._word_count_timer.start()
+
+    def _on_selection_changed_for_words(self, ed) -> None:
+        if ed is self.current_editor():
+            # Counted once the selection settles, not at every step of it.
+            self._selection_words_timer.start()
+
+    def _update_word_count(self) -> None:
+        """Count the current document's words again (after it changed, or
+        another tab came to the front)."""
         ed = self.current_editor()
-        can_undo = ed.document().isUndoAvailable() if ed else False
-        can_redo = ed.document().isRedoAvailable() if ed else False
-        self.header_widget.undo_btn.setEnabled(can_undo)
-        self.header_widget.redo_btn.setEnabled(can_redo)
+        self._document_words = count_words(ed.toPlainText()) if ed is not None else 0
+        self._show_word_count(ed)
+
+    def _show_word_count(self, ed) -> None:
+        """"1,234 words · 6 min read", or "12 of 1,234 words" while words
+        are selected; nothing for an empty document or a PDF."""
+        total = self._document_words
+        if ed is None or total == 0:
+            self._words_label.setText("")
+            return
+        selected = ed.textCursor().selectedText() if ed.textCursor().hasSelection() else ""
+        if selected:
+            self._words_label.setText(ngettext(
+                "{selected} of {count} word", "{selected} of {count} words", total).format(
+                selected=_number(count_words(selected)), count=_number(total)))
+            return
+        minutes = reading_minutes(total)
+        self._words_label.setText(ngettext(
+            "{count} word", "{count} words", total).format(count=_number(total))
+            + " · " + ngettext("{minutes} min read", "{minutes} min read", minutes).format(
+                minutes=_number(minutes)))
+
+    def _update_undo_redo_buttons(self, *_args):
+        """Undo and Redo for what has the focus: the Imports window when it
+        is in front (Undo Skip there), a text field (the find field, a
+        dialog's field), or the document, unless only its preview shows
+        (nothing edits the hidden text)."""
+        if not hasattr(self, "act_undo"):
+            return
+        imports = self._imports_in_front()
+        field = _text_field(QApplication.focusWidget())
+        toolbar = getattr(self, "format_toolbar", None)
+        if imports is not None:
+            # What Undo undoes in the window in front (Undo Skip there).
+            self.act_undo.setText(imports.undo_text())
+            self.act_redo.setText(redo_words())
+            self.act_undo.setEnabled(imports.can_undo())
+            self.act_redo.setEnabled(field is not None and _field_history(field)[1])
+            if toolbar is not None:
+                toolbar.describe_history(imports.undo_text(), redo_words())
+            return
+        undo_name = redo_name = ""
+        if field is not None:
+            # Never the document behind (T1 of the CP3 fixes review: Undo
+            # with a dialog's About field focused undid the document).
+            can_undo, can_redo = _field_history(field)
+        else:
+            ed = self.current_editor()
+            editing = ed is not None and not self._shows_preview_only(ed)
+            can_undo = editing and ed.document().isUndoAvailable()
+            can_redo = editing and ed.document().isRedoAvailable()
+            if editing:
+                # What it takes back, named where the platform names it
+                # ("Undo Typing", "Undo Paste").
+                undo_name, redo_name = ed.undo_name(), ed.redo_name()
+        self.act_undo.setText(undo_words(undo_name if can_undo else ""))
+        self.act_redo.setText(redo_words(redo_name if can_redo else ""))
+        self.act_undo.setEnabled(can_undo)
+        self.act_redo.setEnabled(can_redo)
+        if toolbar is not None:
+            # The toolbar's tips name the step on every platform.
+            toolbar.describe_history(undo_words(undo_name if can_undo else "", named=True),
+                                     redo_words(redo_name if can_redo else "", named=True))
+
+    # How many steps the toolbar's Undo and Redo lists show, as Word's.
+    HISTORY_LENGTH = 15
+
+    def _fill_history(self, menu: QMenu, *, redo: bool) -> None:
+        """The toolbar's list of what Undo (or Redo) takes one step after
+        another, newest first, as the arrow beside the button opens it:
+        choosing the third takes three steps, exactly as three Undos would.
+        Only a document's steps have names; for a text field or the
+        Imports window, the list holds the one step the button takes, by
+        the Edit menu's words."""
+        menu.clear()
+        action = self.act_redo if redo else self.act_undo
+        if not action.isEnabled():
+            return
+        ed = self.current_editor()
+        names = []
+        if (ed is not None and self._imports_in_front() is None
+                and _text_field(QApplication.focusWidget()) is None):
+            names = (ed.redo_history if redo else ed.undo_history)(self.HISTORY_LENGTH)
+        if not names:
+            menu.addAction(action.text(), action.trigger)
+            return
+        for count, name in enumerate(names, 1):
+            menu.addAction(_(name), lambda n=count, e=ed: self._take_steps(e, n, redo=redo))
+
+    def _take_steps(self, ed, count: int, *, redo: bool) -> None:
+        """``count`` single Undos (or Redos) of ``ed``, one after another."""
+        if not shiboken6.isValid(ed) or ed is not self.current_editor() \
+                or self._shows_preview_only(ed):
+            return
+        take = ed.redo if redo else ed.undo
+        for _step in range(count):
+            take()
+        self._update_format_buttons()
+
+    def _update_clipboard_commands(self, *_args) -> None:
+        """Cut, Copy, Paste and Delete for whatever has the focus, dimmed
+        where they cannot act (as the HIG asks): a text field (the find
+        field, a sheet's or a dialog's), the Imports window, the PDF reader
+        (Copy) or the document. Cut, Copy and Delete need a selection,
+        Paste a place that takes text and something on the clipboard (T2
+        of the CP3 fixes review: it followed the kind of tab, not the
+        focus). Paste and Match Style needs words on the clipboard."""
+        if not hasattr(self, "act_cut"):
+            return
+        field = _text_field(QApplication.focusWidget())
+        imports = self._imports_in_front()
+        clipboard = QApplication.clipboard().mimeData()
+        has_words = clipboard is not None and (clipboard.hasText() or clipboard.hasHtml())
+        if field is not None:
+            selected = (field.hasSelectedText() if isinstance(field, QLineEdit)
+                        else field.textCursor().hasSelection())
+            editable = not field.isReadOnly()
+            pastes = editable and (clipboard is not None and clipboard.hasText()
+                                   if isinstance(field, QLineEdit) else field.canPaste())
+            plain = pastes
+        elif imports is not None:
+            # Never the document behind (N2 of the CP3 fixes review): Copy
+            # copies the posts' links and Delete skips; nothing takes a
+            # paste, and nothing acts while a sheet is in front.
+            self.act_copy.setEnabled(imports.can_edit("copy"))
+            self.act_cut.setEnabled(imports.can_edit("cut"))
+            self.act_delete.setEnabled(imports.can_edit("delete"))
+            self.act_paste.setEnabled(False)
+            self.act_paste_plain.setEnabled(False)
+            return
+        elif self.current_pdf_viewer() is not None:
+            selected, editable, pastes, plain = True, False, False, False   # Copy only
+        else:
+            ed = self.current_editor()
+            selected = ed is not None and ed.textCursor().hasSelection()
+            editable = ed is not None and not ed.isReadOnly()
+            # What the editor takes, a picture included; Paste and Match
+            # Style pastes words only.
+            pastes = editable and ed.canPaste()
+            plain = editable and has_words
+        self.act_copy.setEnabled(selected)
+        self.act_cut.setEnabled(selected and editable)
+        self.act_delete.setEnabled(selected and editable)
+        self.act_paste.setEnabled(pastes)
+        self.act_paste_plain.setEnabled(plain)
+
+    def _on_focus_changed(self, _old, new) -> None:
+        tabs = getattr(self, "tabs", None)
+        if tabs is None or not shiboken6.isValid(tabs):
+            return                                   # the window is closing
+        self._note_side_in_use(new)
+        self._follow_field(new)
+        self._on_field_changed()
+
+    def _follow_field(self, widget) -> None:
+        """Cut, Copy, Delete, Undo and Redo follow the text field with the
+        focus as it changes, as they follow the document: a find field, a
+        sheet's field, the Imports window's article (S4 of the CP3 fixes
+        review). The one place for every field; the document has its own
+        connections."""
+        old = getattr(self, "_followed_field", None)
+        if old is not None and shiboken6.isValid(old):
+            for signal in _field_signals(old):
+                signal.disconnect(self._on_field_changed)
+        self._followed_field = None
+        if _text_field(widget) is not None:
+            for signal in _field_signals(widget):
+                signal.connect(self._on_field_changed)
+            self._followed_field = widget
+
+    def _on_field_changed(self, *_args) -> None:
+        self._update_clipboard_commands()
+        self._update_undo_redo_buttons()
 
     def _toggle_format(self, fmt: str):
         ed = self.current_editor()
@@ -836,193 +1753,804 @@ class MainWindow(QMainWindow):
             getattr(ed, f'toggle_{fmt}')()
             self._update_format_buttons()
 
+    def _schedule_format_buttons(self):
+        """Show the style at the caret once the event loop is free: moving
+        the caret or extending a selection reports several changes at
+        once, and they need one update, not three."""
+        timer = getattr(self, "_format_buttons_timer", None)
+        if timer is None:
+            timer = self._format_buttons_timer = QTimer(self)
+            timer.setSingleShot(True)
+            timer.setInterval(0)
+            timer.timeout.connect(self._update_format_buttons)
+        timer.start()
+
     def _update_format_buttons(self):
-        ed = self.current_editor()
-        if not ed:
-            self.header_widget.bold_btn.setChecked(False)
-            self.header_widget.italic_btn.setChecked(False)
-            self.header_widget.underline_btn.setChecked(False)
+        """The format commands show the style at the caret (or of the whole
+        selection): in the Format menu and on the format toolbar alike."""
+        if not hasattr(self, "act_bold"):
             return
-        cursor = ed.textCursor()
-        if cursor.hasSelection():
-            bold = ed._all_in_selection(cursor, lambda f: f.fontWeight() > 400)
-            italic = ed._all_in_selection(cursor, lambda f: f.fontItalic())
-            underline = ed._all_in_selection(cursor, lambda f: f.fontUnderline())
+        ed = self.current_editor()
+        styles = {self.act_bold: rich_text.BOLD, self.act_italic: rich_text.ITALIC,
+                  self.act_underline: rich_text.UNDERLINE, self.act_strike: rich_text.STRIKE,
+                  self.act_code: rich_text.CODE}
+        cursor = ed.textCursor() if ed else None
+        if cursor is None or cursor.isNull():
+            state = {}
+        elif cursor.hasSelection():
+            # One bounded pass over the selection for all five.
+            state = rich_text.selection_state(cursor, tuple(styles.values()))
         else:
             fmt = ed.currentCharFormat()
-            bold = fmt.fontWeight() > 400
-            italic = fmt.fontItalic()
-            underline = fmt.fontUnderline()
-        self.header_widget.bold_btn.setChecked(bold)
-        self.header_widget.italic_btn.setChecked(italic)
-        self.header_widget.underline_btn.setChecked(underline)
+            state = {style: rich_text.has_style(fmt, style) for style in styles.values()}
+        for action, style in styles.items():
+            action.setChecked(state.get(style, False))
+        self._update_style_checks(ed)
+        if self._caret_context() != getattr(self, "_caret_context_shown", (False, False)):
+            # The caret went into a code block or a table, or out of one.
+            self._update_editor_commands()
 
+    def _update_style_checks(self, ed) -> None:
+        """The Style menu checks the style of the paragraph at the caret
+        (none for a selection of mixed styles, or Heading 4 and lower,
+        which come from Markdown files)."""
+        if not hasattr(self, "act_styles"):
+            return
+        cursor = ed.textCursor() if ed else None
+        paragraphs = (rich_text.paragraph_state(cursor) if cursor is not None
+                      else rich_text.ParagraphState())
+        level = paragraphs.heading if paragraphs.code is None else -1
+        for index, action in enumerate(self.act_styles):
+            action.setChecked(index == level)
+        for action in self.act_code_languages:
+            action.setChecked(paragraphs.code is not None and action.data() == (
+                canonical_language(paragraphs.code) or paragraphs.code))
+        if getattr(self, "format_toolbar", None) is not None:
+            if paragraphs.code is not None:
+                name = self._code_style_name(paragraphs.code)
+            elif 0 <= level < len(self.act_styles):
+                name = self.act_styles[level].text()
+            elif level > 0:
+                name = _("Heading {level}").format(level=level)
+            else:
+                name = pgettext("paragraph style", "Mixed")
+            self.format_toolbar.set_style_name(name)
+            if ed is not None:
+                ed.selection_bar.set_style_name(name)
+        # A checklist is shown as one, not as a bulleted list as well.
+        self.act_bullets.setChecked(paragraphs.list_kind == rich_text.BULLET
+                                    and not paragraphs.tasks)
+        self.act_numbers.setChecked(paragraphs.list_kind == rich_text.NUMBER)
+        self.act_checklist.setChecked(paragraphs.tasks)
+        rich = cursor is not None and self._editor_kind(ed) == "rich"
+        tasks = rich_text.task_blocks(cursor) if rich else []
+        self.act_tick.setEnabled(bool(tasks) and not self._shows_preview_only(ed))
+        self.act_tick.setText(_("Mark as Unchecked") if tasks and all(
+            b.blockFormat().marker() == rich_text.TICKED for b in tasks)
+            else _("Mark as Checked"))
+        target = rich_text.footnote_jump(cursor) if rich else None
+        self.act_footnote_jump.setEnabled(target is not None)
+        self.act_footnote_jump.setText(
+            _("Go to Mark") if target is not None and target < cursor.position()
+            else _("Go to Note"))
+        self.act_quote.setChecked(paragraphs.quoted)
+        in_link = (cursor is not None and self._editor_kind(ed) == "rich"
+                   and rich_text.link_range(cursor) is not None)
+        self.act_link.setText(_("Edit Link\u2026") if in_link else _("Add Link\u2026"))
 
     # ----------------------------------------------------------------------
     # ACTIONS / MENU
     # ----------------------------------------------------------------------
     def _build_actions(self):
-        self.act_new = QAction("New", self)
-        self.act_new.setShortcut(QKeySequence.New)
-        self.act_new.triggered.connect(self.new_tab)
+        """Every command of the window, through the one command list
+        (commands.py), which also feeds the Keyboard Shortcuts window."""
+        self.commands = CommandRegistry(self)
+        add = self.commands.add
 
-        self.act_open = QAction("Open…", self)
-        self.act_open.setShortcut(QKeySequence.Open)
-        self.act_open.triggered.connect(self.open_dialog)
-
-        self.act_save = QAction("Save", self)
-        self.act_save.setShortcut(QKeySequence.Save)
-        self.act_save.triggered.connect(self.save)
-
-        self.act_save_as = QAction("Save As…", self)
-        self.act_save_as.setShortcut(QKeySequence("Ctrl+Shift+S"))
+        self.act_new = add(Command("file.new", _("New"), FILE, QKeySequence.StandardKey.New,
+                                   listed_as=_("New tab"), keywords=("tab", "document")),
+                           triggered=self.new_tab)
+        self.act_open = add(Command("file.open", _("Open…"), FILE,
+                                    QKeySequence.StandardKey.Open, listed_as=_("Open file")),
+                            triggered=self.open_dialog)
+        self.act_save = add(Command("file.save", _("Save"), FILE, QKeySequence.StandardKey.Save),
+                            triggered=self.save)
         # Contextual: behaves as classic Save As when no Nostr profile
         # is connected; otherwise asks where to save (local file vs.
         # encrypted Nostr draft) and remembers the per-tab choice. See
         # ``_on_save_as_pressed`` for the full decision tree.
-        self.act_save_as.triggered.connect(self._on_save_as_pressed)
-
-        self.act_page_setup = QAction("Page Setup…", self)
-        self.act_page_setup.triggered.connect(self._on_page_setup)
-
+        self.act_save_as = add(Command("file.save_as", _("Save As…"), FILE, "Ctrl+Shift+S"),
+                               triggered=self._on_save_as_pressed)
+        # Shift-Command-P on a Mac, the key Apple's guidelines give Page
+        # Setup (MyEditor 3.3's Publish as Note key moves off it there).
+        self.act_page_setup = add(Command("file.page_setup", _("Page Setup…"), FILE,
+                                          platform_keys("Ctrl+Shift+P", None)),
+                                  triggered=self._on_page_setup)
         # Print prints the current tab as formatted pages (see printing.py);
         # both actions dim when the current tab has nothing to print.
-        self.act_print = QAction("Print\u2026", self)
-        self.act_print.setShortcut(QKeySequence.StandardKey.Print)
-        self.act_print.triggered.connect(self._on_print)
-        self.act_print_preview = QAction("Print Preview\u2026", self)
-        self.act_print_preview.triggered.connect(self._on_print_preview)
-
+        self.act_print = add(Command("file.print", _("Print\u2026"), FILE,
+                                     QKeySequence.StandardKey.Print),
+                             triggered=self._on_print)
+        # Ctrl+Shift+O, LibreOffice's Print Preview (offered where the
+        # print panel has no preview of its own: not on a Mac).
+        self.act_print_preview = add(Command("file.print_preview", _("Print Preview\u2026"),
+                                             FILE, platform_keys(None, "Ctrl+Shift+O")),
+                                     triggered=self._on_print_preview)
         # Knitting renders the on-disk .Rmd through the R toolchain, so the
         # actions only light up for .Rmd tabs (see _update_knit_actions).
-        self.act_knit_html = QAction("Knit to HTML", self)
-        self.act_knit_html.setShortcut(QKeySequence("Ctrl+Shift+K"))
-        self.act_knit_html.setEnabled(False)
-        self.act_knit_html.triggered.connect(lambda: self._on_knit("html"))
-        self.addAction(self.act_knit_html)
+        self.act_knit_html = add(Command("file.knit_html", _("Knit to HTML"), FILE,
+                                         "Ctrl+Shift+K", listed_as=_("Knit R Markdown to HTML")),
+                                 triggered=lambda: self._on_knit("html"), enabled=False)
+        self.act_knit_pdf = add(Command("file.knit_pdf", _("Knit to PDF"), FILE),
+                                triggered=lambda: self._on_knit("pdf"), enabled=False)
+        self.act_rmd_toolchain = add(Command("file.rmd_toolchain", _("R Markdown Toolchain…"),
+                                             FILE),
+                                     triggered=self._on_rmd_toolchain)
+        # Ctrl+W (Command-W) first, as Notepad, Word and every Mac app show
+        # it; the system's other Close keys (Ctrl+F4 on Windows) answer too.
+        close_keys = ("Ctrl+W",) + tuple(
+            keys for keys in all_key_texts(QKeySequence.StandardKey.Close) if keys != "Ctrl+W")
+        self.act_close_tab = add(Command("file.close_tab", _("Close Tab"), FILE, close_keys,
+                                         listed_as=_("Close tab")),
+                                 triggered=self._close_current_tab)
+        self.act_quit = add(Command("file.quit", _("Quit"), FILE, "Ctrl+Q",
+                                    role=QAction.MenuRole.QuitRole),
+                            triggered=self._quit_application)
 
-        self.act_knit_pdf = QAction("Knit to PDF", self)
-        self.act_knit_pdf.setEnabled(False)
-        self.act_knit_pdf.triggered.connect(lambda: self._on_knit("pdf"))
-
-        self.act_rmd_toolchain = QAction("R Markdown Toolchain…", self)
-        self.act_rmd_toolchain.triggered.connect(self._on_rmd_toolchain)
-
-        self.act_close_tab = QAction("Close Tab", self)
-        self.act_close_tab.setShortcut(QKeySequence("Ctrl+W"))
-        self.act_close_tab.triggered.connect(self._close_current_tab)
-
-        self.act_quit = QAction("Quit", self)
-        self.act_quit.setShortcut(QKeySequence("Ctrl+Q"))
-        self.act_quit.triggered.connect(self._quit_application)
+        # Edit, as in every Mac app. Cut, Copy, Paste and Select All act on
+        # whatever has the keyboard focus: the document, the find field,
+        # the PDF reader (see _edit_focused).
+        self.act_undo = add(Command("edit.undo", _("Undo"), EDIT, QKeySequence.StandardKey.Undo),
+                            triggered=self._undo)
+        self.act_redo = add(Command("edit.redo", _("Redo"), EDIT, QKeySequence.StandardKey.Redo),
+                            triggered=self._redo)
+        self.act_cut = add(Command("edit.cut", _("Cut"), EDIT, QKeySequence.StandardKey.Cut),
+                           triggered=lambda: self._edit_focused("cut"))
+        self.act_copy = add(Command("edit.copy", _("Copy"), EDIT, QKeySequence.StandardKey.Copy),
+                            triggered=lambda: self._edit_focused("copy"))
+        self.act_paste = add(Command("edit.paste", _("Paste"), EDIT,
+                                     QKeySequence.StandardKey.Paste),
+                             triggered=lambda: self._edit_focused("paste"))
+        # Paste as plain text, in the style of the text around it.
+        self.act_paste_plain = add(
+            Command("edit.paste_plain", _("Paste and Match Style"), EDIT,
+                    platform_keys("Ctrl+Alt+Shift+V", "Ctrl+Shift+V"),
+                    keywords=(_("plain text"),)),
+            triggered=self._paste_plain)
+        self.act_delete = add(Command("edit.delete", _("Delete"), EDIT),
+                              triggered=lambda: self._edit_focused("delete"))
+        self.act_select_all = add(Command("edit.select_all", _("Select All"), EDIT,
+                                          QKeySequence.StandardKey.SelectAll),
+                                  triggered=lambda: self._edit_focused("select_all"))
+        # Settings: in the application menu on a Mac (Command-comma), at the
+        # end of the Edit menu elsewhere (Ctrl+comma, as GNOME and most apps).
+        self.act_settings = add(Command("app.settings", _("Settings\u2026"), EDIT, "Ctrl+,",
+                                        listed_as=_("Settings"),
+                                        keywords=("preferences", "options"),
+                                        role=QAction.MenuRole.PreferencesRole),
+                                triggered=self._show_settings)
 
         # Formatting
-        self.act_bold = QAction("Bold", self)
-        self.act_bold.setShortcut(QKeySequence("Ctrl+B"))
-        self.act_bold.triggered.connect(self._fmt_bold)
+        self.act_bold = add(Command("format.bold", _("Bold"), FORMAT, "Ctrl+B",
+                                    checkable=True),
+                            triggered=self._fmt_bold)
+        self.act_italic = add(Command("format.italic", _("Italic"), FORMAT, "Ctrl+I",
+                                    checkable=True),
+                              triggered=self._fmt_italic)
+        self.act_underline = add(Command("format.underline", _("Underline"), FORMAT, "Ctrl+U",
+                                    checkable=True),
+                                 triggered=self._fmt_underline)
+        # Underline has no Markdown, so it is offered only where the file
+        # keeps it: HTML documents (owner decision Q-L). Elsewhere it is
+        # dimmed, and it has no toolbar button.
+        self.act_underline.setToolTip(_("Underlining is kept in HTML documents only."))
+        # Shift-Command-X on a Mac, Alt+Shift+5 elsewhere, as in Google Docs:
+        # Notes, Pages and TextEdit have no key for it, nor Word or
+        # LibreOffice (the one exception to Apple's keys on a Mac, kept
+        # because writers know it from Google Docs).
+        self.act_strike = add(Command("format.strike", _("Strikethrough"), FORMAT,
+                                      platform_keys("Ctrl+Shift+X", "Alt+Shift+5"),
+                                      checkable=True, keywords=(_("cross out"),)),
+                              triggered=lambda: self._toggle_style(rich_text.STRIKE))
+        # Ctrl+E, Notion's and GitHub's key for it; on a Mac Shift-Command-E,
+        # as Command-E is Use Selection for Find there.
+        self.act_code = add(Command("format.code", _("Inline Code"), FORMAT,
+                                    platform_keys("Ctrl+Shift+E", "Ctrl+E"),
+                                    checkable=True, keywords=(_("monospace"),)),
+                            triggered=lambda: self._toggle_style(rich_text.CODE))
+        # Ctrl+D (Command-D), MyEditor 3.3's Reset Format key; Command-\ and
+        # Ctrl+\, Google Docs' keys for it, answer too.
+        self.act_reset_format = add(Command("format.reset", _("Clear Formatting"), FORMAT,
+                                            ("Ctrl+D", "Ctrl+\\"), keywords=(_("plain"),)),
+                                    triggered=self._reset_format)
+        # Paragraph styles. Google Docs' keys on a Mac, Option-Command-0 to 3
+        # (Notes' Shift-Command-T and H are MyEditor 3.3's theme and syntax
+        # keys). Ctrl+0 to 3 elsewhere, as in LibreOffice, because Ctrl+Alt
+        # is AltGr there and types characters (² and ³ on a German keyboard).
+        mac_style_keys = {level: f"Ctrl+Alt+{level}" for level in range(4)}
+        self._style_group = QActionGroup(self)
+        self._style_group.setExclusionPolicy(QActionGroup.ExclusionPolicy.ExclusiveOptional)
+        self.act_styles = []
+        for level, title, words in (
+                (0, _("Body"), (_("paragraph"), _("text"))),
+                (1, _("Heading 1"), (_("title"), "h1")),
+                (2, _("Heading 2"), (_("subtitle"), "h2")),
+                (3, _("Heading 3"), ("h3",))):
+            action = add(Command(f"format.style.{'body' if not level else f'h{level}'}", title,
+                                 FORMAT, platform_keys(mac_style_keys[level], f"Ctrl+{level}"),
+                                 checkable=True, keywords=words,
+                                 slash_section=slash_menu.TEXT),
+                         triggered=lambda n=level: self._set_heading(n))
+            self._style_group.addAction(action)
+            self.act_styles.append(action)
+        # Lists: Google Docs' keys on every system (Ctrl+Shift+8 bulleted, 7
+        # numbered, 9 checklist; Shift-Command on a Mac), since Notes'
+        # Checklist key is MyEditor 3.3's Show Line Numbers.
+        self.act_bullets = add(Command("format.list.bullet", _("Bulleted List"), FORMAT,
+                                       "Ctrl+Shift+8",
+                                       checkable=True, keywords=(_("bullets"), _("list")),
+                                       slash_section=slash_menu.LISTS),
+                               triggered=lambda: self._toggle_list(rich_text.BULLET))
+        self.act_numbers = add(Command("format.list.number", _("Numbered List"), FORMAT,
+                                       "Ctrl+Shift+7",
+                                       checkable=True,
+                                       keywords=(_("numbers"), _("list"), _("ordered")),
+                                       slash_section=slash_menu.LISTS),
+                               triggered=lambda: self._toggle_list(rich_text.NUMBER))
+        self.act_checklist = add(Command("format.list.task", _("Checklist"), FORMAT,
+                                         "Ctrl+Shift+9",
+                                         checkable=True,
+                                         keywords=(_("todo"), _("checkbox"), _("task")),
+                                         slash_section=slash_menu.LISTS),
+                                 triggered=lambda: self._editor_call("toggle_checklist"))
+        # Mark as Checked: Notes' key on a Mac; Ctrl+Return elsewhere, as in
+        # Notion (Ctrl+Shift+U is the Unicode input of Linux desktops). It
+        # is on only in a checklist, so Ctrl+Return leaves a code block or
+        # a table as before.
+        self.act_tick = add(Command("format.list.tick", _("Mark as Checked"), FORMAT,
+                                    platform_keys("Ctrl+Shift+U", "Ctrl+Return"),
+                                    keywords=(_("tick"), _("done"), _("task"))),
+                            triggered=self._toggle_ticks)
+        # Go to Note and back (footnotes): the keyboard's way to Command-click.
+        self.act_footnote_jump = add(Command("edit.footnote_jump", _("Go to Note"), EDIT,
+                                             keywords=(_("footnote"),)),
+                                     triggered=self._footnote_jump)
+        self.act_indent = add(Command("format.indent", _("Increase Indent"), FORMAT, "Ctrl+]",
+                                      keywords=(_("nest"),)),
+                              triggered=lambda: self._change_indent(+1))
+        self.act_outdent = add(Command("format.outdent", _("Decrease Indent"), FORMAT,
+                                       "Ctrl+["),
+                               triggered=lambda: self._change_indent(-1))
+        # Apple Notes' Block Quote key, and Bear's, on every system (Word,
+        # Google Docs and LibreOffice have none).
+        self.act_quote = add(Command("format.quote", _("Quote"), FORMAT, "Ctrl+'",
+                                     checkable=True, keywords=(_("citation"), _("blockquote")),
+                                     slash_section=slash_menu.BLOCKS),
+                             triggered=lambda: self._editor_call("toggle_quote"))
 
-        self.act_italic = QAction("Italic", self)
-        self.act_italic.setShortcut(QKeySequence("Ctrl+I"))
-        self.act_italic.triggered.connect(self._fmt_italic)
+        # Insert. Command-K, as in Pages, Mail and Notes; the title says
+        # Edit Link… while the caret is in a link.
+        self.act_link = add(Command("insert.link", _("Add Link\u2026"), INSERT, "Ctrl+K",
+                                    keywords=(_("web address"), "url", _("hyperlink")),
+                                    slash_section=slash_menu.INSERT,
+                                    insert_title=_("Link\u2026")),
+                            triggered=lambda: self._editor_call("show_link_popover"))
+        # Ctrl+Shift+Minus: no app has a key for a divider; the minus is
+        # the line Markdown draws it with (---).
+        self.act_divider = add(Command("insert.divider", _("Divider"), INSERT, "Ctrl+Shift+-",
+                                       keywords=(_("horizontal rule"), _("line"),
+                                                 _("separator")),
+                                       slash_section=slash_menu.BLOCKS),
+                               triggered=lambda: self._editor_call("insert_divider"))
+        # Code Block: Slack's key, Option-Shift-Command-C on a Mac, and
+        # Ctrl+Shift+C elsewhere (Ctrl+Alt is AltGr there). The language is
+        # asked right after, in a short list at the caret.
+        self.act_code_block = add(Command("insert.code_block", _("Code Block"), INSERT,
+                                          platform_keys("Ctrl+Alt+Shift+C", "Ctrl+Shift+C"),
+                                          keywords=(_("code"), _("snippet"), _("program"),
+                                                    "fence"),
+                                          slash_section=slash_menu.BLOCKS),
+                                  triggered=self._insert_code_block)
+        # The language of the code block at the caret: Format > Code
+        # Language, one choice of a group.
+        self._code_language_group = QActionGroup(self)
+        self.act_code_languages = []
+        for language, name in [("", _("Plain Text"))] + sorted(
+                ((key, title) for key, title in LANGUAGE_DISPLAY_NAMES.items()
+                 if key != "markdown"), key=lambda pair: pair[1].lower()):
+            action = add(Command(f"format.code_language.{language or 'plain'}", name, FORMAT,
+                                 checkable=True, keywords=(_("code"), _("language"))),
+                         triggered=lambda lang=language: self._set_code_language(lang))
+            action.setData(language)
+            self._code_language_group.addAction(action)
+            self.act_code_languages.append(action)
+        # Footnote: its mark at the caret, its note at the end of the
+        # document, where the caret goes (literal Markdown, rich_text.py).
+        # Ctrl+Shift+F: the nearest free key to Word's and Google Docs'
+        # (Ctrl+Alt+F, AltGr elsewhere; Option-Command-F is Find and
+        # Replace on a Mac).
+        self.act_footnote = add(Command("insert.footnote", _("Footnote"), INSERT, "Ctrl+Shift+F",
+                                        keywords=(_("note"), _("source"), _("reference"),
+                                                  _("citation")),
+                                        slash_section=slash_menu.INSERT),
+                                triggered=lambda: self._editor_call("insert_footnote"))
+        # Image...: a picture file, put in as dropping it at the caret would.
+        # Pages' Insert > Choose… on a Mac (Shift-Command-V); elsewhere,
+        # where Ctrl+Shift+V pastes as plain text and Ctrl+Shift+G finds
+        # the previous match, Ctrl+Shift+E (no app has a key for it).
+        self.act_insert_image = add(Command("insert.image", _("Image\u2026"), INSERT,
+                                            platform_keys("Ctrl+Shift+V", "Ctrl+Shift+E"),
+                                            keywords=(_("picture"), _("photo")),
+                                            slash_section=slash_menu.INSERT),
+                                    triggered=self._insert_image)
+        # Table...: its size is chosen on a grid at the caret (table_picker).
+        # Ctrl+F12, LibreOffice's Insert Table (Command-F12 on a Mac).
+        self.act_table = add(Command("insert.table", _("Table\u2026"), INSERT, "Ctrl+F12",
+                                     keywords=(_("grid"), _("rows"), _("columns")),
+                                     slash_section=slash_menu.BLOCKS),
+                             triggered=self._insert_table)
+        # A table's rows and columns: Format > Table, and the context menu in
+        # a table. No keys: Pages' Option-arrow keys for rows and columns
+        # move by word and paragraph in text, and no convention has others.
+        self.act_table_commands = [
+            add(Command(f"format.table.{name}", title, FORMAT,
+                        keywords=(_("table"), _("row") if "row" in name else _("column"))),
+                triggered=lambda n=name: self._editor_table_command(n))
+            for name, title in (
+                ("add_row_above", _("Add Row Above")), ("add_row_below", _("Add Row Below")),
+                ("add_column_before", _("Add Column Before")),
+                ("add_column_after", _("Add Column After")),
+                ("delete_row", _("Delete Row")), ("delete_column", _("Delete Column")),
+                ("delete_table", _("Delete Table")))]
+        # Text colors stay in the document and in local files; Markdown
+        # has none, so they never reach Nostr.
+        self.act_colors = []
+        for name, color in TEXT_COLORS.items():
+            self.act_colors.append(add(
+                Command(f"format.color.{name.lower()}", _(name), FORMAT,
+                        keywords=(_("color"),)),
+                triggered=lambda c=color: self._apply_color(c)))
+        self.act_remove_color = add(Command("format.color.none", _("Remove Color"), FORMAT),
+                                    triggered=lambda: self._apply_color(None))
 
-        self.act_underline = QAction("Underline", self)
-        self.act_underline.setShortcut(QKeySequence("Ctrl+U"))
-        self.act_underline.triggered.connect(self._fmt_underline)
+        # Find, in the Edit menu. Find Next and Find Previous use each
+        # platform's own keys (Command-G on a Mac, F3 on Windows), and F3
+        # and Shift+F3 on every system, as MyEditor 3.3 had them.
+        self.act_find = add(Command("search.find", _("Find\u2026"), SEARCH, "Ctrl+F",
+                                    listed_as=_("Find")),
+                            triggered=lambda: self._show_find(replace=False))
+        # Option-Command-F on a Mac (TextEdit, Pages); Ctrl+H elsewhere
+        # (Word, Google Docs, LibreOffice). Never QKeySequence.Replace,
+        # which is Command-H, Hide, on a Mac.
+        self.act_replace = add(Command("search.replace", _("Find and Replace\u2026"), SEARCH,
+                                       platform_keys("Ctrl+Alt+F", "Ctrl+H"),
+                                       listed_as=_("Find and replace")),
+                               triggered=lambda: self._show_find(replace=True))
+        self.act_find_next = add(Command("search.next", _("Find Next"), SEARCH,
+                                         standard_and(QKeySequence.StandardKey.FindNext, "F3"),
+                                         listed_as=_("Find next")),
+                                 triggered=self._find_next)
+        self.act_find_prev = add(Command("search.previous", _("Find Previous"), SEARCH,
+                                         standard_and(QKeySequence.StandardKey.FindPrevious,
+                                                      "Shift+F3"),
+                                         listed_as=_("Find previous")),
+                                 triggered=self._find_prev)
+        # Command-E on a Mac: the selection becomes what Find Next looks for.
+        self.act_use_selection = add(
+            Command("search.use_selection", _("Use Selection for Find"), SEARCH,
+                    platform_keys("Ctrl+E", None)),
+            triggered=self._use_selection_for_find)
 
-        self.act_reset_format = QAction("Reset Format", self)
-        self.act_reset_format.setShortcut(QKeySequence("Ctrl+D"))
-        self.act_reset_format.triggered.connect(self._reset_format)
-
-        # Search
-        self.act_find = QAction("Find", self)
-        self.act_find.setShortcut(QKeySequence("Ctrl+F"))
-        self.act_find.triggered.connect(self._toggle_findbar)
-
-        self.act_find_next = QAction("Find Next", self)
-        self.act_find_next.setShortcut(QKeySequence("F3"))
-        self.act_find_next.triggered.connect(self._find_next)
-
-        self.act_find_prev = QAction("Find Previous", self)
-        self.act_find_prev.setShortcut(QKeySequence("Shift+F3"))
-        self.act_find_prev.triggered.connect(self._find_prev)
+        # Disabled where there is no editor (a PDF tab), so the shortcuts
+        # the PDF reader has for itself stay its own.
+        self._editor_actions = [
+            self.act_undo, self.act_redo, self.act_cut, self.act_paste, self.act_paste_plain,
+            self.act_delete, self.act_select_all, self.act_use_selection, self.act_replace,
+            self.act_indent, self.act_outdent,
+            self.act_bold, self.act_italic, self.act_underline, self.act_reset_format,
+            *self.act_colors, self.act_remove_color,
+        ]
+        # Structure that only a document holding Markdown can carry
+        # (headings, lists, links): off in plain-text tabs as well.
+        self._rich_actions = [self.act_strike, self.act_code, *self.act_styles,
+                              self.act_bullets, self.act_numbers, self.act_checklist,
+                              self.act_quote, self.act_divider, self.act_link,
+                              self.act_code_block, self.act_table, self.act_footnote,
+                              self.act_insert_image]
+        # Paragraph structure, which a table cell (one line of words in
+        # Markdown) cannot hold: off in a table.
+        self._block_actions = [*self.act_styles, self.act_bullets, self.act_numbers,
+                               self.act_checklist, self.act_quote, self.act_divider,
+                               self.act_code_block, self.act_table, self.act_indent,
+                               self.act_outdent]
+        # Styles of words, which code does not have: off in a code block.
+        self._word_actions = [self.act_bold, self.act_italic, self.act_underline,
+                              self.act_strike, self.act_code, self.act_link,
+                              *self.act_colors, self.act_remove_color, self.act_reset_format,
+                              self.act_footnote, self.act_insert_image]
 
         self._search_matches = []
         self._current_match_index = -1
         self._last_search_text = ""
-        self._search_extra_selections = []
 
-        # Theme + line numbers
-        self.act_toggle_theme = QAction("Toggle Dark/Light Theme", self)
-        self.act_toggle_theme.setShortcut(QKeySequence("Ctrl+Shift+T"))
-        self.act_toggle_theme.triggered.connect(self._toggle_theme)
-
-        self.act_toggle_line_numbers = QAction("Show Line Numbers", self)
-        self.act_toggle_line_numbers.setShortcut(QKeySequence("Ctrl+Shift+L"))
-        self.act_toggle_line_numbers.triggered.connect(self._toggle_line_numbers)
-        self.act_toggle_line_numbers.setCheckable(True)
-
-        self.act_toggle_syntax_hl = QAction("Syntax Highlighting", self)
-        self.act_toggle_syntax_hl.setShortcut(QKeySequence("Ctrl+Shift+H"))
-        self.act_toggle_syntax_hl.triggered.connect(self._toggle_syntax_highlighting)
-        self.act_toggle_syntax_hl.setCheckable(True)
-        self.act_toggle_syntax_hl.setChecked(False)
+        # Appearance is the system's (followed as it changes) unless Light
+        # or Dark is chosen; Automatic goes back to the system's. Switching
+        # between light and dark, line numbers and syntax highlighting keep
+        # MyEditor 3.3's keys: Ctrl+Shift+T, L and H.
+        self._appearance_group = QActionGroup(self)
+        self._appearance_group.setExclusive(True)
+        self.act_appearance = {}
+        for mode, title in (("system", pgettext("appearance", "Automatic")),
+                            ("light", pgettext("appearance", "Light")),
+                            ("dark", pgettext("appearance", "Dark"))):
+            action = add(Command(f"view.appearance.{mode}", title, VIEW, checkable=True,
+                                 keywords=(_("appearance"), _("theme"), "dark", "light")),
+                         triggered=lambda m=mode: self.set_appearance(m),
+                         checked=self.appearance == mode)
+            self._appearance_group.addAction(action)
+            self.act_appearance[mode] = action
+        # Named for what it does next, as Show Toolbar is.
+        self.act_switch_appearance = add(
+            Command("view.appearance.switch", _("Switch to Dark Appearance"), VIEW,
+                    "Ctrl+Shift+T", listed_as=_("Switch between light and dark"),
+                    keywords=(_("appearance"), _("theme"), "dark", "light")),
+            triggered=self._switch_appearance)
+        if isinstance(self.__dict__.get("is_dark_theme"), bool) and self.is_dark_theme:
+            self.act_switch_appearance.setText(_("Switch to Light Appearance"))
+        self.act_toggle_line_numbers = add(
+            Command("view.line_numbers", _("Show Line Numbers"), VIEW, "Ctrl+Shift+L",
+                    checkable=True, listed_as=_("Toggle line numbers")),
+            triggered=self._toggle_line_numbers)
+        self.act_toggle_syntax_hl = add(
+            Command("view.syntax_highlighting", _("Syntax Highlighting"), VIEW,
+                    "Ctrl+Shift+H", checkable=True, listed_as=_("Toggle syntax highlighting")),
+            triggered=self._toggle_syntax_highlighting, checked=False)
 
         # View menu: background viewing aids. All four toggles are independent
         # and composable except the background pattern, which is a radio pick.
-        self.act_paper_mode = QAction("Paper Mode", self)
-        self.act_paper_mode.setCheckable(True)
-        self.act_paper_mode.setChecked(self.paper_mode)
-        self.act_paper_mode.toggled.connect(self._toggle_paper_mode)
+        self.act_paper_mode = add(Command("view.paper_mode", _("Paper Mode"), VIEW,
+                                          checkable=True),
+                                  toggled=self._toggle_paper_mode, checked=self.paper_mode)
 
         self._bg_pattern_group = QActionGroup(self)
         self._bg_pattern_group.setExclusive(True)
-
-        self.act_bg_none = QAction("None", self)
-        self.act_bg_lines = QAction("Lines", self)
-        self.act_bg_dashed = QAction("Dashed", self)
-        self.act_bg_dots = QAction("Dots", self)
-        self.act_bg_grid = QAction("Grid", self)
-
-        for name, action in (
-            ("none", self.act_bg_none),
-            ("lines", self.act_bg_lines),
-            ("dashed", self.act_bg_dashed),
-            ("dots", self.act_bg_dots),
-            ("grid", self.act_bg_grid),
-        ):
-            action.setCheckable(True)
-            action.setChecked(self.editor_background == name)
-            action.triggered.connect(lambda checked, n=name: self._set_background_pattern(n))
+        backgrounds = {}
+        # The pattern's name in the settings, and in the menu.
+        self._background_titles = {
+            "none": pgettext("background", "None"),
+            "lines": pgettext("background", "Lines"),
+            "dashed": pgettext("background", "Dashed"),
+            "dots": pgettext("background", "Dots"),
+            "grid": pgettext("background", "Grid"),
+        }
+        for name, title in self._background_titles.items():
+            action = add(Command(f"view.background.{name}", title, VIEW, checkable=True,
+                                 keywords=("background", "pattern")),
+                         triggered=lambda n=name: self._set_background_pattern(n),
+                         checked=self.editor_background == name)
             self._bg_pattern_group.addAction(action)
+            backgrounds[name] = action
+        self.act_bg_none = backgrounds["none"]
+        self.act_bg_lines = backgrounds["lines"]
+        self.act_bg_dashed = backgrounds["dashed"]
+        self.act_bg_dots = backgrounds["dots"]
+        self.act_bg_grid = backgrounds["grid"]
 
-        self.act_highlight_line = QAction("Highlight Current Line", self)
-        self.act_highlight_line.setCheckable(True)
-        self.act_highlight_line.setChecked(self.highlight_current_line)
-        self.act_highlight_line.toggled.connect(self._toggle_highlight_line)
+        # The language MyEditor speaks. Applied at the next start: many
+        # texts are read once, when their module loads (see i18n.py).
+        self._language_group = QActionGroup(self)
+        self._language_group.setExclusive(True)
+        chosen = i18n.chosen_language()
+        self.act_languages = []
+        self._language_codes = [i18n.SYSTEM] + i18n.available()
+        for code in self._language_codes:
+            title = (_("System Language") if code == i18n.SYSTEM
+                     else i18n.LANGUAGE_NAMES.get(code, code))
+            action = add(Command(f"view.language.{code}", title, VIEW, checkable=True,
+                                 keywords=("language", "sprache")),
+                         triggered=lambda c=code: self._choose_language(c),
+                         checked=chosen == code)
+            self._language_group.addAction(action)
+            self.act_languages.append(action)
 
+        # Option-Command-T on a Mac, as every Mac app's Show Toolbar; no key
+        # elsewhere, where none is common (Ctrl+Alt+T opens a terminal).
+        self.show_toolbar = bool(load_settings().get("show_toolbar", True))
+        # Typed Markdown turned into what it means ("# " a heading, "**x**"
+        # bold), in Edit > Substitutions as Apple's apps keep such
+        # substitutions; off until the person turns it on.
+        # Spelling, with the system's own checker (decision Q-O): on, as in
+        # Apple's apps; dimmed where the system has no checker.
+        self.check_spelling = bool(load_settings().get("check_spelling", True))
+        self.spelling_language = str(load_settings().get("spelling_language", "") or "")
+        # Shift+F7, LibreOffice's Automatic Spell Checking; on a Mac
+        # Option-Command-;, beside Apple's spelling key (Command-;).
+        self.act_check_spelling = add(
+            Command("edit.check_spelling", _("Check Spelling While Typing"), EDIT,
+                    platform_keys("Ctrl+Alt+;", "Shift+F7"), checkable=True, keywords=(_("spelling"), _("spellcheck"))),
+            toggled=self._set_check_spelling, checked=self.check_spelling)
+        self.markdown_shortcuts = bool(load_settings().get("markdown_shortcuts", False))
+        # The format bar over text selected with the pointer (Settings).
+        self.format_bar_on_selection = bool(
+            load_settings().get("format_bar_on_selection", True))
+        self.act_markdown_shortcuts = add(
+            Command("edit.markdown_shortcuts", _("Markdown Shortcuts"), EDIT, checkable=True,
+                    keywords=(_("autoformat"), _("substitutions"), "markdown")),
+            toggled=self._set_markdown_shortcuts, checked=self.markdown_shortcuts)
+        # Write, Preview and Split: the text, its preview, or both side by
+        # side, for every document that holds Markdown (app-wide, like
+        # standup's). No app has keys for these; numbered in their order,
+        # with Control-Command on a Mac and Ctrl+Shift elsewhere (Command-1
+        # and Alt+1 go to tabs, Option-Command-1 and Ctrl+1 are headings).
+        mode = load_settings().get("view_mode", WRITE)
+        self.view_mode = mode if mode in preview_pane.MODES else WRITE
+        self._view_group = QActionGroup(self)
+        self.act_view_write = add(Command("view.write", _("Write"), VIEW,
+                                          platform_keys("Meta+Ctrl+1", "Ctrl+Shift+1"),
+                                          checkable=True,
+                                          keywords=(_("editor"), _("text"))),
+                                  triggered=lambda: self._choose_view(WRITE),
+                                  checked=self.view_mode == WRITE)
+        self.act_view_preview = add(Command("view.preview", _("Preview"), VIEW,
+                                          platform_keys("Meta+Ctrl+2", "Ctrl+Shift+2"),
+                                          checkable=True,
+                                            keywords=(_("reading"), _("read"))),
+                                    triggered=lambda: self._choose_view(PREVIEW),
+                                    checked=self.view_mode == PREVIEW)
+        self.act_view_split = add(Command("view.split", _("Split"), VIEW,
+                                          platform_keys("Meta+Ctrl+3", "Ctrl+Shift+3"),
+                                          checkable=True,
+                                          keywords=(_("side by side"),)),
+                                  triggered=lambda: self._choose_view(SPLIT),
+                                  checked=self.view_mode == SPLIT)
+        for action in (self.act_view_write, self.act_view_preview, self.act_view_split):
+            self._view_group.addAction(action)
+        # Writing in the monospace font, for those who prefer it (Q-K).
+        self.monospace_writing = bool(load_settings().get("monospace_writing", False))
+        style = load_settings().get("caret_style", DEFAULT_CARET_STYLE)
+        self.caret_style = style if style in CARET_STYLES else DEFAULT_CARET_STYLE
+        self.act_monospace_writing = add(
+            Command("view.monospace_writing", _("Use Monospace Font for Writing"), VIEW,
+                    checkable=True, keywords=(_("font"), _("typewriter"))),
+            toggled=self._set_monospace_writing, checked=self.monospace_writing)
+        self.act_show_toolbar = add(Command("view.toolbar", _("Show Toolbar"), VIEW,
+                                            platform_keys("Ctrl+Alt+T", None),
+                                            checkable=True),
+                                    toggled=self._set_toolbar_shown, checked=self.show_toolbar)
+        self.act_highlight_line = add(Command("view.highlight_line",
+                                              _("Highlight Current Line"), VIEW,
+                                              checkable=True),
+                                      toggled=self._toggle_highlight_line,
+                                      checked=self.highlight_current_line)
         # Distraction-free reading and writing: the whole window can go
         # full screen. QKeySequence.FullScreen is F11 on Windows/Linux
         # and Ctrl+Cmd+F on macOS, matching each platform's convention.
-        self.act_fullscreen = QAction("Full Screen", self)
-        self.act_fullscreen.setShortcut(QKeySequence.FullScreen)
-        self.act_fullscreen.setCheckable(True)
-        self.act_fullscreen.toggled.connect(self._toggle_fullscreen)
+        # Named for what it does next, as Notes, Pages and Finder name it
+        # (changeEvent keeps the name in step with the window).
+        self.act_fullscreen = add(Command("view.fullscreen", _("Enter Full Screen"), VIEW,
+                                          QKeySequence.StandardKey.FullScreen,
+                                          listed_as=_("Full screen")),
+                                  triggered=self._toggle_fullscreen)
+        # View > Show Sidebar, for the window in front that has one (the
+        # Imports window); dimmed while this window is in front. Its own
+        # key (Control-Command-S) belongs to that window.
+        self.act_window_sidebar = add(Command("view.sidebar", _("Show Sidebar"), VIEW,
+                                              listed_as=_("Show or hide the sidebar")),
+                                      triggered=self._toggle_window_sidebar, enabled=False)
 
-        self.addAction(self.act_bold)
-        self.addAction(self.act_italic)
-        self.addAction(self.act_underline)
-        self.addAction(self.act_reset_format)
-        self.addAction(self.act_toggle_theme)
-        self.addAction(self.act_toggle_line_numbers)
-        self.addAction(self.act_toggle_syntax_hl)
-        self.addAction(self.act_fullscreen)
+        # Nostr. Only the ones that need an account are marked: Create
+        # Account, Connect Signer, Restore and the membership window are
+        # how a person starts using Nostr. MyEditor 3.3's Ctrl+Shift family
+        # (P, A, M, I, D); on a Mac Publish as Note is Option-Command-P, as
+        # Shift-Command-P is Page Setup there.
+        self.act_nostr_publish_note = add(
+            Command("nostr.publish_note", _("Publish as Note…"), NOSTR,
+                    platform_keys("Ctrl+Alt+P", "Ctrl+Shift+P"),
+                    nostr=True, listed_as=_("Publish as note"), keywords=("post", "kind 1")),
+            triggered=self._on_nostr_publish_note)
+        self.act_nostr_publish_article = add(
+            Command("nostr.publish_article", _("Publish as Article…"), NOSTR,
+                    "Ctrl+Shift+A", nostr=True, listed_as=_("Publish as article"), keywords=("long", "blog")),
+            triggered=self._on_nostr_publish_article)
+        # Media (Blossom) - browse the user's uploaded blobs, upload new
+        # ones, or insert one into the current document at the cursor.
+        self.act_nostr_media = add(
+            Command("nostr.media_library", _("Media Library…"), NOSTR,
+                    "Ctrl+Shift+M", nostr=True, listed_as=_("Media library"), keywords=("images", "upload")),
+            triggered=self._on_nostr_media_library)
+        # A file of the media library, already on the media servers: not
+        # Insert > Image..., which puts in a file from the computer.
+        self.act_nostr_insert_image = add(
+            Command("nostr.insert_image", _("Insert Image from Media Library…"), NOSTR,
+                    "Ctrl+Shift+I", nostr=True, listed_as=_("Insert image from media library"),
+                    keywords=(_("picture"), _("photo"), _("image")),
+                    slash_section=slash_menu.INSERT,
+                    insert_title=_("Image from Media Library…")),
+            triggered=self._on_nostr_insert_image)
+        # Mention: "@" at the start of a word does the same while typing.
+        self.act_insert_mention = add(
+            Command("nostr.insert_mention", _("Insert Mention…"), NOSTR, nostr=True,
+                    keywords=(_("person"), _("people"), _("tag"), "@"),
+                    slash_section=slash_menu.INSERT, insert_title=_("Mention…")),
+            triggered=lambda: self._ask_mention(self.current_editor(), -1))
+        # A note or an article quoted in the text, as a paragraph of its own.
+        self.act_insert_reference = add(
+            Command("nostr.insert_reference", _("Insert Note or Article…"), NOSTR,
+                    "Ctrl+Shift+R", nostr=True,
+                    keywords=(_("quote"), _("embed"), _("note"), _("article")),
+                    slash_section=slash_menu.INSERT, insert_title=_("Note or Article…")),
+            triggered=lambda: self._ask_reference(self.current_editor()))
+        # Article Details: the inspector beside the document, as in Pages
+        # (View > Inspector, Option-Command-I there); elsewhere Ctrl+F5,
+        # LibreOffice's key for its sidebar.
+        self.act_article_details = add(
+            Command("nostr.article_details", _("Article Details"), NOSTR,
+                    platform_keys("Ctrl+Alt+I", "Ctrl+F5"), checkable=True, nostr=True,
+                    listed_as=_("Show or hide Article Details"),
+                    keywords=(_("inspector"), _("title"), _("summary"), _("cover"),
+                              _("hashtags"))),
+            toggled=self._show_article_details_panel)
+        # Audio or video, uploaded to the media servers and put in the text
+        # as its address, where readers show a player.
+        self.act_insert_audio_video = add(
+            Command("nostr.insert_audio_video", _("Insert Audio or Video…"), NOSTR,
+                    "Ctrl+Shift+J", nostr=True, keywords=(_("audio"), _("video"), _("podcast"), _("music"),
+                                          _("film")), slash_section=slash_menu.INSERT,
+                    insert_title=_("Audio or Video…")),
+            triggered=self._ask_audio_or_video)
+        # Drafts surface - the side-docked panel, toggled from the Nostr
+        # menu or with MyEditor 3.3's Ctrl+Shift+D.
+        self.act_nostr_drafts = add(
+            Command("nostr.drafts", _("Drafts"), NOSTR, "Ctrl+Shift+D", checkable=True,
+                    nostr=True, listed_as=_("Toggle Drafts panel")),
+            triggered=self._on_toggle_drafts_panel)
+        # The panel's other view: what the account published.
+        self.act_nostr_published = add(
+            Command("nostr.published", _("Published"), NOSTR, "Ctrl+Shift+B", nostr=True,
+                    listed_as=_("Show what you published"),
+                    keywords=(_("notes"), _("articles"), _("published"))),
+            triggered=self._on_show_published)
+        # The Drafts panel's view reads again (its title follows the view
+        # shown). In the menu bar, where every command of the app is listed,
+        # and in the panel's action menu; each platform's own key for it.
+        self.act_refresh_drafts = add(
+            Command("nostr.refresh_drafts", _("Refresh Drafts"), NOSTR,
+                    QKeySequence.StandardKey.Refresh, nostr=True,
+                    listed_as=_("Refresh the Drafts panel"), keywords=("reload", "sync")),
+            triggered=self._refresh_drafts_panel, enabled=False)
+        # Where the account keeps its drafts: a sheet on this window. In the
+        # menu bar, where every command of the app is listed, and in the
+        # Drafts panel's action menu.
+        self.act_draft_relays = add(
+            Command("nostr.draft_relays", _("Draft Relays…"), NOSTR, nostr=True,
+                    keywords=("drafts", "private", "relays")),
+            triggered=self._open_draft_relays)
+        # Imports: the window of sources, their posts and the open one.
+        # Ctrl+Shift+N, for the new posts it gathers.
+        self.act_nostr_imports = add(
+            Command("nostr.imports", _("Imports\u2026"), NOSTR, "Ctrl+Shift+N", nostr=True,
+                    keywords=("rss", "feed", "import", "sources")),
+            triggered=self._open_imports_window)
+        # Q-7: off until turned on here, or where Imports offers it once.
+        self.act_imports_badge = add(
+            Command("nostr.imports_badge", IMPORTS_BADGE_TITLE, NOSTR, checkable=True,
+                    nostr=True, keywords=("dock", "badge", "taskbar", "new posts")),
+            toggled=self._on_imports_badge_toggled)
+        self.act_membership = add(
+            Command("nostr.membership", _("EINUNDZWANZIG Membership\u2026"), NOSTR,
+                    keywords=("einundzwanzig", "21", "join")),
+            triggered=self._open_membership_window)
+        self.act_create_account = add(
+            Command("nostr.create_account", _("Create Account\u2026"), NOSTR,
+                    keywords=("new", "key", "sign up")),
+            triggered=self._on_create_account)
+        self.act_nostr_connect = add(
+            Command("nostr.connect", _("Connect Signer App\u2026"), NOSTR,
+                    keywords=("login", "bunker", "signer")),
+            triggered=self._on_nostr_connect)
+        self.act_restore_account = add(
+            Command("nostr.restore_account", _("Restore Account\u2026"), NOSTR,
+                    keywords=("backup", "import")),
+            triggered=self._on_restore_account)
+        self._act_backup_account = add(
+            Command("nostr.backup_account", _("Back Up Account\u2026"), NOSTR, nostr=True,
+                    keywords=("export", "key")),
+            triggered=self._on_backup_account)
+        self.act_move_to_signer = add(
+            Command("nostr.move_to_signer", _("Move Key to Signer App\u2026"), NOSTR,
+                    nostr=True, keywords=("amber", "phone", "key")),
+            triggered=self._on_move_to_signer)
+        self.act_edit_profile = add(
+            Command("nostr.edit_profile", _("Edit Profile\u2026"), NOSTR, nostr=True,
+                    keywords=("name", "picture", "about", "lightning address")),
+            triggered=self._on_edit_profile)
+        self.act_nostr_sign_out = add(
+            Command("nostr.sign_out", _("Sign Out"), NOSTR, nostr=True,
+                    keywords=("log out",)),
+            triggered=self._on_nostr_sign_out)
+
+        # The Window menu every Mac app has, where Command-M minimizes the
+        # window in front (Qt makes none). Windows and Linux keep these in
+        # the title bar.
+        if sys.platform == "darwin":
+            self.act_minimize = add(Command("window.minimize", _("Minimize"), WINDOW,
+                                            "Ctrl+M"),
+                                    triggered=lambda: self._front_window().showMinimized())
+            self.act_zoom = add(Command("window.zoom", _("Zoom"), WINDOW),
+                                triggered=self._zoom_front_window)
+            self.act_bring_all = add(Command("window.bring_all", _("Bring All to Front"),
+                                             WINDOW),
+                                     triggered=self._bring_all_to_front)
+
+        # Moving around by key: tabs as in Safari on a Mac (Control-Tab and
+        # Shift-Command-] for the next one, Command-1 to 8 and Command-9 for
+        # the last), as in Firefox and GNOME's apps elsewhere (Ctrl+Tab,
+        # Ctrl+PgDown, Alt+1 to 9; Ctrl+1 is Heading 1 there). F6 and
+        # Shift+F6 move to the next and the previous pane, as on Windows
+        # and in GNOME.
+        self.act_next_tab = add(Command(
+            "nav.next_tab", _("Show Next Tab"), NAVIGATION,
+            platform_keys(("Meta+Tab", "Ctrl+}"), ("Ctrl+Tab", "Ctrl+PgDown"))),
+            triggered=lambda: self._show_tab(self.tabs.currentIndex() + 1))
+        self.act_previous_tab = add(Command(
+            "nav.previous_tab", _("Show Previous Tab"), NAVIGATION,
+            platform_keys(("Meta+Shift+Tab", "Ctrl+{"), ("Ctrl+Shift+Tab", "Ctrl+PgUp"))),
+            triggered=lambda: self._show_tab(self.tabs.currentIndex() - 1))
+        for number in range(1, 9):
+            add(Command(f"nav.tab_{number}", _("Go to Tab {number}").format(number=number),
+                        NAVIGATION, platform_keys(f"Ctrl+{number}", f"Alt+{number}")),
+                triggered=lambda n=number: self._show_tab(n - 1, wrap=False))
+        add(Command("nav.last_tab", _("Go to Last Tab"), NAVIGATION,
+                    platform_keys("Ctrl+9", "Alt+9")),
+            triggered=lambda: self._show_tab(self.tabs.count() - 1))
+        add(Command("nav.next_pane", _("Next Pane"), NAVIGATION, "F6",
+                    listed_as=_("Move to the next pane"), keywords=(_("focus"), _("panel"))),
+            triggered=lambda: self._move_to_pane(+1))
+        add(Command("nav.previous_pane", _("Previous Pane"), NAVIGATION, "Shift+F6",
+                    listed_as=_("Move to the previous pane"),
+                    keywords=(_("focus"), _("panel"))),
+            triggered=lambda: self._move_to_pane(-1))
+        # The PDF reader's own keys never take a command's, but those of
+        # the editing commands, which are off in a PDF tab.
+        editor_only = {action.objectName() for action in (
+            *self._editor_actions, *self._rich_actions, *self._block_actions,
+            *self._word_actions)}
+        self.commands.refuse_clashes(
+            "the PDF reader",
+            [keys for _s, _w, act, tab_keys, view_keys in pdf_reader_keys() if act is not None
+             for keys in tab_keys + view_keys], yielding=editor_only)
+
+        # Help
+        self.act_welcome = add(Command("help.welcome", _("Welcome"), HELP),
+                               triggered=self.show_welcome_tab)
+        # Ctrl+/ (Command-/), the key of Google Docs' and Slack's lists.
+        self.act_shortcuts = add(Command("help.shortcuts", _("Keyboard Shortcuts"), HELP,
+                                         "Ctrl+/", keywords=("keys", "cheat sheet")),
+                                 triggered=self._show_shortcuts)
+        self.act_install_help = add(Command("help.install", _("Installation Help"), HELP),
+                                    triggered=self._open_install_guide)
+        self.act_check_updates = add(Command("help.check_updates", _("Check for Updates\u2026"),
+                                             HELP, keywords=("upgrade", "version")),
+                                     triggered=self._check_for_updates_manual)
+        self.act_show_logs = add(Command("help.show_logs", _("Show Log Files"), HELP,
+                                         keywords=("diagnostics", "bug report", "crash")),
+                                 triggered=self._show_log_files)
+        self.act_about = add(Command("help.about",
+                                     _("About {app}").format(app=APP_DISPLAY_NAME), HELP,
+                                     role=QAction.MenuRole.AboutRole),
+                             triggered=self._show_about)
 
     def _build_menu(self):
-        m_file = self.menuBar().addMenu("&File")
+        # The chevron a narrow window shows for the menus it has no room
+        # for: Qt gives it no name, so a screen reader would say "button".
+        more = self.menuBar().findChild(QToolButton, "qt_menubar_ext_button")
+        if more is not None:
+            more.setAccessibleName(_("More Menus"))
+        m_file = self.menuBar().addMenu(_("&File"))
         m_file.addAction(self.act_new)
         m_file.addAction(self.act_open)
         m_file.addSeparator()
-        self.m_recent = m_file.addMenu("Recent Files")
+        self.m_recent = m_file.addMenu(_("Recent Files"))
         self._populate_recent_menu()
         m_file.addSeparator()
         m_file.addAction(self.act_save)
@@ -1033,22 +2561,132 @@ class MainWindow(QMainWindow):
             m_file.addAction(self.act_print_preview)
         m_file.addAction(self.act_print)
         m_file.addSeparator()
-        m_file.addAction(self.act_knit_html)
-        m_file.addAction(self.act_knit_pdf)
-        m_file.addAction(self.act_rmd_toolchain)
+        # R Markdown is for the few who write it: one item in the File menu,
+        # its commands (and Knit's key) inside.
+        self.m_rmarkdown = m_file.addMenu(_("R Markdown"))
+        self.m_rmarkdown.addAction(self.act_knit_html)
+        self.m_rmarkdown.addAction(self.act_knit_pdf)
+        self.m_rmarkdown.addSeparator()
+        self.m_rmarkdown.addAction(self.act_rmd_toolchain)
         m_file.addSeparator()
         m_file.addAction(self.act_close_tab)
         m_file.addAction(self.act_quit)
 
-        m_find = self.menuBar().addMenu("&Search")
-        m_find.addAction(self.act_find)
-        m_find.addAction(self.act_find_next)
-        m_find.addAction(self.act_find_prev)
+        m_edit = self.menuBar().addMenu(_("&Edit"))
+        m_edit.addAction(self.act_undo)
+        m_edit.addAction(self.act_redo)
+        m_edit.addSeparator()
+        m_edit.addAction(self.act_cut)
+        m_edit.addAction(self.act_copy)
+        m_edit.addAction(self.act_paste)
+        m_edit.addAction(self.act_paste_plain)
+        m_edit.addAction(self.act_delete)
+        m_edit.addAction(self.act_select_all)
+        m_edit.addSeparator()
+        self.m_find = m_edit.addMenu(pgettext("menu", "Find"))
+        self.m_find.addAction(self.act_find)
+        self.m_find.addAction(self.act_replace)
+        self.m_find.addAction(self.act_find_next)
+        self.m_find.addAction(self.act_find_prev)
+        self.m_find.addAction(self.act_use_selection)
+        m_edit.addAction(self.act_footnote_jump)
+        # Spelling, then Substitutions, in the order of Apple's Edit menus.
+        self.m_spelling = m_edit.addMenu(_("Spelling"))
+        self.m_spelling.addAction(self.act_check_spelling)
+        if sys.platform != "darwin":
+            # macOS tells the language of each paragraph by itself;
+            # elsewhere the person says which one (the system's at first).
+            self.m_spelling_language = self.m_spelling.addMenu(_("Language"))
+        self.m_spelling.aboutToShow.connect(self._update_spelling_menu)
+        self.m_substitutions = m_edit.addMenu(_("Substitutions"))
+        self.m_substitutions.addAction(self.act_markdown_shortcuts)
+        # On a Mac Settings moves to the application menu; a separator left
+        # here would end the Edit menu with a line.
+        if sys.platform != "darwin":
+            m_edit.addSeparator()
+        m_edit.addAction(self.act_settings)
+        self.m_edit = m_edit
 
-        m_view = self.menuBar().addMenu("&View")
+        # Insert, between Edit and Format, as in Pages.
+        self.m_insert = self.menuBar().addMenu(_("&Insert"))
+        self.m_insert.addAction(self.act_link)
+        self.m_insert.addSeparator()
+        self.m_insert.addAction(self.act_insert_image)
+        self.m_insert.addAction(self.act_table)
+        self.m_insert.addAction(self.act_divider)
+        self.m_insert.addAction(self.act_code_block)
+        self.m_insert.addAction(self.act_footnote)
+        # Nostr's own insertions, in the Insert menu only while a Nostr
+        # account is in use (decision D-1); always in the Nostr menu.
+        self._insert_nostr_separator = self.m_insert.addSeparator()
+        self._insert_nostr_actions = [self.act_insert_mention, self.act_insert_reference,
+                                      self.act_nostr_insert_image, self.act_insert_audio_video]
+        self.m_insert.aboutToShow.connect(self._fill_insert_menu)
+        # Named for the verb: "Mention…" in it, "Insert Mention…" elsewhere.
+        self.commands.use_insert_titles(self.m_insert)
+
+        m_format = self.menuBar().addMenu(_("F&ormat"))
+        self.m_style = m_format.addMenu(_("Style"))
+        for action in self.act_styles:
+            self.m_style.addAction(action)
+        m_format.addSeparator()
+        m_format.addAction(self.act_bold)
+        m_format.addAction(self.act_italic)
+        m_format.addAction(self.act_underline)
+        m_format.addAction(self.act_strike)
+        m_format.addAction(self.act_code)
+        m_format.addSeparator()
+        m_format.addAction(self.act_bullets)
+        m_format.addAction(self.act_numbers)
+        m_format.addAction(self.act_checklist)
+        m_format.addAction(self.act_tick)
+        m_format.addAction(self.act_quote)
+        m_format.addSeparator()
+        m_format.addAction(self.act_indent)
+        m_format.addAction(self.act_outdent)
+        m_format.addSeparator()
+        self.m_color = m_format.addMenu(_("Color"))
+        for action in self.act_colors:
+            self.m_color.addAction(action)
+        self.m_color.addSeparator()
+        self.m_color.addAction(self.act_remove_color)
+        self.m_code_language = m_format.addMenu(_("Code Language"))
+        for action in self.act_code_languages:
+            self.m_code_language.addAction(action)
+            if not action.data():
+                self.m_code_language.addSeparator()         # after Plain Text
+        self.m_table = m_format.addMenu(_("Table"))
+        for index, action in enumerate(self.act_table_commands):
+            if index in (2, 4, 6):
+                self.m_table.addSeparator()     # rows | columns | delete | the table
+            self.m_table.addAction(action)
+        m_format.addSeparator()
+        m_format.addAction(self.act_reset_format)
+        self.m_format = m_format
+
+        m_view = self.menuBar().addMenu(_("&View"))
+        self.m_view = m_view
+        # Full screen is named for the window in front as the menu opens.
+        m_view.aboutToShow.connect(self._name_full_screen)
+        m_view.addAction(self.act_view_write)
+        m_view.addAction(self.act_view_preview)
+        m_view.addAction(self.act_view_split)
+        m_view.addSeparator()
+        m_view.addAction(self.act_show_toolbar)
+        m_view.addSeparator()
+        m_view.addAction(self.act_monospace_writing)
+        m_view.addSeparator()
+        self.m_appearance = m_view.addMenu(_("Appearance"))
+        for action in self.act_appearance.values():
+            self.m_appearance.addAction(action)
+        self.m_appearance.addSeparator()
+        self.m_appearance.addAction(self.act_switch_appearance)
+        m_view.addAction(self.act_toggle_line_numbers)
+        m_view.addAction(self.act_toggle_syntax_hl)
+        m_view.addSeparator()
         m_view.addAction(self.act_paper_mode)
         m_view.addSeparator()
-        m_background = m_view.addMenu("Background")
+        m_background = m_view.addMenu(_("Background"))
         m_background.addAction(self.act_bg_none)
         m_background.addAction(self.act_bg_lines)
         m_background.addAction(self.act_bg_dashed)
@@ -1056,127 +2694,116 @@ class MainWindow(QMainWindow):
         m_background.addAction(self.act_bg_grid)
         m_view.addAction(self.act_highlight_line)
         m_view.addSeparator()
+        m_language = m_view.addMenu(_("Language"))
+        for action in self.act_languages:
+            m_language.addAction(action)
+        m_view.addSeparator()
+        m_view.addAction(self.act_window_sidebar)
+        # Article Details, while a Nostr account is in use (D-1).
+        self._view_nostr_separator = m_view.addSeparator()
+        m_view.addAction(self.act_article_details)
+        m_view.aboutToShow.connect(self._fill_view_menu)
         m_view.addAction(self.act_fullscreen)
+        self._m_background = m_background
 
         m_nostr = self.menuBar().addMenu("&Nostr")
-        act_nostr_publish = QAction("Publish as Note…", self)
-        act_nostr_publish.setShortcut(QKeySequence("Ctrl+Shift+P"))
-        act_nostr_publish.triggered.connect(self._on_nostr_publish_note)
-        m_nostr.addAction(act_nostr_publish)
-        act_nostr_publish_article = QAction("Publish as Article…", self)
-        act_nostr_publish_article.setShortcut(QKeySequence("Ctrl+Shift+A"))
-        act_nostr_publish_article.triggered.connect(self._on_nostr_publish_article)
-        m_nostr.addAction(act_nostr_publish_article)
+        m_nostr.addAction(self.act_nostr_publish_note)
+        m_nostr.addAction(self.act_nostr_publish_article)
         m_nostr.addSeparator()
-        # Media (Blossom) - browse the user's uploaded blobs, upload new
-        # ones, or insert one into the current document at the cursor.
-        act_nostr_media = QAction("Media Library…", self)
-        act_nostr_media.setShortcut(QKeySequence("Ctrl+Shift+M"))
-        act_nostr_media.triggered.connect(self._on_nostr_media_library)
-        m_nostr.addAction(act_nostr_media)
-        self.addAction(act_nostr_media)
-        act_nostr_insert_image = QAction("Insert image…", self)
-        act_nostr_insert_image.setShortcut(QKeySequence("Ctrl+Shift+I"))
-        act_nostr_insert_image.triggered.connect(self._on_nostr_insert_image)
-        m_nostr.addAction(act_nostr_insert_image)
-        self.addAction(act_nostr_insert_image)
+        m_nostr.addAction(self.act_nostr_media)
+        m_nostr.addAction(self.act_nostr_insert_image)
+        m_nostr.addAction(self.act_insert_mention)
+        m_nostr.addAction(self.act_insert_reference)
+        m_nostr.addAction(self.act_insert_audio_video)
+        m_nostr.addAction(self.act_article_details)
         m_nostr.addSeparator()
-        # Drafts surface - the side-docked panel. ``Ctrl+Shift+D`` (D
-        # for Draft) toggles it, sitting alongside the other Ctrl+Shift
-        # Nostr shortcuts.
-        self.act_nostr_drafts = QAction("Drafts…", self)
-        self.act_nostr_drafts.setShortcut(QKeySequence("Ctrl+Shift+D"))
-        self.act_nostr_drafts.setCheckable(True)
-        self.act_nostr_drafts.triggered.connect(self._on_toggle_drafts_panel)
         m_nostr.addAction(self.act_nostr_drafts)
-        # Register globally so the shortcut works even when the menu
-        # bar is hidden (Linux compact themes, full-screen mode).
-        self.addAction(self.act_nostr_drafts)
+        m_nostr.addAction(self.act_nostr_published)
+        m_nostr.addAction(self.act_refresh_drafts)
+        m_nostr.addAction(self.act_draft_relays)
+        m_nostr.addAction(self.act_nostr_imports)
+        m_nostr.addAction(self.act_imports_badge)
         m_nostr.addSeparator()
-        act_nostr_connect = QAction("Connect Signer…", self)
-        act_nostr_connect.triggered.connect(self._on_nostr_connect)
-        m_nostr.addAction(act_nostr_connect)
-        act_nostr_sign_out = QAction("Sign Out Active Profile", self)
-        act_nostr_sign_out.triggered.connect(self._on_nostr_sign_out)
-        m_nostr.addAction(act_nostr_sign_out)
+        m_nostr.addAction(self.act_membership)
+        # The ways to an account, then the account in use.
+        m_nostr.addSeparator()
+        m_nostr.addAction(self.act_create_account)
+        m_nostr.addAction(self.act_nostr_connect)
+        m_nostr.addAction(self.act_restore_account)
+        m_nostr.addSeparator()
+        m_nostr.addAction(self.act_edit_profile)
+        m_nostr.addAction(self._act_backup_account)
+        m_nostr.addAction(self.act_move_to_signer)
+        m_nostr.addAction(self.act_nostr_sign_out)
+        self._update_account_actions()
 
-        help_menu = self.menuBar().addMenu("&Help")
-        welcome_action = QAction("Welcome", self)
-        welcome_action.triggered.connect(self.show_welcome_tab)
-        help_menu.addAction(welcome_action)
-        shortcuts_action = QAction("Keyboard Shortcuts", self)
-        shortcuts_action.triggered.connect(self._show_shortcuts)
-        help_menu.addAction(shortcuts_action)
-        help_menu.addSeparator()
-        install_help_action = QAction("Installation Help", self)
-        install_help_action.triggered.connect(self._open_install_guide)
-        help_menu.addAction(install_help_action)
-        check_updates_action = QAction("Check for Updates\u2026", self)
-        check_updates_action.triggered.connect(self._check_for_updates_manual)
-        help_menu.addAction(check_updates_action)
-        help_menu.addSeparator()
-        about_action = QAction("About", self)
-        about_action.triggered.connect(self._show_about)
-        help_menu.addAction(about_action)
+        if sys.platform == "darwin":
+            self.m_window = self.menuBar().addMenu(_("Window"))
+            self.m_window.addAction(self.act_minimize)
+            self.m_window.addAction(self.act_zoom)
+            self.m_window.addSeparator()
+            # Safari's: the tabs, before the windows.
+            self.m_window.addAction(self.act_previous_tab)
+            self.m_window.addAction(self.act_next_tab)
+            self.m_window.addSeparator()
+            self.m_window.addAction(self.act_bring_all)
 
-    def _build_status_bar_view_toggle(self):
-        """Quick status-bar toggle for Paper Mode, mirroring the View menu item."""
-        self._paper_btn = QToolButton()
-        self._paper_btn.setText("Paper")
-        self._paper_btn.setToolTip("Toggle Paper Mode")
-        self._paper_btn.setCheckable(True)
-        self._paper_btn.setChecked(self.paper_mode)
-        self._paper_btn.setAutoRaise(True)
-        self._paper_btn.toggled.connect(self._toggle_paper_mode)
-        self.status.addPermanentWidget(self._paper_btn)
+        help_menu = self.menuBar().addMenu(_("&Help"))
+        help_menu.addAction(self.act_welcome)
+        help_menu.addAction(self.act_shortcuts)
+        help_menu.addSeparator()
+        help_menu.addAction(self.act_install_help)
+        help_menu.addAction(self.act_check_updates)
+        help_menu.addAction(self.act_show_logs)
+        help_menu.addSeparator()
+        help_menu.addAction(self.act_about)
 
     def _populate_recent_menu(self):
+        """The files opened last, then Clear Recent Files: an ordinary
+        menu item (reached by the keyboard like any other, in the menu's
+        own color, since clearing the list deletes no file), dimmed while
+        the list is empty, as a Mac's Open Recent menu does."""
+        # The menu owns its items, so clear() deletes them (owned by the
+        # window, every refill used to leave the old ones behind).
         self.m_recent.clear()
         self.m_recent.setToolTipsVisible(True)
         entries = [p for p in load_recent() if os.path.exists(p)]
-
-        if not entries:
-            empty = QAction("(empty)", self)
-            empty.setEnabled(False)
-            self.m_recent.addAction(empty)
-        else:
-            for path in entries:
-                action = QAction(os.path.basename(path), self)
-                action.setToolTip(path)
-                action.triggered.connect(lambda checked, p=path: self.open_path(p))
-                self.m_recent.addAction(action)
-
-        self.m_recent.addSeparator()
-        clear_widget = QLabel("  Clear Recent Files  ")
-        clear_widget.setContentsMargins(4, 4, 4, 4)
-        clear_widget.setStyleSheet("""
-            QLabel {
-                color: #CC4444;
-                padding: 4px 8px;
-            }
-            QLabel:hover {
-                background: rgba(180, 40, 40, 0.15);
-                color: #FF6666;
-            }
-        """)
-        clear_action = QWidgetAction(self)
-        clear_action.setDefaultWidget(clear_widget)
-        clear_action.triggered.connect(self._clear_recent_files)
-        clear_widget.mousePressEvent = lambda e: (self.m_recent.close(), self._clear_recent_files())
-        self.m_recent.addAction(clear_action)
+        for path in entries:
+            action = QAction(os.path.basename(path), self.m_recent)
+            action.setToolTip(path)
+            action.triggered.connect(lambda checked, p=path: self.open_path(p))
+            self.m_recent.addAction(action)
+        if entries:
+            self.m_recent.addSeparator()
+        clear = QAction(_("Clear Recent Files"), self.m_recent)
+        clear.setEnabled(bool(entries))
+        clear.triggered.connect(self._clear_recent_files)
+        self.m_recent.addAction(clear)
 
     def _clear_recent_files(self):
         clear_recent()
         self._populate_recent_menu()
 
     def _build_findbar(self):
-        self.findbar = FindBar(self._find_next, self._find_prev, self._toggle_findbar, self)
+        self.findbar = FindBar(self._find_next, self._find_prev, self._close_findbar, self,
+                               replace=True, options=True)
         self.findbar.setVisible(False)
         self.findbar.edit.textChanged.connect(self._on_search_text_changed)
+        QApplication.instance().focusChanged.connect(self._on_focus_changed)
+        self.findbar.options_changed.connect(self._on_find_options_changed)
+        self.findbar.replace_requested.connect(self._replace_current)
+        self.findbar.replace_all_requested.connect(self._replace_all)
+        # Matches are found again shortly after the document changes, so
+        # the count and the highlights never describe text that is gone.
+        self._find_refresh = QTimer(self)
+        self._find_refresh.setSingleShot(True)
+        self._find_refresh.setInterval(250)
+        self._find_refresh.timeout.connect(self._refresh_matches)
 
         self.update_bar = UpdateBar()
         self.update_bar.update_theme(self.is_dark_theme)
         self.update_bar.update_requested.connect(self._on_update_bar_clicked)
+        self.update_bar.whats_new_requested.connect(self._on_whats_new_requested)
 
         # The editor area (header + findbar + tabs) lives on the left
         # of a horizontal splitter; the drafts panel docks on the right.
@@ -1189,7 +2816,32 @@ class MainWindow(QMainWindow):
         v = QVBoxLayout(editor_side)
         v.setContentsMargins(0, 0, 0, 0)
         v.setSpacing(0)
-        v.addWidget(self.header_widget, 0)
+        self.format_toolbar = FormatToolbar(
+            {"undo": self.act_undo, "redo": self.act_redo,
+             "bold": self.act_bold, "italic": self.act_italic, "strike": self.act_strike,
+             "link": self.act_link, "bullets": self.act_bullets, "numbers": self.act_numbers,
+             "checklist": self.act_checklist, "quote": self.act_quote},
+            self.m_style, self.m_insert, dark=self.is_dark_theme)
+        self.format_toolbar.undo_menu.aboutToShow.connect(
+            lambda: self._fill_history(self.format_toolbar.undo_menu, redo=False))
+        self.format_toolbar.redo_menu.aboutToShow.connect(
+            lambda: self._fill_history(self.format_toolbar.redo_menu, redo=True))
+        self._update_undo_redo_buttons()
+        self.view_switch = ViewSwitch(
+            (self.act_view_write, self.act_view_preview, self.act_view_split),
+            dark=self.is_dark_theme)
+        # The switch sits right of the toolbar, outside it, so a narrow
+        # window never hides it in the toolbar's chevron.
+        self._view_switch_holder = self.format_toolbar.add_trailing(self.view_switch)
+        self.format_bar = QWidget()
+        bar_row = QHBoxLayout(self.format_bar)
+        bar_row.setContentsMargins(0, 0, 0, 0)
+        bar_row.setSpacing(0)
+        bar_row.addWidget(self.format_toolbar, 1)
+        bar_row.addWidget(self._view_switch_holder, 0)
+        # Tabs made before the switch existed show their view now.
+        QTimer.singleShot(0, lambda: self._apply_view(self.current_editor()))
+        v.addWidget(self.format_bar, 0)
         v.addWidget(self.findbar, 0)
         v.addWidget(self.update_bar, 0)
         v.addWidget(self.tabs, 1)
@@ -1200,14 +2852,6 @@ class MainWindow(QMainWindow):
         # already owns, so there is one cache, one URL policy and one
         # place where an image request can be made.
         self._drafts_panel.set_preview_image_loader(self._media_image_loader)
-        self._drafts_panel.feeds.bind_runtime(
-            relay_pool=self._relay_pool,
-            relay_list_cache=self._relay_list_cache,
-            session_pool=self._session_pool,
-            # Lets imports reuse a pre-prefix identifier that already
-            # exists locally instead of duplicating the draft.
-            draft_store=self._draft_store,
-        )
         self._drafts_panel.set_active_profile(self._profile_store.default())
         # The panel's outbound actions all route back through the host.
         self._drafts_panel.open_draft.connect(self._on_panel_open_draft)
@@ -1216,18 +2860,59 @@ class MainWindow(QMainWindow):
         self._drafts_panel.retry_decrypt.connect(self._on_panel_retry_decrypt)
         self._drafts_panel.retry_signer.connect(self._draft_sync.retry_signer)
         self._drafts_panel.copy_event_id.connect(self._on_panel_copy_event_id)
-        self._drafts_panel.refresh_requested.connect(self._draft_sync.refresh)
+        self._drafts_panel.refresh_requested.connect(self._draft_sync.refresh_by_hand)
+        # The deletions other apps announce come with the drafts (L13).
+        self._drafts_panel.refresh_requested.connect(self._draft_deletions.refresh)
         self._drafts_panel.close_requested.connect(self._hide_drafts_panel)
+        self._drafts_panel.draft_relays_requested.connect(self._open_draft_relays)
+        # The second view: what the account published, to edit, open,
+        # share or delete. It reads the relays once it is shown
+        # (_follow_account_in_published), not when MyEditor starts.
+        self._published_view = PublishedView(
+            PublishedList(relay_pool=self._relay_pool, relay_directory=self._relay_directory,
+                          session_pool=self._session_pool,
+                          entitled_relays=self._entitled_relays, parent=self),
+            is_dark=self.is_dark_theme)
+        add_published_view(self._drafts_panel, self._published_view)
+        self._drafts_panel.view_changed.connect(self._follow_account_in_published)
+        self._drafts_panel.view_changed.connect(self._update_refresh_command)
+        self._published_view.open_requested.connect(self._on_published_open)
+        self._published_view.status_message.connect(self._on_published_status)
+        # The panel's one row about imports (D-2): new posts, how an
+        # import goes, and the Imports window.
+        self._drafts_panel.open_imports.connect(self._open_imports_window)
+        self._drafts_panel.pause_import.connect(self._imports.pause_import)
+        self._drafts_panel.resume_import.connect(self._resume_import)
+        for signal in (self._imports.bound_changed, self._imports.inbox_count_changed,
+                       self._imports.activity_changed):
+            signal.connect(self._update_imports_row)
+        self._update_imports_row()
 
         self._central_splitter = QSplitter(Qt.Horizontal)
         self._central_splitter.setObjectName("central_splitter")
         self._central_splitter.setHandleWidth(1)
         self._central_splitter.setChildrenCollapsible(False)
         self._central_splitter.addWidget(editor_side)
+        # The inspector beside the document, the drafts panel at the edge.
+        self._article_details_panel = ArticleDetailsPanel(
+            media_store=self._media_store, media_visibility=self._media_visibility,
+            copy_maker=self._copy_maker, private_library=self._private_library,
+            media_saver=self._media_saver,
+            profile=self._profile_store.default, pick_person=self._pick_coauthor,
+            name_of=self._person_name, can_receive_zaps=self._ask_can_receive_zaps,
+            relay_hint=self._relay_directory.relay_hint, is_dark=self.is_dark_theme)
+        self._article_details_panel.changed.connect(
+            lambda details: self._set_article_details(self.current_editor(), details))
+        self._article_details_panel.close_requested.connect(
+            lambda: self.act_article_details.setChecked(False))
+        self._article_details_panel.cover_uploaded.connect(self._cover_uploaded_for)
+        self._central_splitter.addWidget(self._article_details_panel)
         self._central_splitter.addWidget(self._drafts_panel)
-        # Editor takes all stretch; panel starts hidden.
+        # Editor takes all stretch; the panels start hidden.
         self._central_splitter.setStretchFactor(0, 1)
         self._central_splitter.setStretchFactor(1, 0)
+        self._central_splitter.setStretchFactor(2, 0)
+        self._article_details_panel.hide()
         self._drafts_panel.hide()
 
         self.setCentralWidget(self._central_splitter)
@@ -1236,15 +2921,19 @@ class MainWindow(QMainWindow):
     # ----------------------------------------------------------------------
     # CRASH RECOVERY
     # ----------------------------------------------------------------------
-    def _restore_backups(self) -> bool:
+    def _restore_backups(self, skip=frozenset()) -> bool:
         """Silently restore any backup files left over from a previous crash.
 
+        ``skip`` holds the backup files an update restart just reopened its
+        tabs from, or that those tabs write to, so none opens twice.
         Returns True if at least one backup was restored.
         """
         restored = 0
         for backup in find_all_backups():
+            if os.path.abspath(backup.get("_backup_file", "")) in skip:
+                continue
             try:
-                if self._restore_one_backup(backup):
+                if self._restore_one_backup(backup) is not None:
                     restored += 1
             except Exception:
                 # One unreadable record must never cost the user the
@@ -1252,18 +2941,16 @@ class MainWindow(QMainWindow):
                 continue
         return restored > 0
 
-    def _restore_one_backup(self, backup: dict) -> bool:
-        version = backup.get("version")
-        if version is not None and (not isinstance(version, int)
-                                    or isinstance(version, bool)
-                                    or version > BACKUP_VERSION
-                                    or backup.get("format") not in ("html",)):
+    def _restore_one_backup(self, backup: dict) -> Optional[HtmlEditor]:
+        """Open one backup record as a recovered tab; returns its editor,
+        or None for a record this build must leave alone."""
+        if not is_restorable(backup):
             # Written by a newer build. Leave it on disk untouched rather
             # than guess at a format this build does not know.
-            return False
+            return None
 
-        original_path = backup.get("original_path")
-        content = backup.get("content", "")
+        # Possibly written by an older version, in another spelling.
+        original_path = file_paths.normalize(backup.get("original_path") or "") or None
         backup_file = backup["_backup_file"]
         freshness = classify_backup(backup)
 
@@ -1273,97 +2960,49 @@ class MainWindow(QMainWindow):
         # Set before the content: image names beside the original file
         # resolve against it.
         ed._file_path = None if freshness == "stale" else original_path
-        if version is None:
-            # Version 1 stored plain text. Restoring it as HTML would
-            # render the user's angle brackets as markup.
-            ed.setPlainText(content)
+        load_backup_content(ed, backup, modified=True)
+        # The draft it was bound to and the article it edited come back
+        # too, so saving or publishing it goes on under its identifier.
+        workspace_restore.restore_identity(
+            ed, backup.get("draft"), backup.get("article"), backup.get("article_author"),
+            backup.get("details"), backup.get("front_matter"), backup.get("newline"),
+            draft_type=DraftBinding)
+        self._attach_highlighter(ed, ed._file_path)
+
+        container, bar = self._editor_container(ed)
+
+        base_name = os.path.basename(original_path) if original_path else _("Untitled")
+        if freshness == "stale":
+            tab_title = _("{name} (recovered copy)").format(name=base_name)
         else:
-            ed.setHtml(content)
-            normalize_lists_after_set_html(ed.document())
-        ed.document().clearUndoRedoStacks()
-        ed.document().setModified(True)
-
-        container = QWidget()
-        vbox = QVBoxLayout(container)
-        vbox.setContentsMargins(0, 0, 0, 0)
-        vbox.setSpacing(0)
-
-        bar = FileChangedBar()
-        bar.update_theme(self.is_dark_theme)
-        bar.reload_requested.connect(lambda b=bar, e=ed: self._reload_from_disk(e, b))
-        vbox.addWidget(bar)
-
-        editor_area = QWidget()
-        layout = QHBoxLayout(editor_area)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(0)
-
-        if self.show_line_numbers:
-            gutter = LineNumberGutter(ed)
-            layout.addWidget(gutter)
-            ed._line_gutter = gutter
-
-        layout.addWidget(ed)
-        vbox.addWidget(editor_area)
-
-        base_name = os.path.basename(original_path) if original_path else "Untitled"
-        suffix = "recovered copy" if freshness == "stale" else "recovered"
-        idx = self.tabs.addTab(container, f"{base_name} ({suffix})*")
+            tab_title = _("{name} (recovered)").format(name=base_name)
+        # The tab says so until the work is saved (_compose_tab_title).
+        ed._recovered_title = tab_title
+        idx = self.tabs.addTab(container, tab_title + "*")
         self._attach_close_button(idx, container)
 
         if freshness == "stale" and original_path:
             bar.show_notice(
-                f"Recovered a copy. The file on disk is newer: {original_path}"
+                _("Recovered a copy. The file on disk is newer: {path}").format(
+                    path=original_path)
             )
         elif ed._file_path:
             self._watcher.addPath(ed._file_path)
 
-        # Write the replacement first: removing the old file before its
-        # successor exists is a window in which a second crash loses
-        # everything. A restored document that kept its path derives the
-        # same backup ID, so the replacement IS this record's file and
-        # deleting it would leave the recovered work unprotected.
-        ed._backup = EditorBackup(
-            ed, ed._file_path, externalize=self._asset_manager.adopt_data_uri
-        )
-        if (ed._backup.write_now()
-                and os.path.abspath(backup_file) != os.path.abspath(ed._backup.path)):
-            try:
-                os.remove(backup_file)
-            except OSError:
-                pass
-        return True
+        ed._backup = self._new_backup(ed, ed._file_path)
+        ed._backup.take_over(backup_file)
+        return ed
 
     # ----------------------------------------------------------------------
     # FILE I/O
     # ----------------------------------------------------------------------
-    def new_tab(self):
+    def new_tab(self) -> HtmlEditor:
+        """Open an untitled tab, make it current, and return its editor."""
         ed = self._new_wired_editor()
 
-        container = QWidget()
-        vbox = QVBoxLayout(container)
-        vbox.setContentsMargins(0, 0, 0, 0)
-        vbox.setSpacing(0)
+        container, bar = self._editor_container(ed)
 
-        bar = FileChangedBar()
-        bar.update_theme(self.is_dark_theme)
-        bar.reload_requested.connect(lambda b=bar, e=ed: self._reload_from_disk(e, b))
-        vbox.addWidget(bar)
-
-        editor_area = QWidget()
-        layout = QHBoxLayout(editor_area)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(0)
-
-        if self.show_line_numbers:
-            gutter = LineNumberGutter(ed)
-            layout.addWidget(gutter)
-            ed._line_gutter = gutter
-
-        layout.addWidget(ed)
-        vbox.addWidget(editor_area)
-
-        idx = self.tabs.addTab(container, "Untitled*")
+        idx = self.tabs.addTab(container, _("Untitled") + "*")
         self.tabs.setCurrentIndex(idx)
 
         self._attach_close_button(idx, container)
@@ -1380,20 +3019,32 @@ class MainWindow(QMainWindow):
         ed._lang_detect_timer = _timer
 
         ed.setHtml("<div></div>")
-        ed._backup = EditorBackup(
-            ed, None, externalize=self._asset_manager.adopt_data_uri
-        )
+        self._attach_highlighter(ed, None)
+        ed._backup = self._new_backup(ed, None)
         ed.setFocus()
         self._update_window_title()
+        return ed
 
-    def show_welcome_tab(self):
-        """Open a friendly first-run tab introducing the app."""
-        self.new_tab()
-        ed = self.current_editor()
-        ed.setHtml(welcome_html())
+    def _welcome_keys(self) -> dict:
+        """The keys the welcome page names, as this platform writes them."""
+        keys = {}
+        for command in WELCOME_KEYS:
+            shortcut = self.commands.action(command).shortcut()
+            text = shortcut.toString(QKeySequence.SequenceFormat.NativeText)
+            if text:
+                keys[command] = text
+        return keys
+
+    def show_welcome_tab(self) -> HtmlEditor:
+        """Open a friendly first-run tab introducing the app; returns its editor."""
+        ed = self.new_tab()
+        ed.setHtml(welcome_html(self._welcome_keys()))
         ed.document().setModified(False)
-        self.tabs.setTabText(self.tabs.currentIndex(), "Welcome")
+        ed._is_welcome = True   # so an update restart reopens it as the welcome tab
+        self._attach_spelling(ed)
+        self.tabs.setTabText(self.tabs.currentIndex(), _("Welcome"))
         self._update_status_bar()
+        return ed
 
     def _on_tab_context_menu(self, pos):
         idx = self.tabs.tabBar().tabAt(pos)
@@ -1403,17 +3054,17 @@ class MainWindow(QMainWindow):
         has_path = bool(getattr(ed, '_file_path', None))
 
         menu = QMenu(self)
-        rename_action = menu.addAction("Rename")
+        rename_action = menu.addAction(_("Rename"))
         rename_action.setEnabled(has_path)
         if not has_path:
-            rename_action.setToolTip("Save the file first before renaming")
+            rename_action.setToolTip(_("Save the file first before renaming"))
 
         menu.addSeparator()
 
-        delete_action = menu.addAction("Delete File...")
+        delete_action = menu.addAction(_("Delete File..."))
         delete_action.setEnabled(has_path)
         if not has_path:
-            delete_action.setToolTip("No file on disk to delete")
+            delete_action.setToolTip(_("No file on disk to delete"))
 
         action = menu.exec(self.tabs.tabBar().mapToGlobal(pos))
         if action == rename_action:
@@ -1426,49 +3077,59 @@ class MainWindow(QMainWindow):
         file_name = os.path.basename(file_path)
 
         # Windows calls it the Recycle Bin; macOS and Linux desktops, the Trash.
-        bin_name = "Recycle Bin" if sys.platform == "win32" else "Trash"
+        if sys.platform == "win32":
+            title = _("Move \u201c{name}\u201d to the Recycle Bin?")
+            message = _("You can restore it from the Recycle Bin until you empty it.")
+            action = _("Move to Recycle Bin")
+            failed = _("Couldn't move \u201c{name}\u201d to the Recycle Bin")
+        else:
+            title = _("Move \u201c{name}\u201d to the Trash?")
+            message = _("You can restore it from the Trash until you empty it.")
+            action = _("Move to Trash")
+            failed = _("Couldn't move \u201c{name}\u201d to the Trash")
         if not confirm_destructive(
                 self,
-                title=f"Move \u201c{file_name}\u201d to the {bin_name}?",
-                message=f"You can restore it from the {bin_name} until you empty it.",
-                action=f"Move to {bin_name}",
+                title=title.format(name=file_name),
+                message=message,
+                action=action,
                 is_dark=self.is_dark_theme):
             return
 
         try:
             send2trash(file_path)
         except Exception as e:
-            inform(self, title=f"Couldn't move \u201c{file_name}\u201d to the {bin_name}",
-                   message=str(e))
+            inform(self, title=failed.format(name=file_name), message=str(e))
             return
 
-        # Close tab without prompting to save - file is gone
-        if hasattr(ed, '_backup'):
-            ed._backup.delete()
-        self._watcher.removePath(file_path)
-        self.tabs.removeTab(idx)
+        # The file is gone: the tab closes for good, asking nothing more.
+        self._discard_tab(idx)
 
     def _rename_tab(self, idx: int, ed):
         old_path = ed._file_path
         old_name = os.path.basename(old_path)
         directory = os.path.dirname(old_path)
 
-        new_name, ok = QInputDialog.getText(self, "Rename File", "New filename:", text=old_name)
+        new_name, ok = QInputDialog.getText(self, _("Rename File"), _("New filename:"),
+                                            text=old_name)
         if not ok or not new_name.strip() or new_name.strip() == old_name:
             return
 
         new_name = new_name.strip()
-        new_path = os.path.join(directory, new_name)
+        new_path = file_paths.normalize(os.path.join(directory, new_name))
 
-        if os.path.exists(new_path):
-            inform(self, title=f"\u201c{new_name}\u201d already exists",
-                   message="Choose a different name.")
+        # Any entry with that name is a clash, a link (even a broken one)
+        # included: renaming onto it would replace it. Only changing the
+        # case of the name, where the disk ignores case (Windows, a Mac),
+        # finds the file itself, and that is a rename.
+        if os.path.lexists(new_path) and not file_paths.is_case_change(old_path, new_path):
+            inform(self, title=_("\u201c{name}\u201d already exists").format(name=new_name),
+                   message=_("Choose a different name."))
             return
 
         try:
             os.rename(old_path, new_path)
         except OSError as e:
-            inform(self, title="Couldn't rename the file", message=str(e))
+            inform(self, title=_("Couldn't rename the file"), message=str(e))
             return
 
         self._watcher.removePath(old_path)
@@ -1477,29 +3138,18 @@ class MainWindow(QMainWindow):
         if hasattr(ed, '_backup'):
             ed._backup.update_file_path(new_path)
         self.tabs.setTabText(idx, new_name)
+        ed.setAccessibleName(self._document_name(ed))
         self._update_window_title()
 
     def _attach_close_button(self, idx: int, container: QWidget):
+        # Closing a tab is not destructive (unsaved changes are asked
+        # about), so the button is the tab's own quiet color, not red; the
+        # window's stylesheet (TabClose) gives it its colors per theme.
         close_btn = QPushButton("×")
+        close_btn.setObjectName("TabClose")
         close_btn.setFixedSize(24, 24)
-        close_btn.setStyleSheet("""
-            QPushButton {
-                color: #A84444;
-                background: transparent;
-                border: none;
-                border-radius: 4px;
-                font-size: 18px;
-                padding: 0px;
-            }
-            QPushButton:hover {
-                color: #D06060;
-                background: rgba(168, 68, 68, 0.15);
-            }
-            QPushButton:pressed {
-                background: rgba(168, 68, 68, 0.30);
-            }
-        """)
-        close_btn.setToolTip("Close tab")
+        close_btn.setToolTip(_("Close Tab"))
+        close_btn.setAccessibleName(_("Close Tab"))
         close_btn.clicked.connect(lambda: self.close_tab(self.tabs.indexOf(container)))
         self.tabs.tabBar().setTabButton(idx, QTabBar.RightSide, close_btn)
 
@@ -1511,20 +3161,49 @@ class MainWindow(QMainWindow):
             viewer.save_view_state()
             self._watcher.removePath(viewer._file_path)
             self.tabs.removeTab(index)
+            # The tab goes with its document, as a document's tab does.
+            viewer.release()
+            viewer.deleteLater()
             return
 
         editor = self._editor_from_widget(w)
 
+        uploading = self._uploading(editor) if editor else []
+        if editor and not editor.document().isModified() \
+                and not self._may_leave_uploads(uploading, quitting=False):
+            return
         if editor and editor.document().isModified():
-            file_name = os.path.basename(editor._file_path) if getattr(editor, '_file_path', None) else "Untitled"
+            file_name = os.path.basename(editor._file_path) if getattr(editor, '_file_path', None) else _("Untitled")
             r = _ask_save_changes(
-                self, f"Do you want to save the changes you made to \u201c{file_name}\u201d?")
+                self, _("Do you want to save the changes you made to \u201c{name}\u201d?").format(
+                    name=file_name),
+                message=self._save_question_words(uploading, quitting=False))
             if r == "cancel":
                 return
             if r == "save":
                 self.tabs.setCurrentIndex(index)
                 if not self.save():
                     return
+        self._discard_tab(index)
+
+    def _discard_tab(self, index: int) -> None:
+        """Take a document's tab away for good, asking nothing (close_tab
+        asks first; Move to Trash has, about the file): what it set going
+        stops, and the tab is deleted with its editor and document."""
+        w = self.tabs.widget(index)
+        editor = self._editor_from_widget(w)
+        if editor:
+            self._drop_media_reads(editor)
+            # What the tab set going stops: its spelling (no late result
+            # comes to it), and Find's matches when they are its own.
+            spelling_of_tab = editor.spelling()
+            if spelling_of_tab is not None:
+                spelling_of_tab.close()
+                editor.set_spelling(None)
+            if getattr(self, "_matches_of", None) is editor:
+                self._search_matches = []
+                self._current_match_index = -1
+                self._matches_of = None
         if editor and hasattr(editor, '_backup'):
             editor._backup.delete()
         if editor:
@@ -1547,8 +3226,25 @@ class MainWindow(QMainWindow):
                 active_job.cancel()
                 editor._active_stash_job = None
         self.tabs.removeTab(index)
+        if editor is not None:
+            # The tab goes, its editor and document with it, once what is
+            # running now has finished: a long session that opens and
+            # closes many tabs does not keep growing.
+            w.deleteLater()
 
     def _close_current_tab(self):
+        # Command-W closes the window in front (Settings, Keyboard
+        # Shortcuts, Imports...), also from the menu: on a Mac the menu
+        # bar takes the key before the window in front sees it. In this
+        # window it closes the tab. A sheet is answered with its buttons:
+        # neither it nor the window under it is closed (CP3 review M2).
+        front = self._front_window()
+        if front is not self:
+            imports = self._imports_in_front()
+            if (front.windowModality() == Qt.WindowModality.NonModal
+                    and not (imports is not None and imports.sheet_in_front())):
+                front.close()
+            return
         idx = self.tabs.currentIndex()
         if idx >= 0:
             self.close_tab(idx)
@@ -1561,20 +3257,32 @@ class MainWindow(QMainWindow):
 
     def _resolve_unsaved_before_closing(self) -> bool:
         """Save, discard or keep unsaved documents. True means close."""
+        editors = [ed for i in range(self.tabs.count())
+                   if (ed := self._editor_from_widget(self.tabs.widget(i))) is not None]
+        # Quitting stops every upload, the documents' and the Media
+        # Library's alike, and every Save As still downloading.
+        uploading = self._uploading(*editors) + self._library_uploads()
+        saving = self._media_saves()
         unsaved = [i for i in range(self.tabs.count())
                    if (ed := self._editor_from_widget(self.tabs.widget(i)))
                    and ed.document().isModified()]
         if not unsaved:
-            return True
+            # Nothing to save: what is still uploading or saving is the question.
+            return self._may_leave_uploads(uploading, quitting=True, saving=saving)
+        words = self._save_question_words(uploading, quitting=True, saving=saving)
         if len(unsaved) == 1:
             ed = self._editor_from_widget(self.tabs.widget(unsaved[0]))
-            name = os.path.basename(ed._file_path) if getattr(ed, "_file_path", None) else "Untitled"
+            name = os.path.basename(ed._file_path) if getattr(ed, "_file_path", None) else _("Untitled")
             answer = _ask_save_changes(
-                self, f"Do you want to save the changes you made to \u201c{name}\u201d?")
+                self, _("Do you want to save the changes you made to \u201c{name}\u201d?").format(
+                    name=name), message=words)
         else:
+            count = len(unsaved)
             answer = _ask_save_changes(
-                self, f"Do you want to save the changes to {len(unsaved)} documents?",
-                save_label="Save All")
+                self, ngettext("Do you want to save the changes to {count} document?",
+                               "Do you want to save the changes to {count} documents?",
+                               count).format(count=count),
+                save_label=_("Save All"), message=words)
         if answer == "cancel":
             return False
         if answer == "save":
@@ -1632,13 +3340,22 @@ class MainWindow(QMainWindow):
         image_paths = []
         for url in urls:
             if not url.isLocalFile():
+                # A tile dragged out of the Media Library: its address,
+                # inserted as Insert Image inserts it.
+                media = self._library_file_at(url.toString())
+                if media is not None and self.current_editor() is not None:
+                    self._insert_media_at_cursor(media, self.current_editor())
                 continue
-            path = url.toLocalFile()
+            # A URL's path has forward slashes, also on Windows.
+            path = file_paths.normalize(url.toLocalFile())
             ext = os.path.splitext(path)[1].lower()
             if ext in _SUPPORTED_EXTS:
                 self.open_path(path)
             elif ext in _IMAGE_EXTS:
                 image_paths.append(path)
+            elif media_files.is_audio_or_video(path) and self._may_insert_audio_video(
+                    self.current_editor()):
+                self._upload_into(self.current_editor(), path)
             else:
                 unsupported.append(os.path.basename(path))
 
@@ -1650,8 +3367,16 @@ class MainWindow(QMainWindow):
             if bar:
                 bar.show_unsupported(", ".join(unsupported))
 
-    def _handle_dropped_images(self, paths):
-        """Images were dropped on the window: adopt and insert them now.
+    def _library_file_at(self, url: str):
+        """The Media Library's file at this address, or None."""
+        sha = hash_from_url(url)
+        store = getattr(self, "_media_store", None)
+        return store.files.get(sha) if sha and store is not None else None
+
+    def _handle_dropped_images(self, paths, step: str = N_("Drag")):
+        """Images were dropped on the window: adopt and insert them now, as
+        one step of Undo called ``step`` (an N_ word; a paste's own
+        name stays the paste's).
 
         The insert never waits for a signer or a server. Uploading is
         offered afterwards, and declining costs nothing: the image is
@@ -1663,21 +3388,31 @@ class MainWindow(QMainWindow):
             ed = self.current_editor()
         if ed is None:
             return
+        if not self._keeps_pictures(ed):
+            # A plain-text or code file saves its text only: the file goes
+            # in as its path, as TextEdit puts it in plain text, never as a
+            # picture that saving would leave out.
+            cursor = ed.textCursor()
+            with ed.undo_step(step):
+                cursor.insertText("\n".join(paths))
+            ed.setTextCursor(cursor)
+            return
 
         adopted = []
         refused = []
-        for path in paths:
-            alt = os.path.splitext(os.path.basename(path))[0] or "image"
-            asset = self._asset_manager.adopt_file(path, alt=alt)
-            if asset is None:
-                refused.append(os.path.basename(path))
-                continue
-            self._insert_asset(ed, asset, alt=alt)
-            adopted.append(asset)
+        with ed.undo_step(step):
+            for path in paths:
+                alt = os.path.splitext(os.path.basename(path))[0] or "image"
+                asset = self._asset_manager.adopt_file(path, alt=alt)
+                if asset is None:
+                    refused.append(os.path.basename(path))
+                    continue
+                self._insert_asset(ed, asset, alt=alt)
+                adopted.append(asset)
 
         if refused:
             self.status.showMessage(
-                f"Could not add: {', '.join(refused)}", 5000
+                _("Could not add: {names}").format(names=", ".join(refused)), 5000
             )
         if not adopted:
             return
@@ -1686,22 +3421,35 @@ class MainWindow(QMainWindow):
         if not pending:
             return
         if self._profile_store.default() is None:
-            self.status.showMessage(
-                "Images added. Connect a signer to upload them.", 6000
-            )
-            return
+            return          # a local image; nothing of Nostr without an account
 
         count = len(pending)
-        plural = "s" if count != 1 else ""
         upload = ask(
             self,
-            title=f"Upload {count} image{plural} to your Blossom servers?",
-            message="They're already in your document and stay there either way.",
-            buttons=(Button("Keep Local", False, CANCEL), Button("Upload", True, DEFAULT)))
+            title=ngettext("Upload {count} image to your media servers?",
+                           "Upload {count} images to your media servers?",
+                           count).format(count=count),
+            message=_("Anyone with the link can view them. They’re already in your "
+                      "document and stay there either way."),
+            buttons=(Button(_("Keep Local"), False, CANCEL), Button(_("Upload"), True, DEFAULT)))
         if not upload:
             return
         for asset in pending:
             self._asset_manager.request_upload(asset.sha256)
+
+    def _insert_image(self) -> None:
+        """Insert > Image…: a picture file chosen in the system's dialog,
+        put in at the caret exactly as dropping it there would
+        (_handle_dropped_images: one step of Undo, and the offer to upload
+        it while a Nostr account is in use)."""
+        ed = self.current_editor()
+        if ed is None or self._editor_kind(ed) != "rich":
+            return
+        patterns = " ".join("*" + ext for ext in sorted(_IMAGE_EXTS))
+        path, _filter = QFileDialog.getOpenFileName(
+            self, _("Insert Image"), "", _("Images ({patterns})").format(patterns=patterns))
+        if path:
+            self._handle_dropped_images([file_paths.normalize(path)], N_("Image"))
 
     def _handle_dropped_text(self, text: str):
         ed = self.current_editor()
@@ -1714,17 +3462,20 @@ class MainWindow(QMainWindow):
         fmt.setFontItalic(False)
         fmt.setFontUnderline(False)
         fmt.clearForeground()
-        cursor.insertText(text, fmt)
+        with ed.undo_step(N_("Drag")):
+            cursor.insertText(text, fmt)
         ed.setTextCursor(cursor)
 
     def open_dialog(self):
         # Both .Rmd casings listed: some non-native dialogs glob case-sensitively.
-        path, _ = QFileDialog.getOpenFileName(
-            self, "Open", "",
-            "Supported files (*.md *.html *.htm *.txt *.Rmd *.rmd *.pdf);;"
-            "Note files (*.md *.html *.htm *.txt *.Rmd *.rmd);;"
-            "PDF documents (*.pdf);;All files (*.*)"
-        )
+        notes = "*.md *.html *.htm *.txt *.Rmd *.rmd"
+        filters = ";;".join((
+            _("Supported files ({patterns})").format(patterns=notes + " *.pdf"),
+            _("Note files ({patterns})").format(patterns=notes),
+            _("PDF documents ({patterns})").format(patterns="*.pdf"),
+            _("All files ({patterns})").format(patterns="*.*"),
+        ))
+        path, _filter = QFileDialog.getOpenFileName(self, _("Open"), "", filters)
         if path:
             self.open_path(path)
 
@@ -1732,19 +3483,35 @@ class MainWindow(QMainWindow):
         """Load file content into an editor with per-format handling.
 
         Shared by open_path and _reload_from_disk so both agree on the
-        dispatch and on post-load normalization.
+        dispatch and on post-load normalization. ``content`` is as the file
+        writes it: its line endings become "\n" here, but for a Markdown
+        file's front matter, which keeps each line's own (saved so again);
+        the text under it is saved with the ending most of its own lines
+        have.
         """
         ext = path.lower()
+        front = None
+        if ext.endswith('.md'):
+            front, content = front_matter.split(content)
+            if front is not None:
+                # A text of one line takes its front matter's ending.
+                ed._newline = newline_of(content) if re.search(r"[\r\n]", content) \
+                    else front.newline
+        content = with_newlines(content)
         if ext.endswith(('.html', '.htm')):
             ed.setHtml(content)
-            # Real <ul><li> lists (our own exports, foreign HTML) become
-            # QTextList objects, which the editor's bullet handlers don't
-            # manage; convert them back to literal "• " lines.
-            normalize_lists_after_set_html(ed.document())
+            # Lists stay real lists (the editor edits them as such); what
+            # the reader leaves behind is tidied.
+            normalize_after_set_html(ed.document())
             ed.document().clearUndoRedoStacks()
         elif ext.endswith('.md'):
-            ed.document().setMarkdown(content)
-            ed._loaded_as_markdown = True
+            # The article's details are the file's front matter (Q-F): shown
+            # in Article Details, never in the text, never published as it.
+            # Read when something asks for them (_article_details_of), never
+            # on opening: a file nobody publishes pays nothing for them.
+            ed._front_matter = front
+            tab_details.hold(ed, None)
+            self._load_markdown(ed, content)
         elif ext.endswith('.rmd'):
             # R Markdown is edited as source, the way RStudio does it.
             ed.setPlainText(content)
@@ -1753,83 +3520,76 @@ class MainWindow(QMainWindow):
             ed.setPlainText(content)
 
     def open_path(self, path: str):
+        """Open ``path`` in a new tab and make it current.
+
+        Returns the new tab's editor, or its PDF viewer. Returns None when
+        no tab was opened: the file is open already (its tab becomes
+        current) or it could not be read (the person is told why).
+
+        Every way of opening a file ends here (the Open dialog, the recent
+        files, the last session, the system's file manager, a second
+        launch), so the path takes the app's one spelling here, and a file
+        already open under another spelling is found.
+        """
+        path = file_paths.normalize(path)
         for i in range(self.tabs.count()):
-            if self._tab_file_path(self.tabs.widget(i)) == path:
+            if file_paths.same_file(self._tab_file_path(self.tabs.widget(i)), path):
                 self.tabs.setCurrentIndex(i)
                 bar = self._bar_from_widget(self.tabs.widget(i))
                 if bar:
                     bar.show_already_open()
-                return
+                return None
 
         if path.lower().endswith('.pdf'):
-            self._open_pdf_tab(path)
-            return
+            return self._open_pdf_tab(path)
 
         try:
-            with open(path, "r", encoding="utf-8") as f:
-                content = f.read()
-        except Exception as e:
-            inform(self, title=f"Couldn't open \u201c{os.path.basename(path)}\u201d",
+            content, newline = read_text_as_written(path)
+        except (OSError, ValueError) as e:
+            inform(self, title=_("Couldn't open \u201c{name}\u201d").format(
+                       name=os.path.basename(path)),
                    message=str(e))
-            return
+            return None
 
         ed = self._new_wired_editor()
         # The path first: image names in the content resolve against the
         # document's own directory, and Qt caches whatever the first
         # lookup answered.
         ed._file_path = path
+        # Saved back with the line endings it came with.
+        ed._newline = newline
         self._set_editor_content(ed, path, content)
 
         ed.document().setModified(False)
         self._attach_highlighter(ed, path)
 
-        container = QWidget()
-        vbox = QVBoxLayout(container)
-        vbox.setContentsMargins(0, 0, 0, 0)
-        vbox.setSpacing(0)
-
-        bar = FileChangedBar()
-        bar.update_theme(self.is_dark_theme)
-        bar.reload_requested.connect(lambda b=bar, e=ed: self._reload_from_disk(e, b))
-        vbox.addWidget(bar)
-
-        editor_area = QWidget()
-        layout = QHBoxLayout(editor_area)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(0)
-
-        if self.show_line_numbers:
-            gutter = LineNumberGutter(ed)
-            layout.addWidget(gutter)
-            ed._line_gutter = gutter
-
-        layout.addWidget(ed)
-        vbox.addWidget(editor_area)
+        container, bar = self._editor_container(ed)
 
         idx = self.tabs.addTab(container, os.path.basename(path))
         self.tabs.setCurrentIndex(idx)
         self._attach_close_button(idx, container)
-        ed._backup = EditorBackup(
-            ed, path, externalize=self._asset_manager.adopt_data_uri
-        )
+        ed._backup = self._new_backup(ed, path)
         self._watcher.addPath(path)
         add_recent(path)
         self._populate_recent_menu()
         ed.setFocus()
         self._update_window_title()
+        return ed
 
-    def _open_pdf_tab(self, path: str):
-        """Open ``path`` read-only in the built-in PDF viewer."""
+    def _open_pdf_tab(self, path: str) -> Optional[PdfViewerTab]:
+        """Open ``path`` read-only in the built-in PDF viewer; returns the
+        viewer, or None when the file could not be read."""
         viewer = PdfViewerTab(path, is_dark=self.is_dark_theme)
         if not viewer.load_ok:
-            inform(self, title=f"Couldn't open \u201c{os.path.basename(path)}\u201d",
+            inform(self, title=_("Couldn't open \u201c{name}\u201d").format(
+                       name=os.path.basename(path)),
                    message=str(viewer.load_error))
             viewer.deleteLater()
-            return
+            return None
         viewer.page_changed.connect(self._on_pdf_page_changed)
 
         idx = self.tabs.addTab(viewer, os.path.basename(path))
-        self.tabs.setTabToolTip(idx, viewer.document_title())
+        self.tabs.setTabToolTip(idx, path)
         self.tabs.setCurrentIndex(idx)
         self._attach_close_button(idx, viewer)
         # Watch the file so a regenerated PDF (LaTeX build, re-export)
@@ -1840,15 +3600,20 @@ class MainWindow(QMainWindow):
         viewer.setFocus()
         self._update_window_title()
         self._update_status_bar()
+        return viewer
 
     def _on_pdf_page_changed(self):
         if self.sender() is self.tabs.currentWidget():
             self._update_status_bar()
 
     def _has_formatting(self, ed: HtmlEditor) -> bool:
-        """Return True if the document contains any bold, italic, underline, or color formatting."""
+        """Return True if the document contains any bold, italic, underline, or color
+        formatting, or structure plain text cannot keep (lists, headings)."""
         block = ed.document().begin()
         while block.isValid():
+            if (block.textList() is not None or block.blockFormat().headingLevel()
+                    or rich_text.quote_depth(block) or rich_text.is_divider(block)):
+                return True
             it = block.begin()
             while not it.atEnd():
                 fragment = it.fragment()
@@ -1900,20 +3665,31 @@ class MainWindow(QMainWindow):
         """
         if ed is None:
             return True
+        waiting = self._media_not_uploaded(ed.document())
+        if waiting:
+            # Not there yet: its upload goes on (or starts again after a
+            # failure or a restart), and publishing waits for it.
+            for asset in waiting:
+                self._asset_manager.request_upload(asset.sha256)
+            inform(self, title=_("Audio or video is still uploading"),
+                   message=_("Publish or save it as a draft once the upload is done; it "
+                             "goes on uploading meanwhile."))
+            return False
         blocked = self._unpublishable_images(ed.document())
         if not blocked:
             return True
 
         count = len(blocked)
-        plural = "s" if count != 1 else ""
-        verb = "are" if count != 1 else "is"
-        them = "them" if count != 1 else "it"
         upload = ask(
             self,
-            title=f"Upload {count} image{plural} before publishing?",
-            message=(f"{count} image{plural} in this document {verb} not on "
-                     f"Blossom yet. Publishing now would break {them} for readers."),
-            buttons=(Button("Cancel", False, CANCEL), Button("Upload Now", True, DEFAULT)))
+            title=ngettext("Upload {count} image before publishing?",
+                           "Upload {count} images before publishing?", count).format(count=count),
+            message=ngettext(
+                "{count} image in this document is not on your media servers yet. "
+                "Publishing now would break it for readers.",
+                "{count} images in this document are not on your media servers yet. "
+                "Publishing now would break them for readers.", count).format(count=count),
+            buttons=(Button(_("Cancel"), False, CANCEL), Button(_("Upload Now"), True, DEFAULT)))
         if upload:
             for name in blocked:
                 sha = parse_asset_key(name)
@@ -1946,14 +3722,16 @@ class MainWindow(QMainWindow):
         def remember(asset, url: str, fmt) -> None:
             if not url or url in records:
                 return
-            alt = str(fmt.property(QTextImageFormat.ImageAltText) or "")
+            # Audio and video have no alternative text: their name is a name.
+            alt = "" if asset.is_media else (
+                str(fmt.property(QTextImageFormat.ImageAltText) or "") or asset.alt)
             records[url] = PublishedMedia(
                 url=url,
                 sha256=asset.sha256,
                 mime=asset.mime,
                 width=asset.width,
                 height=asset.height,
-                alt=alt or asset.alt,
+                alt=alt,
                 size=asset.size,
                 servers=tuple(asset.servers),
             )
@@ -1971,24 +3749,41 @@ class MainWindow(QMainWindow):
             asset = self._asset_manager.get(sha)
             if asset is None or not asset.is_uploaded:
                 return None
-            remember(asset, asset.remote_url, fmt)
-            return asset.remote_url
+            url = _published_address(asset)
+            remember(asset, url, fmt)
+            return url
 
         def as_markdown(fmt) -> Optional[str]:
             url = destination(fmt)
             if not url:
                 return None
-            alt = str(fmt.property(QTextImageFormat.ImageAltText) or "image")
-            return f"![{alt}]({url})"
+            if _is_media(self._asset_manager, fmt.name()):
+                return url                     # where readers show a player
+            return image_markdown(str(fmt.property(QTextImageFormat.ImageAltText) or ""), url)
 
         def as_note(fmt) -> Optional[str]:
             url = destination(fmt)
+            if url and _is_media(self._asset_manager, fmt.name()):
+                return url                     # always a line of its own
             # A bare URL welded to the surrounding words is unreadable
             # and unlinkable, so it always keeps its own whitespace.
             return f" {url} " if url else None
 
+        # One writer for every flavor: an article (and its draft) is the
+        # Markdown a .md file would hold; a note is the same walk as plain
+        # text, which is what apps show for a note.
         target = as_markdown if flavor == "markdown" else as_note
-        content = serialize_plain_with_images(ed.document(), target)
+        if getattr(ed, "_markdown_source", False):
+            # Opened as its Markdown text: published exactly as written.
+            content = serialize_plain_with_images(ed.document(), target).rstrip("\n")
+        else:
+            content = document_to(ed.document(), flavor, target).rstrip("\n")
+        # Audio and video of the account's media library, described from
+        # what its media servers confirmed.
+        store = getattr(self, "_media_store", None)
+        if store is not None:
+            for media in library_audio_video_in(store.files, content):
+                records.setdefault(media.url, media)
         return content, list(records.values())
 
     def _publish_text(self, ed, flavor: str) -> str:
@@ -2009,7 +3804,11 @@ class MainWindow(QMainWindow):
             return False
         if lowered.endswith('.rtf'):
             return self._has_images(ed)
-        if lowered.endswith(('.md', '.rmd')):
+        if lowered.endswith('.md'):
+            # Markdown carries bold, italic, lists, headings and links;
+            # only underline and colors stay behind.
+            return has_local_only_formatting(ed.document())
+        if lowered.endswith('.rmd'):
             return self._has_formatting(ed)
         return self._has_formatting(ed) or self._has_images(ed)
 
@@ -2017,29 +3816,29 @@ class MainWindow(QMainWindow):
         """Ask before saving to a format that drops content.
         Returns 'anyway', 'html', 'rtf', or 'cancel'."""
         buttons = [
-            Button(f"Save as {ext_label} Anyway", "anyway", DESTRUCTIVE,
-                   "Formatting, colors and images will be permanently removed "
-                   "from the saved file."),
-            Button("Save as .html", "html", NORMAL,
-                   "Saves all colors, bold, italic and formatting.\n"
-                   "Best choice for editing in this editor."),
+            Button(_("Save as {ext} Anyway").format(ext=ext_label), "anyway", DESTRUCTIVE,
+                   _("Formatting, colors and images will be permanently removed "
+                     "from the saved file.")),
+            Button(_("Save as {ext}").format(ext=".html"), "html", NORMAL,
+                   _("Saves all colors, bold, italic and formatting.\n"
+                     "Best choice for editing in this editor.")),
         ]
         # Offering .rtf as the escape from an .rtf save would be a loop.
         if ext_label.lower() != ".rtf":
             buttons.append(Button(
-                "Save as .rtf", "rtf", NORMAL,
-                "Saves all colors, bold, italic and formatting.\n"
-                "Compatible with Word, LibreOffice and other apps."))
-        buttons.append(Button("Cancel", "cancel", DEFAULT))
+                _("Save as {ext}").format(ext=".rtf"), "rtf", NORMAL,
+                _("Saves all colors, bold, italic and formatting.\n"
+                  "Compatible with Word, LibreOffice and other apps.")))
+        buttons.append(Button(_("Cancel"), "cancel", DEFAULT))
         return ask(
-            self, title=f"Save as {ext_label} without formatting?",
-            message=(f"This document has colors, text formatting or images "
-                     f"that {ext_label} can't store."),
+            self, title=_("Save as {ext} without formatting?").format(ext=ext_label),
+            message=_("This document has colors, text formatting or images "
+                      "that {ext} can't store.").format(ext=ext_label),
             buttons=buttons, caution=True)
 
     def save(self) -> bool:
         if self.current_pdf_viewer() is not None:
-            self.status.showMessage("PDFs open read-only; there is nothing to save.", 3000)
+            self.status.showMessage(_("PDFs open read-only; there is nothing to save."), 3000)
             return True
         path = self.current_path()
         if not path:
@@ -2067,8 +3866,9 @@ class MainWindow(QMainWindow):
                     if outcome == "switch":
                         if not self._switch_active_profile_to(mismatch_pk):
                             inform(
-                                self, title="That profile isn't connected anymore",
-                                message="Pair it again from Nostr > Connect Signer to save here.")
+                                self, title=_("That account isn\u2019t signed in anymore"),
+                                message=_("Connect it again with Nostr > Connect Signer "
+                                          "App\u2026 to save here."))
                             return False
                 self._restash_with_binding(ed, binding)
                 return True
@@ -2090,12 +3890,14 @@ class MainWindow(QMainWindow):
 
     def save_as(self, initial_path: str = "", initial_filter: str = "") -> bool:
         path, selected_filter = QFileDialog.getSaveFileName(
-            self, "Save As", initial_path,
+            self, _("Save As"), initial_path,
             ".txt (*.txt);; .html (*.html);; .pdf (*.pdf);; .md (*.md);; .rtf (*.rtf);; .Rmd (*.Rmd)",
             initial_filter
         )
         if not path:
             return False
+        # Qt's dialog answers with forward slashes, also on Windows.
+        path = file_paths.normalize(path)
 
         # Auto-add extension if the user didn't type one
         if not any(path.lower().endswith(e) for e in _SAVE_EXTS):
@@ -2142,6 +3944,8 @@ class MainWindow(QMainWindow):
         QTimer.singleShot(500, lambda: self._saving_paths.discard(path))
 
         ext = path.lower()
+        front = None
+        head = ""                   # a Markdown file's front matter, as written
         try:
             if ext.endswith('.pdf'):
                 return self._save_as_pdf(ed, path)
@@ -2158,30 +3962,142 @@ class MainWindow(QMainWindow):
             elif ext.endswith('.rmd'):
                 content = self._to_rmd_content(ed, path)
             elif ext.endswith('.md'):
+                # The same Markdown an article publishes, whether the tab
+                # came from a .md file or was typed here.
                 target = self._image_target_for_file_save(ed.document(), path)
-                if getattr(ed, '_loaded_as_markdown', False):
-                    content = self._markdown_with_mapped_images(ed, target)
+                reference = self._markdown_reference_for(target)
+                if getattr(ed, "_markdown_source", False):
+                    content = serialize_plain_with_images(ed.document(), reference)
                 else:
-                    content = serialize_plain_with_images(
-                        ed.document(), self._markdown_reference_for(target)
-                    )
+                    content = document_to_markdown(ed.document(), reference)
+                # Its front matter (Q-F): as written but for the details
+                # changed here; none when there are none and it had none.
+                # Details nothing set or read are the file's: it stays as is.
+                front = getattr(ed, "_front_matter", None)
+                if not tab_details.untouched(ed):
+                    front = front_matter_with(self._article_details_of(ed), front)
+                if not self._saving_without(ed, front, path):
+                    return False
+                head = front_matter.head(front, content)
+                if head:
+                    content = content.lstrip("\n")
+                if front is not None and getattr(ed, "_front_matter", None) is None:
+                    # One written anew: in the file's line ending.
+                    head = head.replace("\n", getattr(ed, "_newline", None) or os.linesep)
             else:
                 # .txt and anything unknown: images cannot be carried, so
                 # they are omitted rather than left as the raw U+FFFC
                 # placeholder the old toPlainText call wrote out.
                 content = serialize_plain_with_images(ed.document(), lambda fmt: None)
 
-            with open(path, "w", encoding="utf-8") as f:
-                f.write(content)
+            save_text_document(path, content, newline=getattr(ed, "_newline", None),
+                               head=head)
+            if ext.endswith('.md'):
+                ed._front_matter = front
+                ed._details_not_saved = front.refused if front is not None else frozenset()
+                tab_details.file_changed(ed)
+            ed._recovered_title = ""
             ed.document().setModified(False)
             self._update_tab_title()
-            self.status.showMessage(f"Saved: {path}")
+            self._say_saved(ed, path)
             return True
 
         except Exception as e:
-            inform(self, title=f"Couldn't save \u201c{os.path.basename(path)}\u201d",
+            inform(self, title=_("Couldn't save \u201c{name}\u201d").format(
+                       name=os.path.basename(path)),
                    message=f"{e}\n\n{_SAVE_FAILED_HINT}", caution=True)
             return False
+
+    def _say_saved(self, ed, path: str) -> None:
+        """Say a document was saved, and whether audio or video in it is
+        still to go in. A Markdown, HTML or PDF file holds such a file once
+        it is on a media server (its address, or a link to it): until then the save writes what it can, and the
+        document is edited again when the upload is done
+        (_on_media_uploaded), as Pages does when an inserted item finishes
+        loading after a save."""
+        waiting = (self._media_not_uploaded(ed.document())
+                   if path.lower().endswith((".md", ".html", ".htm", ".pdf")) else [])
+        ed._media_left_out = {asset.sha256 for asset in waiting}
+        not_saved = getattr(ed, "_details_not_saved", None) if path.lower().endswith(".md") \
+            else None
+        said = []
+        if not_saved:
+            said.append(_("Saved without what you typed for {details}: MyEditor can’t write "
+                          "it into the file.").format(details=self._detail_names(not_saved)))
+        if waiting and said:
+            said.append(ngettext("“{name}” goes into the file once it is uploaded.",
+                                 "{count} files go into the file once they are uploaded.",
+                                 len(waiting)).format(name=waiting[0].alt, count=len(waiting)))
+        elif waiting:
+            said.append(ngettext("Saved. “{name}” goes into the file once it is uploaded.",
+                                 "Saved. {count} files go into the file once they are uploaded.",
+                                 len(waiting)).format(name=waiting[0].alt, count=len(waiting)))
+        self.status.showMessage(" ".join(said) or _("Saved: {path}").format(path=path))
+
+    def _on_media_uploaded(self, sha: str) -> None:
+        """Audio or video a save had to leave out is uploaded: the documents
+        saved without it are edited again, so Close and Quit ask."""
+        asset = self._asset_manager.get(sha)
+        if asset is None or not asset.is_media or not asset.is_uploaded:
+            return
+        for i in range(self.tabs.count()):
+            ed = self._editor_from_widget(self.tabs.widget(i))
+            left_out = getattr(ed, "_media_left_out", set()) if ed is not None else set()
+            if sha in left_out:
+                left_out.discard(sha)
+                ed.document().setModified(True)
+                self.status.showMessage(
+                    _("“{name}” is uploaded. Save the document to put it in.").format(
+                        name=asset.alt))
+
+    def _saving_without(self, ed, front, path: str) -> bool:
+        """Whether a save goes on when the front matter it writes leaves
+        out details typed in the tab that no way of writing holds in the
+        file (FrontMatter.refused): asked before anything is written, so
+        Close and Quit with Save stay when the person keeps editing. The
+        tab keeps what was typed either way, and the article still
+        publishes it. Asked once for the same details."""
+        refused = front.refused if front is not None else frozenset()
+        if not refused:
+            return True
+        details = self._article_details_of(ed)
+        if getattr(ed, "_told_not_saved", None) == (refused, details):
+            return True
+        if len(refused) == 1:
+            title = _("“{detail}” can’t be saved in the file").format(
+                detail=self._detail_label(next(iter(refused))))
+            without = _("Save Without It")
+        else:
+            title = _("Some article details can’t be saved in the file")
+            without = _("Save Without Them")
+        choice = ask(self, title=title, caution=True, is_dark=self.is_dark_theme,
+                     message=_("MyEditor can’t write what you typed for {details} into "
+                               "“{name}” so that other apps read it the same way. The file "
+                               "keeps what it had, and the article still publishes what you "
+                               "typed.").format(details=self._detail_names(refused),
+                                                name=os.path.basename(path)),
+                     buttons=(Button(without, "without", NORMAL),
+                              Button(_("Keep Editing"), "keep", DEFAULT)))
+        if choice != "without":
+            return False
+        ed._told_not_saved = (refused, details)
+        return True
+
+    @staticmethod
+    def _detail_label(detail: str) -> str:
+        """The name Article Details gives a detail of the front matter
+        (article_details._FRONT_KEYS)."""
+        return {"title": _("Title"), "summary": _("Summary"), "image": _("Cover image"),
+                "tags": _("Hashtags"), "slug": _("Link name"),
+                "date": _("Date"), "coauthors": _("Co-Authors"),
+                "zap_split": _("Share zaps equally with co-authors")}[detail]
+
+    def _detail_names(self, details) -> str:
+        """``details`` as their names, each in quotes, in the order Article
+        Details shows them."""
+        order = ("title", "summary", "image", "tags", "slug", "date", "coauthors", "zap_split")
+        return ", ".join(_("“{detail}”").format(detail=self._detail_label(detail))
+                         for detail in order if detail in details)
 
     def _on_file_changed(self, path: str):
         if path in self._saving_paths:
@@ -2216,14 +4132,17 @@ class MainWindow(QMainWindow):
         if not path or not os.path.exists(path):
             return
         try:
-            with open(path, 'r', encoding='utf-8') as f:
-                content = f.read()
-        except Exception as e:
-            inform(self, title=f"Couldn't reload \u201c{os.path.basename(path)}\u201d",
+            content, newline = read_text_as_written(path)
+        except (OSError, ValueError) as e:
+            inform(self, title=_("Couldn't reload \u201c{name}\u201d").format(
+                       name=os.path.basename(path)),
                    message=str(e))
             return
+        ed._newline = newline
 
         self._set_editor_content(ed, path, content)
+        self._attach_highlighter(ed, path)
+        ed._recovered_title = ""
 
         ed.document().setModified(False)
         bar.hide()
@@ -2238,11 +4157,11 @@ class MainWindow(QMainWindow):
         if url_safety.is_safe_external_url(url):
             QDesktopServices.openUrl(QUrl(url))
         else:
-            self.status.showMessage("That link cannot be opened.", 5000)
+            self.status.showMessage(_("That link cannot be opened."), 5000)
 
     def _export_title_for(self, path: str) -> str:
         """Document title for export metadata: the filename without extension."""
-        return os.path.splitext(os.path.basename(path))[0] or "Untitled"
+        return os.path.splitext(os.path.basename(path))[0] or _("Untitled")
 
     def _blob_cache_root(self) -> str:
         """Directory holding the content-addressed image cache."""
@@ -2265,39 +4184,12 @@ class MainWindow(QMainWindow):
             destination = target(fmt)
             if not destination:
                 return None
-            alt = str(fmt.property(QTextImageFormat.ImageAltText) or "image")
-            return f"![{alt}]({destination})"
+            if _is_media(self._asset_manager, fmt.name()):
+                return destination             # audio or video: its address
+            return image_markdown(str(fmt.property(QTextImageFormat.ImageAltText) or ""),
+                                  destination)
 
         return reference
-
-    def _markdown_with_mapped_images(self, ed, target) -> str:
-        """toMarkdown() with every image name rewritten to its destination.
-
-        The rewrite happens on a clone: the live document keeps its
-        asset keys, so the open tab still renders and the user's undo
-        stack is untouched.
-        """
-        clone = ed.document().clone()
-        cursor = QTextCursor(clone)
-        cursor.beginEditBlock()
-        for block in iter_blocks(clone):
-            it = block.begin()
-            while not it.atEnd():
-                frag = it.fragment()
-                fmt = frag.charFormat()
-                if frag.isValid() and fmt.isImageFormat():
-                    imf = fmt.toImageFormat()
-                    destination = target(imf)
-                    if destination:
-                        new_fmt = QTextImageFormat(imf)
-                        new_fmt.setName(destination)
-                        cursor.setPosition(frag.position())
-                        cursor.setPosition(frag.position() + frag.length(),
-                                           QTextCursor.KeepAnchor)
-                        cursor.setCharFormat(new_fmt)
-                it += 1
-        cursor.endEditBlock()
-        return clone.toMarkdown()
 
     def _image_target_for_file_save(self, doc, save_path: str):
         """Where each image should point once written to ``save_path``.
@@ -2319,8 +4211,7 @@ class MainWindow(QMainWindow):
                 return written[name]
             try:
                 os.makedirs(media_dir, exist_ok=True)
-                with open(os.path.join(media_dir, name), "wb") as f:
-                    f.write(data)
+                save_document(os.path.join(media_dir, name), data)
             except OSError:
                 return None
             written[name] = f"{os.path.basename(media_dir)}/{name}"
@@ -2334,7 +4225,11 @@ class MainWindow(QMainWindow):
 
             asset = self._asset_manager.get(sha)
             if asset is not None and asset.is_uploaded:
-                return asset.remote_url
+                return _published_address(asset)
+            if asset is not None and asset.is_media:
+                # Not on a media server yet: nothing to write (never a
+                # placeholder); saved again once it is, it is there.
+                return None
 
             data = self._asset_manager.resolve_bytes(name)
             if data:
@@ -2418,9 +4313,16 @@ class MainWindow(QMainWindow):
         # ![alt](sidecar) syntax here. Reading the source out as plain text
         # would drop it, leaving a bare U+FFFC for pandoc to choke on.
         target = self._image_target_for_file_save(ed.document(), path)
-        source = serialize_plain_with_images(
-            ed.document(), self._markdown_reference_for(target)
-        )
+        picture = self._markdown_reference_for(target)
+
+        def reference(fmt):
+            media = _media_asset(self._asset_manager, fmt.name())
+            if media is None:
+                return picture(fmt)
+            link = self._media_file_link(media, path)
+            return link.markdown() if link is not None else None
+
+        source = serialize_plain_with_images(ed.document(), reference)
         if getattr(ed, "_loaded_as_rmd_source", False) or origin.endswith(".rmd"):
             return source
         if source.lstrip().startswith("---") and not self._has_formatting(ed):
@@ -2441,6 +4343,9 @@ class MainWindow(QMainWindow):
         policy = image_safety.ImageRootPolicy(self._image_roots_for(rmd_path))
 
         def copy(name: str):
+            media = _media_asset(self._asset_manager, name)
+            if media is not None:
+                return self._media_file_link(media, rmd_path)
             sha = parse_asset_key(name)
             if sha is not None:
                 data = self._asset_manager.resolve_bytes(name)
@@ -2467,25 +4372,45 @@ class MainWindow(QMainWindow):
             os.makedirs(media_dir, exist_ok=True)
             target = os.path.join(media_dir, filename)
             try:
-                with open(target, "wb") as f:
-                    f.write(data)
+                save_document(target, data)
             except OSError:
                 return None
             return f"{os.path.basename(media_dir)}/{filename}"
 
         return copy
 
+    def _media_file_link(self, asset, save_path: str) -> Optional[MediaLink]:
+        """An audio or video file as a link from the document saved at
+        ``save_path``: to its address once uploaded, else to a copy of it
+        in the document's media folder, as the document's pictures are."""
+        label = asset.alt or f"{asset.sha256}{media_files.extension_for(asset.mime)}"
+        if asset.is_uploaded:
+            return MediaLink(label, _published_address(asset))
+        data = self._asset_manager.resolve_bytes(asset.key)
+        if not data:
+            return None
+        media_dir = media_dir_for(save_path)
+        name = asset.sha256 + media_files.extension_for(asset.mime)
+        try:
+            os.makedirs(media_dir, exist_ok=True)
+            save_document(os.path.join(media_dir, name), data)
+        except OSError:
+            return None
+        return MediaLink(label, f"{os.path.basename(media_dir)}/{name}")
+
     def _save_as_rtf(self, editor, path: str) -> bool:
         try:
             content = self._to_rtf(editor)
-            with open(path, "w", encoding="ascii") as f:
-                f.write(content)
+            save_text_document(path, content, encoding="ascii",
+                               newline=getattr(editor, "_newline", None))
+            editor._recovered_title = ""
             editor.document().setModified(False)
             self._update_tab_title()
-            self.status.showMessage(f"Saved: {path}")
+            self.status.showMessage(_("Saved: {path}").format(path=path))
             return True
         except Exception as e:
-            inform(self, title=f"Couldn't save \u201c{os.path.basename(path)}\u201d",
+            inform(self, title=_("Couldn't save \u201c{name}\u201d").format(
+                       name=os.path.basename(path)),
                    message=f"{e}\n\n{_SAVE_FAILED_HINT}", caution=True)
             return False
 
@@ -2591,12 +4516,14 @@ class MainWindow(QMainWindow):
                        title=self._export_title_for(path),
                        image_roots=self._image_roots_for(path),
                        asset_resolver=self._asset_manager.export_view)
+            editor._recovered_title = ""
             editor.document().setModified(False)
             self._update_tab_title()
-            self.status.showMessage(f"Saved: {path}")
+            self._say_saved(editor, path)
             return True
         except Exception as e:
-            inform(self, title=f"Couldn't save \u201c{os.path.basename(path)}\u201d",
+            inform(self, title=_("Couldn't save \u201c{name}\u201d").format(
+                       name=os.path.basename(path)),
                    message=f"{e}\n\n{_SAVE_FAILED_HINT}", caution=True)
             return False
 
@@ -2634,7 +4561,7 @@ class MainWindow(QMainWindow):
         if ed is None:
             return None
         path = getattr(ed, "_file_path", None)
-        title = self._export_title_for(path) if path else "Untitled"
+        title = self._export_title_for(path) if path else _("Untitled")
         roots = self._image_roots_for(path) if path else (self._blob_cache_root(),)
         return title, lambda printer: printing.print_document(
             ed.document(), printer, image_roots=roots,
@@ -2656,16 +4583,23 @@ class MainWindow(QMainWindow):
             pages = paint(printer)
         except printing.PrintError as exc:
             QGuiApplication.restoreOverrideCursor()
-            inform(self, title="Couldn't print",
-                   message=f"{exc} Check that it's turned on and connected, then try again.")
+            inform(self, title=_("Couldn't print"),
+                   message=_("{error} Check that it's turned on and connected, then try "
+                             "again.").format(error=exc))
             return
         QGuiApplication.restoreOverrideCursor()
         if pages == 0:
-            self.status.showMessage("Nothing printed: those pages aren't in the document.", 6000)
+            self.status.showMessage(
+                _("Nothing printed: those pages aren't in the document."), 6000)
             return
-        where = printer.outputFileName() or printer.printerName() or "the printer"
-        self.status.showMessage(
-            f"Sent {pages} page{'s' if pages != 1 else ''} to {where}.", 6000)
+        where = printer.outputFileName() or printer.printerName()
+        if where:
+            sent = ngettext("Sent {count} page to {where}.", "Sent {count} pages to {where}.",
+                            pages).format(count=pages, where=where)
+        else:
+            sent = ngettext("Sent {count} page to the printer.",
+                            "Sent {count} pages to the printer.", pages).format(count=pages)
+        self.status.showMessage(sent, 6000)
 
     def _on_print_preview(self):
         """File > Print Preview (Windows and Linux; macOS previews in its
@@ -2677,7 +4611,7 @@ class MainWindow(QMainWindow):
         printer = self._printer()
         printing.prepare(printer, title, load_page_setup())
         preview = QPrintPreviewDialog(printer, self)
-        preview.setWindowTitle("Print Preview")
+        preview.setWindowTitle(_("Print Preview"))
         preview.paintRequested.connect(paint)
         preview.exec()
 
@@ -2740,11 +4674,11 @@ class MainWindow(QMainWindow):
         runner.knit(path, fmt)
 
     def _on_knit_started(self):
-        self.status.showMessage("Knitting…")
+        self.status.showMessage(_("Knitting…"))
         self._update_knit_actions()
 
     def _on_knit_done(self, output_path: str):
-        self.status.showMessage(f"Knit complete: {output_path}", 8000)
+        self.status.showMessage(_("Knit complete: {path}").format(path=output_path), 8000)
         # Not gated: this path is the output of our own knit run, not a
         # name that came from a document or the network.
         QDesktopServices.openUrl(QUrl.fromLocalFile(output_path))
@@ -2761,50 +4695,215 @@ class MainWindow(QMainWindow):
                                  want_pdf=(kind == "missing-latex"))
             dlg.exec()
             return
-        inform(self, title="Couldn't knit the document",
-               message="R Markdown stopped with an error. The details show what it reported.",
+        inform(self, title=_("Couldn't knit the document"),
+               message=_("R Markdown stopped with an error. The details show what it "
+                         "reported."),
                details=detail)
-        self.status.showMessage("Knit failed.", 5000)
+        self.status.showMessage(_("Knit failed."), 5000)
 
     # ----------------------------------------------------------------------
     # SEARCH
     # ----------------------------------------------------------------------
-    def _toggle_findbar(self):
+    def _show_find(self, replace: bool = False):
+        """Find… or Find and Replace…: the find bar, its field focused
+        (Find and Replace adds the Replace row). In a PDF tab, the PDF
+        reader's own find bar. With the Imports window in front, its
+        search field."""
+        imports = self._imports_in_front()
+        if imports is not None:
+            imports.focus_search()
+            return
         viewer = self.current_pdf_viewer()
         if viewer is not None:
-            viewer.toggle_findbar()
+            if viewer.findbar.isVisible():
+                viewer.findbar.focusIn()
+            else:
+                viewer.toggle_findbar()
             return
-        vis = not self.findbar.isVisible()
-        self.findbar.setVisible(vis)
-        if vis:
-            self.findbar.focusIn()
-            self._on_search_text_changed()
+        if self.current_editor() is None:
+            return
+        self.findbar.show_replace(replace or (self.findbar.isVisible()
+                                              and self.findbar.replace_shown()))
+        self.findbar.setVisible(True)
+        self.findbar.focusIn()
+        self._last_search_text = None
+        self._on_search_text_changed()
+
+    def _close_findbar(self):
+        """Done or Escape: the bar goes, the highlights with it, and the
+        writing goes on where the match was."""
+        self.findbar.setVisible(False)
+        self.findbar.set_match_info("")
+        self._clear_search_highlights()
+        ed = self.current_editor()
+        if ed:
+            cursor = ed.textCursor()
+            cursor.setPosition(cursor.selectionStart())
+            ed.setTextCursor(cursor)
+            ed.setFocus()
+
+    def _on_find_options_changed(self):
+        self._last_search_text = None
+        self._on_search_text_changed()
+
+    def _on_document_changed_for_find(self, ed):
+        if ed is self.current_editor() and self.findbar.isVisible():
+            self._find_refresh.start()
+
+    def _refresh_matches(self):
+        if not self.findbar.isVisible():
+            return
+        self._last_search_text = None
+        self._on_search_text_changed()
+
+    def _replace_current(self):
+        """Replace: the match that is selected becomes the replacement (in
+        its style), and the next match is selected. With no match
+        selected, the next one is found first."""
+        ed = self.current_editor()
+        needle = self.findbar.text()
+        if ed is None or not needle:
+            return
+        self._update_search_matches(needle)
+        self._last_search_text = needle
+        cursor = ed.textCursor()
+        selected = (cursor.selectionStart(), cursor.selectionEnd())
+        if selected in self._search_matches:
+            # No highlight cursors for the document to move while it changes.
+            ed.set_highlights("find", [])
+            with ed.undo_step(N_("Replace")):
+                _start, end = replace_match(ed.document(), selected,
+                                            self.findbar.replacement())
+            cursor.setPosition(end)
+            ed.setTextCursor(cursor)
+            self._find_refresh.stop()          # found again right here
+            self._update_search_matches(needle)
+            self._last_search_text = needle
+            if not self._search_matches:
+                self._highlight_all_matches()
+                self._update_match_display()
+                return
+        # The next match after the caret (after the replacement).
+        self._find_once(True)
+
+    def _replace_all(self):
+        """Replace All: every match, as one step to undo."""
+        ed = self.current_editor()
+        needle = self.findbar.text()
+        if ed is None or not needle:
+            return
+        # Every highlight holds a cursor the document would move on each of
+        # the replacements: take them away first (thousands of matches made
+        # Replace All take minutes).
+        ed.set_highlights("find", [])
+        with ed.undo_step(N_("Replace All")):
+            count = replace_all(ed.document(), needle, self.findbar.replacement(),
+                                self.findbar.options())
+        self._find_refresh.stop()              # found again right here
+        self._update_search_matches(needle)
+        self._last_search_text = needle
+        self._highlight_all_matches()
+        if count:
+            self.findbar.set_match_info(
+                ngettext("{count} replaced", "{count} replaced", count).format(
+                    count=_number(count)))
         else:
-            self.findbar.set_match_info("")
-            self._clear_search_highlights()
-            ed = self.current_editor()
-            if ed:
-                cursor = ed.textCursor()
-                cursor.setPosition(cursor.selectionStart())
-                ed.setTextCursor(cursor)
-                ed.setFocus()
+            self.findbar.set_match_info(_("No matches"))
+
+    def _choose_language(self, code: str, tell: bool = True) -> None:
+        """Remember the language; it is used from the next start on. View >
+        Language says so in an alert; Settings (``tell`` False) says it
+        under its choice."""
+        save_setting(i18n.SETTING, code)
+        for known, action in zip(self._language_codes, self.act_languages):
+            action.setChecked(known == code)
+        target = i18n.resolve(code)
+        if target == i18n.language() or not tell:
+            return
+        name = i18n.LANGUAGE_NAMES.get(target, target)
+        inform(self, title=_("Restart MyEditor to Change the Language"),
+               message=_("MyEditor will be in {name} the next time you open it.").format(
+                   name=name),
+               is_dark=self.is_dark_theme)
+
+    # -- a Mac's Window menu ----------------------------------------------------------
+
+    def _front_window(self):
+        """The window in front: this one, Settings, the Imports window…"""
+        return QApplication.activeWindow() or self
+
+    def _zoom_front_window(self) -> None:
+        window = self._front_window()
+        if window.isMaximized():
+            window.showNormal()
+        else:
+            window.showMaximized()
+
+    def _bring_all_to_front(self) -> None:
+        """Every open window of MyEditor in front of other apps' windows,
+        the one in front staying in front."""
+        front = QApplication.activeWindow()
+        for window in QApplication.topLevelWidgets():
+            if window.isVisible() and not window.isMinimized() and window is not front:
+                window.raise_()
+        if front is not None:
+            front.raise_()
+
+    def _show_settings(self) -> None:
+        """The Settings window: one, brought to the front when it is open."""
+        window = getattr(self, "_settings_window", None)
+        if window is None:
+            window = SettingsWindow(
+                appearance=self.act_appearance,
+                languages=list(zip(self._language_codes, self.act_languages)),
+                choose_language=lambda code: self._choose_language(code, tell=False),
+                monospace=self.act_monospace_writing,
+                paste_choice=self._paste_choice,
+                choose_paste=self._store_paste_choice,
+                nostr_in_use=lambda: self.nostr_state.active,
+                format_bar=lambda: self.format_bar_on_selection,
+                choose_format_bar=self._set_format_bar_on_selection,
+                caret_style=lambda: self.caret_style,
+                choose_caret_style=self._set_caret_style,
+                is_dark=self.is_dark_theme, parent=self)
+            window.setAttribute(Qt.WA_DeleteOnClose, True)
+            window.destroyed.connect(lambda _obj=None: setattr(self, "_settings_window", None))
+            self._settings_window = window
+        window.show()
+        window.raise_()
+        window.activateWindow()
 
     def _show_shortcuts(self):
-        """Open the cheat-sheet style ``ShortcutsDialog``.
+        """Help > Keyboard Shortcuts: a reference window beside the
+        document, not modal, so a key can be tried while it is open; one
+        window, brought to the front when it is already open."""
+        window = getattr(self, "_shortcuts_window", None)
+        if window is None:
+            from shortcuts_dialog import ShortcutsDialog
+            window = ShortcutsDialog(self._shortcut_groups(), is_dark=self.is_dark_theme,
+                                     parent=self)
+            window.setAttribute(Qt.WA_DeleteOnClose, True)
+            window.destroyed.connect(lambda _obj=None: setattr(self, "_shortcuts_window", None))
+            self._shortcuts_window = window
+        window.show()
+        window.raise_()
+        window.activateWindow()
 
-        Replaces the previous plain-text ``QMessageBox`` so we get a
-        searchable, themed, category-grouped surface in keeping with
-        how major desktop apps display their keyboard reference.
-        """
-        from shortcuts_dialog import ShortcutsDialog
-        dlg = ShortcutsDialog(is_dark=self.is_dark_theme, parent=self)
-        dlg.exec()
+    def _shortcut_groups(self):
+        """The keys Help > Keyboard Shortcuts lists. Nostr shortcuts are
+        listed while an account is in use; before that the editor shows
+        nothing of it beyond the Nostr menu."""
+        from shortcuts_dialog import OTHER_KEYS, groups_from
+        return groups_from(self.commands.shortcut_groups(
+            OTHER_KEYS, nostr=self.nostr_state.active))
 
     def _show_about(self):
         answer = ask(
             self, title=APP_DISPLAY_NAME,
-            message=f"Version {APP_VERSION}\nA minimal distraction-free text editor.",
-            buttons=(Button("Source Code", "source", NORMAL), Button("OK", "ok", DEFAULT)))
+            message=_("Version {version}\nA minimal distraction-free text editor.\n"
+                      "Built by rinbal.").format(version=APP_VERSION),
+            buttons=(Button(_("Source Code"), "source", NORMAL),
+                     Button(_("OK"), "ok", DEFAULT)))
         if answer == "source":
             self._open_external(APP_URL)
 
@@ -2840,20 +4939,26 @@ class MainWindow(QMainWindow):
         self._pending_release = info
         kind = detect_install_kind()
         asset = select_asset(kind, info.assets)
+        # Only a file GitHub published a hash for is installed automatically;
+        # anything else goes through the guide, where the person downloads it.
+        can_self_update = (supports_in_app_update(kind) and asset is not None
+                           and bool(getattr(asset, "sha256", "")))
         plan = plan_for(
             kind, info.version, release_url=info.page_url, asset=asset,
-            can_self_update=supports_in_app_update(kind) and asset is not None)
+            can_self_update=can_self_update)
         installer = UpdateInstaller(kind, self) if plan.mode == AUTOMATIC else None
         dlg = UpdateDialog(
             info.version, APP_VERSION, plan,
             release_url=info.page_url, asset=asset, installer=installer,
-            before_restart=self._confirm_save_before_update,
+            before_restart=self._prepare_workspace_for_update,
+            release_notes=getattr(info, "notes", ""),
             is_dark=self.is_dark_theme, parent=self)
         if installer is not None:
             installer.setParent(dlg)   # lives and goes with its dialog
         dlg.skip_requested.connect(self._skip_update_version)
         dlg.link_activated.connect(self._open_external)
         dlg.restart_ready.connect(self._close_for_update)
+        dlg.restart_failed.connect(self._discard_update_workspace)
         dlg.finished.connect(dlg.deleteLater)
         self._update_dialog = dlg
         dlg.open()
@@ -2863,17 +4968,89 @@ class MainWindow(QMainWindow):
         self.update_bar.hide()
 
     def _close_for_update(self):
-        # The installer (Windows) or the swap helper (AppImage) is now running
-        # and will relaunch MyEditor; close so it can replace our files.
+        # The installer (Windows) or the swap or relaunch helper (AppImage,
+        # macOS, .deb) is now running and will open MyEditor again; close so
+        # it can replace our files.
         self._closing_for_update = True
         self.close()
+
+    def _show_log_files(self):
+        """Help > Show Log Files: the folder with the log, for a bug report."""
+        folder = diagnostics.log_folder()
+        os.makedirs(folder, exist_ok=True)
+        if not QDesktopServices.openUrl(QUrl.fromLocalFile(folder)):
+            self.statusBar().showMessage(
+                _("The log files are in {folder}").format(folder=folder), 8000)
 
     def _open_install_guide(self):
         """Help > Installation Help: the web guide, opened on this system."""
         self._open_external(guide_url(detect_install_kind(), machine=platform.machine()))
 
+    # -- keeping the workspace across an update restart ---------------------
+
+    def _prepare_workspace_for_update(self) -> bool:
+        """Write down every open tab so the restart brings them back.
+
+        Unsaved and untitled work is kept in its crash-recovery backup,
+        written now, so nothing needs to be asked. Only a tab whose backup
+        cannot be written (too large, or a disk error) is asked about, by
+        name, the way closing it would be: saved, it comes back as its file;
+        not saved, as its file on disk, or not at all if it has none. If the
+        record itself cannot be written, the restart brings back nothing
+        unsaved, so every unsaved document is asked about. Returns False
+        when the person cancels.
+        """
+        capture = workspace_restore.capture_tabs(self)
+        for ed in capture.unprotected:
+            answer = self._ask_save_before_update(ed)
+            if answer == "cancel":
+                return False
+            if answer == "save" and not self._save_tab_of(ed):
+                return False
+            capture.settle(ed, saved=answer == "save")
+        info = getattr(self, "_pending_release", None)
+        tabs, active = capture.tabs()
+        ws = Workspace(
+            tabs=tabs,
+            active=active,
+            from_version=APP_VERSION,
+            to_version=getattr(info, "version", ""),
+            release_notes=getattr(info, "notes", ""),
+            release_url=getattr(info, "page_url", ""),
+        )
+        if not workspace.write_workspace(ws):
+            self._update_workspace = None
+            return self._confirm_save_before_update()
+        self._update_workspace = ws
+        return True
+
+    def _discard_update_workspace(self) -> None:
+        """The restart did not happen: the record must not reopen anything later."""
+        workspace.discard_workspace()
+        self._update_workspace = None
+
+    def _ask_save_before_update(self, ed) -> str:
+        """Save, Don't Save or Cancel for one document the update restart
+        can't bring back by itself; the same question closing its tab asks."""
+        path = getattr(ed, "_file_path", None)
+        name = os.path.basename(path) if path else _("Untitled")
+        return _ask_save_changes(
+            self, _("Do you want to save the changes you made to “{name}” "
+                    "before updating?").format(name=name),
+            message=_("MyEditor couldn’t keep a copy of this document for the restart. "
+                      "Your changes will be lost if you don’t save them."))
+
+    def _save_tab_of(self, ed) -> bool:
+        """Save the document in ``ed``'s tab, the way Save does."""
+        index = self._editor_widget_index(ed)
+        if index < 0:
+            return False
+        self.tabs.setCurrentIndex(index)
+        return self.save()
+
     def _confirm_save_before_update(self):
-        """Handle unsaved work before the app relaunches for an update. Returns
+        """The record of the tabs could not be written, so the restart brings
+        back only saved files: ask about every unsaved document. Returns
         True if it is safe to proceed, False if the user cancelled."""
         has_unsaved = False
         for i in range(self.tabs.count()):
@@ -2884,8 +5061,9 @@ class MainWindow(QMainWindow):
         if not has_unsaved:
             return True
         r = _ask_save_changes(
-            self, "Save your changes before updating?",
-            message="MyEditor closes to install the update. Changes you don't save will be lost.")
+            self, _("Save your changes before updating?"),
+            message=_("MyEditor closes to install the update. Changes you don’t save will be "
+                      "lost."))
         if r == "cancel":
             return False
         if r == "save":
@@ -2911,15 +5089,16 @@ class MainWindow(QMainWindow):
 
     def _on_manual_up_to_date(self):
         inform(
-            self, title="You're up to date",
-            message=f"{APP_DISPLAY_NAME} {APP_VERSION} is the newest version.",
+            self, title=_("You're up to date"),
+            message=_("{app} {version} is the newest version.").format(
+                app=APP_DISPLAY_NAME, version=APP_VERSION),
             is_dark=self.is_dark_theme)
 
     def _on_manual_update_failed(self, error: str):
         inform(
-            self, title="Can't check for updates",
-            message=(f"{APP_DISPLAY_NAME} couldn't reach GitHub. Check your "
-                     "internet connection, then try again."),
+            self, title=_("Can't check for updates"),
+            message=_("{app} couldn't reach GitHub. Check your "
+                      "internet connection, then try again.").format(app=APP_DISPLAY_NAME),
             is_dark=self.is_dark_theme)
 
     def _on_search_text_changed(self):
@@ -2938,69 +5117,59 @@ class MainWindow(QMainWindow):
         ed = self.current_editor()
         if not ed:
             return
-        self._search_matches = []
-        if not needle:
-            self._current_match_index = -1
-            return
-        cursor = QTextCursor(ed.document())
-        cursor.movePosition(QTextCursor.Start)
-        while True:
-            cursor = ed.document().find(needle, cursor, QTextDocument.FindFlags())
-            if cursor.isNull():
-                break
-            self._search_matches.append((cursor.selectionStart(), cursor.selectionEnd()))
-        self._current_match_index = -1
+        self._search_matches = find_all(ed.document(), needle, self.findbar.options())
+        # Whose they are: a tab's matches are never painted on another.
+        self._matches_of = ed
+        # And of which text: found before a change, they are not painted
+        # again until Find has looked again (the highlights on screen move
+        # with the text meanwhile).
+        self._matches_revision = ed.document().revision()
+        # The match that is selected stays the current one when the matches
+        # are found again (after typing, after a replacement).
+        cursor = ed.textCursor()
+        selected = (cursor.selectionStart(), cursor.selectionEnd())
+        self._current_match_index = (self._search_matches.index(selected)
+                                     if selected in self._search_matches else -1)
 
     def _highlight_all_matches(self):
+        """Paint the matches on screen (all of them are counted, but only
+        those are painted: each painted one holds a cursor the document
+        moves on every edit), the current one in the selection color."""
         ed = self.current_editor()
         if not ed:
             return
-        if not self._search_matches:
-            ed.setExtraSelections([])
+        if not self._search_matches or getattr(self, "_matches_of", None) is not ed:
+            ed.set_highlights("find", [])
             return
-
-        highlight_fmt = QTextCharFormat()
-        highlight_fmt.setBackground(QColor("#FFD700"))
-        highlight_fmt.setForeground(QColor("#000000"))
-
+        if getattr(self, "_matches_revision", None) != ed.document().revision():
+            return
+        match_fmt = QTextCharFormat()
+        match_fmt.setBackground(QColor("#FFD700"))
+        match_fmt.setForeground(QColor("#000000"))
+        current_fmt = QTextCharFormat()
+        current_fmt.setBackground(QColor("#264F78" if self.is_dark_theme else "#0078D4"))
+        current_fmt.setForeground(QColor("#FFFFFF"))
+        first, last = ed.visible_range()
         selections = []
-        for start_pos, end_pos in self._search_matches:
+        for index, (start, end) in visible_matches(self._search_matches, first, last):
             cursor = QTextCursor(ed.document())
-            cursor.setPosition(start_pos)
-            cursor.setPosition(end_pos, QTextCursor.KeepAnchor)
-            sel = QTextEdit.ExtraSelection()
-            sel.cursor = cursor
-            sel.format = highlight_fmt
-            selections.append(sel)
+            cursor.setPosition(start)
+            cursor.setPosition(end, QTextCursor.MoveMode.KeepAnchor)
+            selection = QTextEdit.ExtraSelection()
+            selection.cursor = cursor
+            selection.format = current_fmt if index == self._current_match_index else match_fmt
+            selections.append(selection)
+        ed.set_highlights("find", selections)
 
-        if 0 <= self._current_match_index < len(self._search_matches):
-            start_pos, end_pos = self._search_matches[self._current_match_index]
-            cursor = QTextCursor(ed.document())
-            cursor.setPosition(start_pos)
-            cursor.setPosition(end_pos, QTextCursor.KeepAnchor)
-            cur_sel = QTextEdit.ExtraSelection()
-            cur_sel.cursor = cursor
-            cur_fmt = QTextCharFormat()
-            if self.is_dark_theme:
-                cur_fmt.setBackground(QColor("#264F78"))
-                cur_fmt.setForeground(QColor("#FFFFFF"))
-            else:
-                cur_fmt.setBackground(QColor("#0078D4"))
-                cur_fmt.setForeground(QColor("#FFFFFF"))
-            cur_sel.format = cur_fmt
-            for i, sel in enumerate(selections):
-                if sel.cursor.selectionStart() == start_pos:
-                    selections[i] = cur_sel
-                    break
-
-        ed.setExtraSelections(selections)
-        self._search_extra_selections = selections
+    def _on_visible_area_changed(self, ed) -> None:
+        """Scrolled or resized: the matches now on screen get painted."""
+        if ed is self.current_editor() and self.findbar.isVisible() and self._search_matches:
+            self._highlight_all_matches()
 
     def _clear_search_highlights(self):
         ed = self.current_editor()
         if ed:
-            ed.setExtraSelections([])
-            self._search_extra_selections = []
+            ed.set_highlights("find", [])
 
     def _find_once(self, forward=True):
         ed = self.current_editor()
@@ -3013,25 +5182,24 @@ class MainWindow(QMainWindow):
             self._update_search_matches(needle)
             self._last_search_text = needle
         if not self._search_matches:
-            self.findbar.set_match_info("No matches")
+            self.findbar.set_match_info(_("No matches"))
             return
 
-        wrapped = False
-        total = len(self._search_matches)
-        if forward:
-            if self._current_match_index == -1:
-                self._current_match_index = 0
-            else:
-                next_idx = (self._current_match_index + 1) % total
-                wrapped = (next_idx == 0)
-                self._current_match_index = next_idx
+        matches = self._search_matches
+        total = len(matches)
+        cursor = ed.textCursor()
+        selected = (cursor.selectionStart(), cursor.selectionEnd())
+        index = self._current_match_index
+        if 0 <= index < total and matches[index] == selected:
+            # On a match: the one after it (before it, going back).
+            index = index + 1 if forward else index - 1
+        elif forward:
+            # Anywhere else: from the caret, the way every editor searches.
+            index = bisect.bisect_left(matches, selected[1], key=lambda match: match[0])
         else:
-            if self._current_match_index == -1:
-                self._current_match_index = total - 1
-            else:
-                prev_idx = (self._current_match_index - 1) % total
-                wrapped = (prev_idx == total - 1)
-                self._current_match_index = prev_idx
+            index = bisect.bisect_right(matches, selected[0], key=lambda match: match[1]) - 1
+        wrapped = not 0 <= index < total
+        self._current_match_index = index % total
 
         if 0 <= self._current_match_index < len(self._search_matches):
             start_pos, end_pos = self._search_matches[self._current_match_index]
@@ -3044,16 +5212,22 @@ class MainWindow(QMainWindow):
         self._highlight_all_matches()
         self._update_match_display()
         if wrapped:
-            self.findbar.set_match_info("Wrapped · " + self.findbar.match_info.text())
+            self.findbar.set_match_info(
+                _("Wrapped · {matches}").format(matches=self.findbar.match_info.text()))
             QTimer.singleShot(1200, self._update_match_display)
 
     def _update_match_display(self):
         if not self._search_matches:
-            self.findbar.set_match_info("No matches")
+            self.findbar.set_match_info(_("No matches"))
             return
         total = len(self._search_matches)
+        if self._current_match_index < 0:
+            self.findbar.set_match_info(
+                ngettext("{count} match", "{count} matches", total).format(count=total))
+            return
         current = self._current_match_index + 1
-        self.findbar.set_match_info(f"{current} of {total}")
+        self.findbar.set_match_info(_("{current} of {total}").format(
+            current=current, total=total))
 
     def _find_next(self):
         viewer = self.current_pdf_viewer()
@@ -3074,57 +5248,547 @@ class MainWindow(QMainWindow):
     # FORMAT HANDLERS
     # ----------------------------------------------------------------------
     def _fmt_bold(self):
-        ed = self.current_editor()
-        if ed:
-            ed.toggle_bold()
+        self._toggle_format('bold')
 
     def _fmt_italic(self):
-        ed = self.current_editor()
-        if ed:
-            ed.toggle_italic()
+        self._toggle_format('italic')
 
     def _fmt_underline(self):
-        ed = self.current_editor()
-        if ed:
-            ed.toggle_underline()
+        self._toggle_format('underline')
 
     def _reset_format(self):
         ed = self.current_editor()
         if ed:
             ed.reset_to_default()
+            self._update_format_buttons()
+
+    # Commands that act on this window's document: dimmed while another
+    # window is in front, as a Mac app dims what the key window cannot do.
+    _DOCUMENT_COMMANDS = frozenset({
+        "file.save", "file.save_as", "file.page_setup", "file.print", "file.print_preview",
+        "file.knit_html", "file.knit_pdf", "search.replace", "search.next",
+        "search.previous", "search.use_selection",
+        "view.line_numbers", "view.syntax_highlighting", "view.paper_mode", "view.toolbar",
+        "view.highlight_line", "view.write", "view.preview", "view.split",
+        "edit.footnote_jump", "nostr.publish_note", "nostr.publish_article",
+        "nostr.insert_image", "nostr.insert_mention", "nostr.insert_reference",
+        "nostr.insert_audio_video"})
+    _DOCUMENT_PREFIXES = ("format.", "insert.")
+
+    def _is_document_command(self, command_id: str) -> bool:
+        return (command_id in self._DOCUMENT_COMMANDS
+                or command_id.startswith(self._DOCUMENT_PREFIXES))
+
+    def _update_window_commands(self, *_args) -> None:
+        """Dim the document's commands while the Imports window is in front
+        (and View > Show Sidebar works for it); give them back after."""
+        if not hasattr(self, "commands"):
+            return
+        imports = self._imports_in_front()
+        in_front = imports is not None
+        if in_front != getattr(self, "_document_commands_dimmed", False):
+            self._document_commands_dimmed = in_front
+            kept = self.__dict__.setdefault("_dimmed_were_enabled", {})
+            for command in self.commands.commands():
+                if not self._is_document_command(command.id):
+                    continue
+                action = self.commands.action(command.id)
+                if in_front:
+                    kept[command.id] = action.isEnabled()
+                    action.setEnabled(False)
+                else:
+                    action.setEnabled(kept.pop(command.id, True))
+            if hasattr(self, "_m_background"):
+                self._m_background.setEnabled(not in_front)
+            if not in_front:
+                # What changed meanwhile is asked again.
+                self._update_knit_actions()
+                self._update_format_buttons()
+        self.act_window_sidebar.setEnabled(in_front)
+        # File > Close names what it closes (HIG; Mail's Close Window): the
+        # Imports window has no tabs. A sheet blocks its window: it is not
+        # closed under it.
+        self.act_close_tab.setText(_("Close Window") if in_front else _("Close Tab"))
+        self.act_close_tab.setEnabled(not (in_front and imports.sheet_in_front()))
+        # Enter or Exit Full Screen, for the window now in front.
+        self._name_full_screen()
+        if in_front:
+            shown = imports.act_sidebar.isChecked()
+            self.act_window_sidebar.setText(_("Hide Sidebar") if shown else _("Show Sidebar"))
+        else:
+            self.act_window_sidebar.setText(_("Show Sidebar"))
+
+    def _toggle_window_sidebar(self) -> None:
+        imports = self._imports_in_front()
+        if imports is not None:
+            imports.act_sidebar.trigger()
+            self._update_window_commands()
+
+    def _imports_in_front(self):
+        """The Imports window while it is the window in front, or one of its
+        sheets or alerts is (CP2 review L-a: with a sheet up, Edit > Undo
+        undid text in the document behind). It has no menu bar of its
+        own: the app's Edit commands act on it then, as a Mac app's menu
+        bar acts on its key window."""
+        imports = getattr(self, "_imports", None)
+        window = imports.window() if imports is not None else None
+        if window is None:
+            return None
+        active = QApplication.activeWindow()
+        while active is not None:
+            if active is window:
+                return window
+            active = active.parentWidget()
+        return None
 
     def _undo(self):
+        """Edit > Undo, for what has the focus: the Imports window when it
+        is in front (Undo Skip there), a text field (the find field, a
+        dialog's About field: each takes its own, as its keys do), or the
+        document."""
+        imports = self._imports_in_front()
+        if imports is not None:
+            imports.undo()
+            return
+        field = _text_field(QApplication.focusWidget())
+        if field is not None:
+            field.undo()
+            return
         ed = self.current_editor()
-        if ed:
+        if ed and not self._shows_preview_only(ed):
             ed.undo()
 
     def _redo(self):
+        field = _text_field(QApplication.focusWidget())
+        if field is not None:
+            field.redo()
+            return
         ed = self.current_editor()
-        if ed:
+        if ed and self._imports_in_front() is None and not self._shows_preview_only(ed):
             ed.redo()
 
+    def _editor_call(self, name: str) -> None:
+        """Run an editing command on the current tab's editor."""
+        ed = self.current_editor()
+        if ed:
+            getattr(ed, name)()
+            self._update_format_buttons()
+
+    def _open_link(self, href: str) -> None:
+        """Open a link from the document: a web page in the browser, a
+        Nostr link through njump.me, an email in the mail app (with only
+        its address, subject, body, cc and bcc). Links reach the document
+        from files and drafts without passing the Add Link checks, so
+        everything else is refused here. A place in the document itself
+        (#name) has nothing to open yet."""
+        if href.startswith("#"):
+            return
+        web = link_url.web_address_for(href)
+        mail = link_url.mail_address_for(href)
+        if web:
+            self._open_external(web)
+        elif mail:
+            QDesktopServices.openUrl(QUrl(mail))
+        else:
+            self.status.showMessage(_("That link cannot be opened."), 5000)
+
+    @staticmethod
+    def _copy_link(href: str) -> None:
+        """The link's address on the clipboard (an email without mailto:)."""
+        QGuiApplication.clipboard().setText(
+            href[len("mailto:"):] if href.lower().startswith("mailto:") else href)
+
+    def _toggle_list(self, kind: str) -> None:
+        ed = self.current_editor()
+        if ed:
+            ed.toggle_list(kind)
+            self._update_format_buttons()
+
+    def _change_indent(self, delta: int) -> None:
+        ed = self.current_editor()
+        if ed:
+            ed.change_indent(delta)
+            self._update_format_buttons()
+
+    def _set_heading(self, level: int) -> None:
+        ed = self.current_editor()
+        if ed:
+            ed.set_heading(level)
+            self._update_format_buttons()
+
+    def _caret_context(self) -> tuple:
+        """(in a code block, in a table): where the caret (or the selection)
+        is, in a document with structure that is being edited."""
+        ed = self.current_editor()
+        editing = (ed is not None and MainWindow._editor_kind(self, ed) == "rich"
+                   and not MainWindow._shows_preview_only(self, ed))
+        if not editing:
+            return False, False
+        return (MainWindow._caret_in_code(ed),
+                ed.textCursor().currentTable() is not None)
+
+    @staticmethod
+    def _caret_in_code(ed) -> bool:
+        """Whether the caret, or either end of the selection, is in a code
+        block."""
+        if ed is None:
+            return False
+        cursor = ed.textCursor()
+        doc = ed.document()
+        return (rich_text.is_code_block(doc.findBlock(cursor.selectionStart()))
+                or rich_text.is_code_block(doc.findBlock(cursor.selectionEnd())))
+
+    @staticmethod
+    def _code_style_name(language: str) -> str:
+        """What the Style pop-up says in a code block: "Code: Python"."""
+        if language == "mixed":
+            return pgettext("paragraph style", "Mixed")
+        canonical = canonical_language(language)
+        if canonical is not None:
+            return _("Code: {language}").format(language=LANGUAGE_DISPLAY_NAMES[canonical])
+        if language:
+            return _("Code: {language}").format(language=language)
+        return _("Code")
+
+    def _insert_table(self) -> None:
+        """Insert > Table...: its size chosen on a grid at the caret, then
+        the table, the caret in its first cell."""
+        ed = self.current_editor()
+        if ed is None:
+            return
+        picker = TablePicker(self, dark=self.is_dark_theme)
+        picker.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+        picker.picked.connect(lambda rows, columns, e=ed: self._table_picked(e, rows, columns))
+        self._table_picker = picker
+        picker.open_at(ed.cursorRect(), ed.viewport())
+
+    def _table_picked(self, ed, rows: int, columns: int) -> None:
+        if not shiboken6.isValid(ed):
+            return
+        # Back to the text, in this window, whatever the panel left active.
+        self.activateWindow()
+        ed.setFocus()
+        ed.insert_table(rows, columns)
+        self._update_format_buttons()
+
+    def _editor_table_command(self, name: str) -> None:
+        ed = self.current_editor()
+        if ed is not None:
+            ed.table_command(name)
+            self._update_format_buttons()
+
+    def _insert_code_block(self) -> None:
+        """Insert > Code Block: the paragraph at the caret (or those
+        selected) become a code block, and its language is asked in a
+        short list at the caret (Escape keeps it plain text)."""
+        ed = self.current_editor()
+        if ed is None:
+            return
+        ed.make_code_block()
+        self._update_editor_commands()
+        self._update_format_buttons()
+        caret = ed.cursorRect()
+        self.m_code_language.popup(ed.viewport().mapToGlobal(caret.bottomLeft()))
+
+    def _set_code_language(self, language: str) -> None:
+        ed = self.current_editor()
+        if ed is not None:
+            ed.set_code_language(language)
+            self._update_format_buttons()
+
+    def _slash_items(self, query: str) -> list:
+        """What the slash menu offers for ``query``: the window's commands,
+        ranked (CommandRegistry.rank), Nostr ones while Nostr is in use."""
+        return [SlashItem(command.slash_section, self.commands.action(command.id),
+                          command.insert_title)
+                for command in self.commands.rank(query, nostr=self.nostr_state.active)]
+
+    def _set_markdown_shortcuts(self, on: bool) -> None:
+        """Edit > Substitutions > Markdown Shortcuts, remembered."""
+        self.markdown_shortcuts = bool(on)
+        save_setting("markdown_shortcuts", self.markdown_shortcuts)
+
+    def _set_monospace_writing(self, on: bool) -> None:
+        """View > Use Monospace Font for Writing, remembered."""
+        self.monospace_writing = bool(on)
+        save_setting("monospace_writing", self.monospace_writing)
+        for i in range(self.tabs.count()):
+            ed = self._editor_from_widget(self.tabs.widget(i))
+            if ed is not None:
+                self._update_editor_font(ed)
+
+    def _set_caret_style(self, style: str) -> None:
+        """Settings > Text cursor, remembered, in every open document."""
+        self.caret_style = style if style in CARET_STYLES else DEFAULT_CARET_STYLE
+        save_setting("caret_style", self.caret_style)
+        for ed in self._all_editors():
+            ed.set_caret_style(self.caret_style)
+
+    def _set_toolbar_shown(self, shown: bool) -> None:
+        """View > Show Toolbar, remembered."""
+        self.show_toolbar = bool(shown)
+        save_setting("show_toolbar", self.show_toolbar)
+        self._update_editor_commands()
+
+    def _toggle_style(self, style: str) -> None:
+        ed = self.current_editor()
+        if ed:
+            ed.toggle_style(style)
+            self._update_format_buttons()
+
+    def _apply_color(self, color) -> None:
+        ed = self.current_editor()
+        if ed:
+            ed.apply_color(color)
+
+    def _edit_focused(self, name: str) -> None:
+        """Cut, Copy, Paste, Delete or Select All, for whatever has the
+        keyboard focus, the way a Mac app sends them to its first
+        responder: a text field (the find field), the PDF reader, or the
+        document."""
+        focus = _text_field(QApplication.focusWidget())
+        if focus is not None:
+            if name == "delete":
+                if isinstance(focus, QLineEdit):
+                    focus.del_()
+                elif not focus.isReadOnly():
+                    focus.textCursor().removeSelectedText()
+                return
+            {"cut": focus.cut, "copy": focus.copy, "paste": focus.paste,
+             "select_all": focus.selectAll}[name]()
+            return
+        imports = self._imports_in_front()
+        if imports is not None:
+            imports.edit(name)
+            return
+        viewer = self.current_pdf_viewer()
+        if viewer is not None:
+            if name == "copy":
+                viewer.view.copy_selection()
+            return
+        ed = self.current_editor()
+        if ed is None:
+            return
+        if name == "cut":
+            ed.cut()
+        elif name == "copy":
+            ed.copy()
+        elif name == "paste":
+            ed.paste_from_clipboard()
+        elif name == "select_all":
+            ed.selectAll()
+        elif name == "delete":
+            cursor = ed.textCursor()
+            if cursor.hasSelection():
+                with ed.undo_step(N_("Delete")):
+                    cursor.removeSelectedText()
+                ed.setTextCursor(cursor)
+        ed.setFocus()
+
+    def _paste_plain(self) -> None:
+        field = _text_field(QApplication.focusWidget())
+        if isinstance(field, QLineEdit):
+            field.paste()
+        elif field is not None:
+            if not field.isReadOnly():
+                field.insertPlainText(QApplication.clipboard().text())
+        elif self._imports_in_front() is None:
+            ed = self.current_editor()
+            if ed:
+                ed.paste_normalized()
+
+    def _use_selection_for_find(self) -> None:
+        """The selected words become what Find looks for (Command-E): Find
+        Next then goes to their next occurrence, with the find bar open or
+        not."""
+        ed = self.current_editor()
+        if ed is None:
+            return
+        text = ed.textCursor().selectedText().replace("\u2029", " ").replace("\u2028", " ")
+        if text.strip():
+            self.findbar.edit.setText(text)
+
+    def _editor_kind(self, ed) -> str:
+        """What a tab's editor holds: "rich" (Markdown and HTML documents,
+        and untitled ones: headings, lists and links go to Markdown), or
+        "source" (text written as it is: .txt, R Markdown, code, and
+        Markdown opened as its text). "" for no editor."""
+        if ed is None:
+            return ""
+        if getattr(ed, "_markdown_source", False) or getattr(ed, "_loaded_as_rmd_source", False):
+            return "source"
+        path = getattr(ed, "_file_path", None)
+        if path:
+            return "rich" if path.lower().endswith(_RICH_DOC_EXTS) else "source"
+        language = getattr(ed, "_language", None)
+        return "rich" if language in (None, "markdown", "html") else "source"
+
+    def _update_editor_commands(self) -> None:
+        """Editing commands follow the current tab: none on a PDF tab, and
+        no Markdown structure in a plain-text one."""
+        if not hasattr(self, "_editor_actions"):
+            return
+        kind = self._editor_kind(self.current_editor())
+        reading = self._shows_preview_only(self.current_editor())
+        in_code, in_table = self._caret_context_shown = self._caret_context() or (False, False)
+        if getattr(self, "format_toolbar", None) is not None:
+            # A PDF has nothing to format; plain text has no paragraph
+            # styles, and neither has a table cell.
+            self.format_toolbar.setVisible(self.show_toolbar and bool(kind))
+            if getattr(self, "format_bar", None) is not None:
+                self.format_bar.setVisible(self.show_toolbar and bool(kind))
+        # Format > Style, and every pop-up of it (the toolbar's, the format
+        # bar's), which follow its action.
+        if getattr(self, "m_style", None) is not None:
+            self.m_style.menuAction().setEnabled(kind == "rich" and not reading
+                                                 and not in_table)
+        # Only the preview shows: nothing to edit there (Copy and Select
+        # All act on the preview itself, through the focus).
+        for action in self._editor_actions:
+            action.setEnabled(bool(kind) and not reading)
+        for action in self._rich_actions:
+            action.setEnabled(kind == "rich" and not reading)
+        # In a code block, words have no styles: the text is code.
+        if in_code:
+            for action in self._word_actions:
+                action.setEnabled(False)
+        for action in self.act_code_languages:
+            action.setEnabled(in_code)
+        # A table cell holds words, no paragraph structure.
+        if in_table:
+            for action in self._block_actions:
+                action.setEnabled(False)
+        for action in self.act_table_commands:
+            action.setEnabled(in_table)
+        self.act_select_all.setEnabled(bool(kind))
+        # Code files only: a document's code blocks are always colored.
+        self.act_toggle_syntax_hl.setEnabled(kind != "rich")
+        for action in (self.act_find, self.act_replace, self.act_find_next, self.act_find_prev):
+            action.setEnabled(not reading)
+        self.act_underline.setEnabled(bool(self._keeps_underline(self.current_editor()))
+                                      and not reading and not in_code)
+        self._update_clipboard_commands()
+        if kind:
+            self._update_undo_redo_buttons()
+
+    def _keeps_pictures(self, ed) -> bool:
+        """Whether ``ed``'s document keeps a picture when it is saved:
+        Markdown (shown formatted or as its text), HTML, R Markdown and new
+        documents do; plain text and code save their text only."""
+        if self._editor_kind(ed) == "rich" or getattr(ed, "_markdown_source", False) \
+                or getattr(ed, "_loaded_as_rmd_source", False):
+            return True
+        path = (getattr(ed, "_file_path", None) or "").lower()
+        return path.endswith((".md", ".markdown", ".rmd"))
+
+    @staticmethod
+    def _keeps_underline(ed) -> bool:
+        """Whether the document's file keeps underlining: an HTML document.
+        Markdown (files, new documents, drafts, articles) and plain text
+        have no underline."""
+        path = (getattr(ed, "_file_path", None) or "").lower() if ed is not None else ""
+        return path.endswith((".html", ".htm")) and not getattr(ed, "_markdown_source", False)
+
+    def _fill_editor_context_menu(self, menu, editor, pos) -> None:
+        """The editor's context menu: the window's own commands, so it
+        offers what the menus offer, under the same names. On a link, the
+        link's own commands come first."""
+        clicked = editor.cursorForPosition(pos)
+        if not editor.textCursor().hasSelection() and (
+                editor.anchorAt(pos) or (self._editor_kind(editor) == "rich"
+                                         and rich_text.footnote_jump(clicked) is not None)):
+            # A link or a footnote right-clicked: its commands, there.
+            editor.setTextCursor(clicked)
+            self._update_format_buttons()
+        self._spelling_context(menu, editor, pos)
+        link = editor.link_at_caret() if self._editor_kind(editor) == "rich" else None
+        if link is not None:
+            # A link's own commands, here only: they mean something only
+            # where a link is.
+            href = link[2]
+            if not href.startswith("#"):
+                # A place in the document itself opens nothing yet.
+                menu.addAction(_("Open Link"), lambda: self._open_link(href))
+            menu.addAction(self.act_link)
+            menu.addAction(_("Copy Link"), lambda: self._copy_link(href))
+            menu.addAction(_("Remove Link"), editor.remove_link)
+            menu.addSeparator()
+        if self._editor_kind(editor) == "rich":
+            if rich_text.footnote_jump(editor.textCursor()) is not None:
+                # A footnote's mark or note: the way to the other (also in
+                # the Edit menu; Command-click is the pointer's way).
+                menu.addAction(self.act_footnote_jump)
+                menu.addSeparator()
+        for action in (self.act_cut, self.act_copy, self.act_paste, self.act_paste_plain):
+            menu.addAction(action)
+        menu.addSeparator()
+        if self._editor_kind(editor) == "rich" and editor.textCursor().currentTable() is not None:
+            # In a table: its rows and columns.
+            menu.addMenu(self.m_table)
+            menu.addSeparator()
+        for action in (self.act_bold, self.act_italic, self.act_underline, self.act_strike,
+                       self.act_code):
+            menu.addAction(action)
+        menu.addMenu(self.m_color)
+        menu.addSeparator()
+        menu.addMenu(self.m_style)
+        menu.addAction(self.act_reset_format)
+
 
     # ----------------------------------------------------------------------
-    # THEME TOGGLE
+    # APPEARANCE
     # ----------------------------------------------------------------------
-    def _set_theme(self, is_dark: bool, announce: bool = True):
+    @property
+    def appearance(self) -> str:
+        """"system" while the system's appearance is followed, else "light"
+        or "dark"."""
+        if self._follow_os_theme:
+            return "system"
+        return "dark" if self.is_dark_theme else "light"
+
+    def set_appearance(self, mode: str) -> None:
+        """Automatic ("system": the system's light or dark, followed as it
+        changes), Light or Dark; remembered across launches. View >
+        Appearance and Settings both choose through here."""
+        settings = load_settings()
+        if mode == "system":
+            settings.pop("theme", None)
+            is_dark = self._detect_os_dark_theme()
+        else:
+            settings["theme"] = mode
+            is_dark = mode == "dark"
+        save_settings(settings)
+        self._follow_os_theme = mode == "system"
+        if is_dark != self.is_dark_theme:
+            self._set_theme(is_dark)
+        self.act_appearance[mode].setChecked(True)
+
+    def _switch_appearance(self) -> None:
+        """View > Appearance > Switch to Dark (or Light) Appearance: the
+        other of the two, chosen and kept, from Automatic too."""
+        self.set_appearance("light" if self.is_dark_theme else "dark")
+
+    def _set_theme(self, is_dark: bool):
         """Apply is_dark to every theme-aware widget in the window.
 
-        Shared by the manual toggle (checkbox / Ctrl+Shift+T) and the
-        OS color-scheme-follow path, so the fan-out logic lives in one
-        place instead of being duplicated.
+        Shared by View > Appearance and the path that follows the system's
+        appearance, so the fan-out logic lives in one place instead of
+        being duplicated. The change itself is the feedback; nothing is
+        said about it.
         """
         self.is_dark_theme = is_dark
-        if hasattr(self, 'header_widget'):
-            self.header_widget.theme_checkbox.blockSignals(True)
-            self.header_widget.theme_checkbox.setChecked(self.is_dark_theme)
-            self.header_widget.theme_checkbox.blockSignals(False)
+        if hasattr(self, "act_switch_appearance"):
+            self.act_switch_appearance.setText(
+                _("Switch to Light Appearance") if is_dark else _("Switch to Dark Appearance"))
         self._apply_theme()
         if hasattr(self, 'findbar'):
             self.findbar.is_dark = self.is_dark_theme
             self.findbar._update_theme()
-        if hasattr(self, 'header_widget'):
-            self.header_widget.update_theme(self.is_dark_theme)
+        self.profile_chip.set_dark_theme(self.is_dark_theme)
+        if getattr(self, 'format_toolbar', None) is not None:
+            self.format_toolbar.set_dark(self.is_dark_theme)
+        if getattr(self, 'view_switch', None) is not None:
+            self.view_switch.set_dark(self.is_dark_theme)
         if hasattr(self, 'update_bar'):
             self.update_bar.update_theme(self.is_dark_theme)
         for i in range(self.tabs.count()):
@@ -3140,47 +5804,367 @@ class MainWindow(QMainWindow):
         # half the editor on the old palette.
         if getattr(self, "_drafts_panel", None) is not None:
             self._drafts_panel.apply_theme(self.is_dark_theme)
+            self._published_view.apply_theme(self.is_dark_theme)
+        if getattr(self, "_article_details_panel", None) is not None:
+            self._article_details_panel.set_dark(self.is_dark_theme)
+        self._redraw_media_cards()
         for banner in getattr(self, "_tab_conflict_banners", {}).values():
             banner.apply_theme(self.is_dark_theme)
-        if announce:
-            mode = "Dark" if self.is_dark_theme else "Light"
-            self.status.showMessage(f"Switched to {mode} theme", 2000)
-
-    def _toggle_theme(self):
-        if hasattr(self, 'header_widget') and self.header_widget.theme_checkbox.isChecked() != self.is_dark_theme:
-            target = self.header_widget.theme_checkbox.isChecked()
-        else:
-            target = not self.is_dark_theme
-        self._set_theme(target)
-        # The user made an explicit choice - stop following the OS scheme
-        # and remember this choice across restarts.
-        self._follow_os_theme = False
-        save_setting("theme", "dark" if target else "light")
+        imports_window = getattr(self, "_imports", None) and self._imports.window()
+        if imports_window is not None:
+            imports_window.apply_theme(self.is_dark_theme)
+        for name in ("_settings_window", "_shortcuts_window"):
+            window = getattr(self, name, None)
+            if window is not None:
+                window.apply_theme(self.is_dark_theme)
+        # A publish sheet open on the window (window-modal: the menus and
+        # the system's appearance still reach the app).
+        sheet = getattr(self, "_publish_sheet", None)
+        if sheet is not None and shiboken6.isValid(sheet):
+            sheet.apply_theme(self.is_dark_theme)
 
     def _on_os_color_scheme_changed(self, scheme):
         if not self._follow_os_theme:
             return
         self._set_theme(scheme != Qt.ColorScheme.Light)
 
-    def _toggle_fullscreen(self, checked: bool):
-        if checked:
-            self.showFullScreen()
-        else:
-            self.showNormal()
+    def _toggle_fullscreen(self, *_args):
+        """The window in front goes full screen, as View > Enter Full Screen
+        does in every Mac app (with the Imports window in front, that one:
+        CP2 review L-a), or back to the size it had (a maximized window
+        comes back maximized)."""
+        window = self._imports_in_front() or self
+        window.setWindowState(window.windowState() ^ Qt.WindowState.WindowFullScreen)
+        self._name_full_screen()
+
+    def _name_full_screen(self, *_args) -> None:
+        """Enter Full Screen or Exit Full Screen, for the window in front."""
+        if hasattr(self, "act_fullscreen"):
+            window = self._imports_in_front() or self
+            self.act_fullscreen.setText(
+                _("Exit Full Screen") if window.isFullScreen() else _("Enter Full Screen"))
+
+    def changeEvent(self, event):  # noqa: N802, Qt's name
+        super().changeEvent(event)
+        # However the window got there: the menu, its key, or the window's
+        # own full-screen button on a Mac. (A state set while the window is
+        # being built comes before its commands.)
+        if event.type() == QEvent.Type.WindowStateChange:
+            self._name_full_screen()
 
 
     # ----------------------------------------------------------------------
     # LINE NUMBERS
     # ----------------------------------------------------------------------
-    def _toggle_line_numbers(self):
-        if hasattr(self, 'header_widget') and self.header_widget.line_numbers_checkbox.isChecked() != self.show_line_numbers:
-            self.show_line_numbers = self.header_widget.line_numbers_checkbox.isChecked()
+    # -- backups -------------------------------------------------------------
+
+    def _new_backup(self, ed, path) -> EditorBackup:
+        """The document's crash backup, which reports here when it cannot
+        be kept."""
+        backup = EditorBackup(ed, path, externalize=self._asset_manager.adopt_data_uri)
+        backup.set_status_listener(lambda _problem, e=ed: self._on_backup_status(e))
+        return backup
+
+    def _on_backup_status(self, ed) -> None:
+        if ed is self.current_editor():
+            self._show_backup_status()
+
+    # -- Write, Preview, Split ------------------------------------------------
+
+    def _editor_container(self, ed):
+        """A tab's content and its file-changed bar: the bar over the text
+        (with its line numbers), the preview beside it when it shows."""
+        container = QWidget()
+        vbox = QVBoxLayout(container)
+        vbox.setContentsMargins(0, 0, 0, 0)
+        vbox.setSpacing(0)
+        bar = FileChangedBar()
+        bar.update_theme(self.is_dark_theme)
+        bar.reload_requested.connect(lambda b=bar, e=ed: self._reload_from_disk(e, b))
+        vbox.addWidget(bar)
+        editor_area = QWidget()
+        layout = QHBoxLayout(editor_area)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+        if self.show_line_numbers:
+            gutter = LineNumberGutter(ed)
+            layout.addWidget(gutter)
+            ed._line_gutter = gutter
+        layout.addWidget(ed)
+        splitter = QSplitter(Qt.Orientation.Horizontal)
+        splitter.setChildrenCollapsible(False)
+        splitter.addWidget(editor_area)
+        splitter.splitterMoved.connect(lambda *_args, s=splitter: self._remember_split(s))
+        _WidthWatcher(splitter, lambda e=ed: self._width_changed(e))
+        vbox.addWidget(splitter)
+        ed._view_splitter = splitter
+        ed._view_side = WRITE           # the side used last, for a narrow Split
+        ed._preview_pane = None
+        ed._split_fits = None
+        return container, bar
+
+    def _previewable(self, ed) -> bool:
+        """Whether a tab has a preview: a document with Markdown structure,
+        or Markdown opened as its text (published as it is written, so a
+        reader draws it the same way). Plain text, code and R Markdown
+        have none."""
+        return (ed is not None and getattr(ed, "_view_splitter", None) is not None
+                and (self._editor_kind(ed) == "rich" or getattr(ed, "_markdown_source", False)))
+
+    def _shown_view(self, ed) -> str:
+        """What the tab shows: WRITE, PREVIEW or SPLIT. Split needs room for
+        two readable columns; narrower, the side used last shows (Q-N)."""
+        if not self._previewable(ed):
+            return WRITE
+        if self.view_mode == SPLIT and not self._split_fits(ed):
+            return ed._view_side if ed._view_side in (WRITE, PREVIEW) else WRITE
+        return self.view_mode
+
+    @staticmethod
+    def _split_fits(ed) -> bool:
+        return ed._view_splitter.width() >= SPLIT_MIN_WIDTH
+
+    def _shows_preview_only(self, ed) -> bool:
+        return ed is not None and self._shown_view(ed) == PREVIEW
+
+    def _choose_view(self, mode: str) -> None:
+        """Write, Preview or Split, chosen. In a tab too narrow for Split
+        while Split is the choice, Write and Preview flip the side shown,
+        and Split comes back when there is room."""
+        ed = self.current_editor()
+        if (mode != SPLIT and self.view_mode == SPLIT and ed is not None
+                and getattr(ed, "_view_splitter", None) is not None
+                and not self._split_fits(ed)):
+            ed._view_side = mode
         else:
-            self.show_line_numbers = not self.show_line_numbers
-        if hasattr(self, 'header_widget'):
-            self.header_widget.line_numbers_checkbox.blockSignals(True)
-            self.header_widget.line_numbers_checkbox.setChecked(self.show_line_numbers)
-            self.header_widget.line_numbers_checkbox.blockSignals(False)
+            self.view_mode = mode
+            save_setting("view_mode", mode)
+            if ed is not None and mode != SPLIT:
+                ed._view_side = mode
+        self._apply_view(ed)
+
+    def _apply_view(self, ed) -> None:
+        """Show the tab's text, preview or both, as chosen."""
+        if getattr(self, "view_switch", None) is None:
+            return
+        splitter = getattr(ed, "_view_splitter", None) if ed is not None else None
+        shown = self._shown_view(ed)
+        if splitter is not None:
+            ed._split_fits = self._split_fits(ed)
+            editor_area = splitter.widget(0)
+            pane = ed._preview_pane
+            if shown != WRITE:
+                pane = self._preview_pane_for(ed)
+            if shown == PREVIEW:
+                had_focus = ed.hasFocus()
+                pane.show()
+                editor_area.hide()
+                if had_focus:
+                    pane.view.setFocus()
+            else:
+                editor_area.show()
+                if pane is not None:
+                    pane.setVisible(shown == SPLIT)
+                if shown == SPLIT:
+                    ratio = float(load_settings().get("split_ratio", 0.5))
+                    ratio = min(0.8, max(0.2, ratio))
+                    width = splitter.width()
+                    splitter.setSizes([round(width * ratio), width - round(width * ratio)])
+                if pane is not None and pane.view.hasFocus():
+                    ed.setFocus()
+        self._sync_view_switch(ed, shown)
+        self._update_editor_commands()
+        if shown == PREVIEW and self.findbar.isVisible():
+            self._close_findbar()
+
+    def _sync_view_switch(self, ed, shown: str) -> None:
+        rich = self._previewable(ed)
+        self._view_switch_holder.setVisible(rich)
+        for action in (self.act_view_write, self.act_view_preview, self.act_view_split):
+            action.setEnabled(rich)
+        if not rich:
+            return
+        fits = self._split_fits(ed)
+        self.act_view_split.setEnabled(fits)
+        self.act_view_split.setToolTip("" if fits else
+                                       _("Make the window wider to show both"))
+        {WRITE: self.act_view_write, PREVIEW: self.act_view_preview,
+         SPLIT: self.act_view_split}[shown].setChecked(True)
+
+    def _width_changed(self, ed) -> None:
+        """A tab got wider or narrower: Split may fit now, or not any more.
+        Looked at once the layout has settled, never in the middle of it."""
+        if ed is self.current_editor() and self.view_mode == SPLIT:
+            # Tied to the editor: dropped if its tab is closed meanwhile.
+            QTimer.singleShot(0, ed, lambda e=ed: self._width_settled(e))
+
+    def _width_settled(self, ed) -> None:
+        if (shiboken6.isValid(ed) and ed is self.current_editor() and self.view_mode == SPLIT
+                and ed._split_fits is not None and ed._split_fits != self._split_fits(ed)):
+            self._apply_view(ed)
+
+    def _remember_split(self, splitter) -> None:
+        sizes = splitter.sizes()
+        if len(sizes) == 2 and sum(sizes) > 0 and all(sizes):
+            save_setting("split_ratio", round(sizes[0] / sum(sizes), 3))
+
+    def _note_side_in_use(self, widget) -> None:
+        """The side of a tab that has the focus is the one a narrow Split
+        shows."""
+        while widget is not None:
+            if isinstance(widget, HtmlEditor):
+                if getattr(widget, "_view_splitter", None) is not None:
+                    widget._view_side = WRITE
+                return
+            if isinstance(widget, PreviewPane):
+                ed = self._editor_from_widget(widget.parentWidget())
+                if ed is not None:
+                    ed._view_side = PREVIEW
+                return
+            widget = widget.parentWidget()
+
+    def _preview_pane_for(self, ed) -> PreviewPane:
+        """The tab's preview, made the first time it shows."""
+        if ed._preview_pane is None:
+            binding = getattr(ed, "_draft_binding", None)
+            pane = PreviewPane(
+                lambda kind, e=ed: self._preview_content(e, kind),
+                images=lambda name, e=ed: self._preview_image(e, name),
+                media_names=self._media_name,
+                dark=self.is_dark_theme,
+                note=binding is not None and binding.inner_kind == INNER_KIND_SHORT_NOTE)
+            pane.setVisible(False)
+            ed._view_splitter.addWidget(pane)
+            ed.document().contentsChanged.connect(pane.schedule)
+            pane.view.selectionChanged.connect(self._update_clipboard_commands)
+            ed._preview_pane = pane
+        return ed._preview_pane
+
+    def _preview_content(self, ed, kind: str) -> PreviewContent:
+        """What the preview of ``ed`` draws: the document as it reads, or,
+        while a Nostr account is in use, what will be published (as an
+        ARTICLE or a NOTE) and what of it readers will not see."""
+        names = self._preview_name
+        if not self.nostr_state.active:
+            def pictures(fmt):
+                media = _media_asset(self._asset_manager, fmt.name())
+                if media is not None:
+                    # Audio or video: where readers show its player, once
+                    # it is on a media server.
+                    return _published_address(media) if media.is_uploaded else None
+                return image_markdown(str(fmt.property(QTextImageFormat.ImageAltText) or ""),
+                                      fmt.name())
+            if getattr(ed, "_markdown_source", False):
+                # Markdown opened as its text: the text is the Markdown.
+                markdown = serialize_plain_with_images(ed.document(), pictures)
+            else:
+                markdown = document_to_markdown(ed.document(), pictures)
+            return PreviewContent(DOCUMENT, markdown.rstrip("\n"), names=names)
+        profile = self._profile_store.default()
+        author = (profile.display_name or profile.npub_short()) if profile is not None else ""
+        checks = []
+        if self._media_not_uploaded(ed.document()):
+            checks.append(_("Audio or video is still uploading: it shows here, and is "
+                            "published, once it is on your media servers."))
+        missing = self._pictures_not_uploaded(ed)
+        if missing:
+            checks.append(ngettext(
+                "A picture is not uploaded yet: readers will not see it.",
+                "{count} pictures are not uploaded yet: readers will not see them.",
+                missing).format(count=missing))
+        if kind == NOTE:
+            text = self._publish_payload(ed, "note")[0]
+            return PreviewContent(NOTE, text, author=author, names=names, checks=tuple(checks))
+        markdown = self._publish_payload(ed, "markdown")[0]
+        if rich_text.footnote_marks(ed.document()):
+            checks.append(_("Some apps (Amethyst, Coracle, Damus) show footnotes as typed: "
+                            "the marks in brackets and the notes at the end."))
+        if rich_text.orphan_notes(ed.document()):
+            checks.append(_("A note no mark refers to: most apps leave it out."))
+        details = self._article_details_of(ed)
+        title = details.title or default_title(markdown, self._preview_name)
+        first = next((line for line in markdown.splitlines() if line.strip()), "")
+        if details.title and first.startswith("# ") and first[2:].strip() == details.title:
+            # Said only for a title set on purpose: without one, the title
+            # is that first heading, and nothing better can be done yet.
+            checks.append(_("The first heading repeats the title, so readers see it twice."))
+        article = PreviewArticle(title=title, summary=details.summary, image=details.image,
+                                 tags=tuple(details.hashtags), author=author,
+                                 published_at=details.published_at or 0)
+        return PreviewContent(ARTICLE, markdown, article, author, names, tuple(checks))
+
+    def _redraw_preview(self) -> None:
+        ed = self.current_editor()
+        pane = getattr(ed, "_preview_pane", None) if ed is not None else None
+        if pane is not None and pane.isVisible():
+            pane.render()
+
+    def _preview_name(self, pubkey: str):
+        person = self._known_people.get(pubkey)
+        return person.display_name if person is not None and person.display_name else None
+
+    def _pictures_not_uploaded(self, ed) -> int:
+        """Pictures in the document that would not be published: kept on
+        this computer only."""
+        count = 0
+        for name in iter_image_names(ed.document()):
+            sha = parse_asset_key(name)
+            if sha is not None:
+                asset = self._asset_manager.get(sha)
+                if asset is None or not asset.is_uploaded:
+                    count += 1
+            elif not name.lower().startswith(("http://", "https://")):
+                count += 1
+        return count
+
+    def _preview_image(self, ed, name: str):
+        """A picture the preview names: from this app's own media (also by
+        its published address), or beside the document's file. Never from
+        the network."""
+        if parse_asset_key(name) is not None:
+            return self._asset_manager.resolve_image(name)
+        if name.lower().startswith(("http://", "https://")):
+            asset = self._asset_manager.find_by_url(name)
+            if asset is not None:
+                return self._asset_manager.resolve_image(f"{ASSET_SCHEME}:{asset.sha256}")
+            return None
+        return self._resolve_local_image(ed, name)
+
+    def _show_backup_status(self) -> None:
+        """Say, for the current document only, that its backup is not kept,
+        and offer to try again where trying again can help."""
+        if not hasattr(self, "_backup_problem"):
+            return
+        ed = self.current_editor()
+        backup = getattr(ed, "_backup", None) if ed is not None else None
+        problem = backup.problem if backup is not None else KEPT
+        if problem == TOO_LARGE:
+            text = _("This document is too large to keep a backup of.")
+        elif problem:
+            text = _("Couldn't keep a backup of this document.")
+        else:
+            text = ""
+        self._backup_problem.setText(text)
+        self._backup_problem.setStyleSheet(
+            f"color: {theme.error_text_color(self.is_dark_theme)}; padding-right: 4px;")
+        # A link, so it reads as something to click next to the status texts.
+        link = theme.dialog_link_color(self.is_dark_theme)
+        self._backup_retry.setStyleSheet(
+            f"#BackupRetry {{ color: {link}; border: none; background: transparent; "
+            f"padding: 0 4px; }} #BackupRetry:hover {{ text-decoration: underline; }}")
+        self._backup_problem.setVisible(bool(text))
+        self._backup_retry.setVisible(bool(problem) and problem != TOO_LARGE)
+        self._backup_retry.setAccessibleDescription(text)
+
+    def _retry_backup(self) -> None:
+        ed = self.current_editor()
+        backup = getattr(ed, "_backup", None) if ed is not None else None
+        if backup is not None:
+            backup.write_now()
+        self._show_backup_status()
+
+    def _toggle_line_numbers(self):
+        self.show_line_numbers = not self.show_line_numbers
         self.act_toggle_line_numbers.setChecked(self.show_line_numbers)
 
         for i in range(self.tabs.count()):
@@ -3197,36 +6181,26 @@ class MainWindow(QMainWindow):
                         editor._line_gutter.deleteLater()
                         delattr(editor, '_line_gutter')
 
-        self.status.showMessage(f"Line numbers {'enabled' if self.show_line_numbers else 'disabled'}", 2000)
+        self.status.showMessage(_("Line numbers enabled") if self.show_line_numbers
+                                else _("Line numbers disabled"), 2000)
 
 
     # ----------------------------------------------------------------------
     # SYNTAX HIGHLIGHTING
     # ----------------------------------------------------------------------
     def _toggle_syntax_highlighting(self):
-        if hasattr(self, 'header_widget') and self.header_widget.syntax_highlight_checkbox.isChecked() != self.syntax_highlighting:
-            self.syntax_highlighting = self.header_widget.syntax_highlight_checkbox.isChecked()
-        else:
-            self.syntax_highlighting = not self.syntax_highlighting
-
+        self.syntax_highlighting = not self.syntax_highlighting
         self.act_toggle_syntax_hl.setChecked(self.syntax_highlighting)
-        self.header_widget.syntax_highlight_checkbox.blockSignals(True)
-        self.header_widget.syntax_highlight_checkbox.setChecked(self.syntax_highlighting)
-        self.header_widget.syntax_highlight_checkbox.blockSignals(False)
 
         for i in range(self.tabs.count()):
             container = self.tabs.widget(i)
             if isinstance(container, QWidget):
                 editor = self._editor_from_widget(container)
                 if editor:
-                    if self.syntax_highlighting:
-                        path = getattr(editor, '_file_path', None)
-                        self._attach_highlighter(editor, path)
-                    elif hasattr(editor, '_highlighter'):
-                        editor._highlighter.setDocument(None)
-                        del editor._highlighter
+                    self._attach_highlighter(editor, getattr(editor, '_file_path', None))
 
-        self.status.showMessage(f"Syntax highlighting {'enabled' if self.syntax_highlighting else 'disabled'}", 2000)
+        self.status.showMessage(_("Syntax highlighting enabled") if self.syntax_highlighting
+                                else _("Syntax highlighting disabled"), 2000)
 
 
     # ----------------------------------------------------------------------
@@ -3239,7 +6213,8 @@ class MainWindow(QMainWindow):
             ed = self._editor_from_widget(self.tabs.widget(i))
             if ed:
                 ed.set_background_pattern(name)
-        self.status.showMessage(f"Background: {name.capitalize()}", 2000)
+        title = self._background_titles.get(name, name)
+        self.status.showMessage(_("Background: {pattern}").format(pattern=title), 2000)
 
     def _toggle_paper_mode(self, on):
         on = bool(on)
@@ -3249,15 +6224,11 @@ class MainWindow(QMainWindow):
             self.act_paper_mode.blockSignals(True)
             self.act_paper_mode.setChecked(on)
             self.act_paper_mode.blockSignals(False)
-        if hasattr(self, "_paper_btn") and self._paper_btn.isChecked() != on:
-            self._paper_btn.blockSignals(True)
-            self._paper_btn.setChecked(on)
-            self._paper_btn.blockSignals(False)
         for i in range(self.tabs.count()):
             ed = self._editor_from_widget(self.tabs.widget(i))
             if ed:
                 ed.set_paper_mode(on)
-        self.status.showMessage(f"Paper mode {'on' if on else 'off'}", 2000)
+        self.status.showMessage(_("Paper mode on") if on else _("Paper mode off"), 2000)
 
     def _toggle_highlight_line(self, on):
         on = bool(on)
@@ -3267,7 +6238,8 @@ class MainWindow(QMainWindow):
             ed = self._editor_from_widget(self.tabs.widget(i))
             if ed:
                 ed.set_highlight_current_line(on)
-        self.status.showMessage(f"Highlight current line {'on' if on else 'off'}", 2000)
+        self.status.showMessage(_("Highlight current line on") if on
+                                else _("Highlight current line off"), 2000)
 
 
     # ----------------------------------------------------------------------
@@ -3284,53 +6256,135 @@ class MainWindow(QMainWindow):
         if not paths:
             return
         data = {"paths": paths, "active": self.tabs.currentIndex()}
-        os.makedirs(os.path.dirname(self._SESSION_FILE), exist_ok=True)
-        with open(self._SESSION_FILE, "w", encoding="utf-8") as f:
-            json.dump(data, f)
+        write_json(self._SESSION_FILE, data)
 
     def _restore_session(self) -> bool:
         if not os.path.isfile(self._SESSION_FILE):
             return False
+        data = read_json(self._SESSION_FILE, dict)
+        # Restored at most once, and a damaged record never restores.
         try:
-            with open(self._SESSION_FILE, "r", encoding="utf-8") as f:
-                data = json.load(f)
-        except Exception:
-            return False
-        os.remove(self._SESSION_FILE)
-        paths = [p for p in data.get("paths", []) if os.path.isfile(p)]
+            os.remove(self._SESSION_FILE)
+        except OSError:
+            pass
+        listed = data.get("paths")
+        listed = listed if isinstance(listed, list) else []
+        paths = [p for p in listed if isinstance(p, str) and os.path.isfile(p)]
         if not paths:
             return False
-        missing = len(data.get("paths", [])) - len(paths)
+        missing = len(listed) - len(paths)
         for path in paths:
             self.open_path(path)
         active = data.get("active", 0)
-        if 0 <= active < self.tabs.count():
+        if isinstance(active, int) and 0 <= active < self.tabs.count():
             self.tabs.setCurrentIndex(active)
         if missing:
-            self.status.showMessage(f"{missing} file(s) from last session could not be found.", 5000)
+            self.status.showMessage(
+                ngettext("{count} file(s) from last session could not be found.",
+                         "{count} file(s) from last session could not be found.",
+                         missing).format(count=missing), 5000)
         return True
+
+    # -- reopening the workspace after an update restart ---------------------
+
+    def _resume_workspace(self) -> Tuple[Optional[Workspace], frozenset]:
+        """Reopen the tabs an update restart wrote down, if it wrote any.
+
+        Returns the record (None when there was none) and the backup files
+        the reopened tabs took over (see workspace_restore.resume).
+        """
+        ws = workspace.take_workspace()
+        if ws is None:
+            return None, frozenset()
+        return ws, workspace_restore.resume(self, ws, draft_type=DraftBinding)
+
+    # -- after a version change ------------------------------------------------
+
+    def _announce_version_change(self, ws: Optional[Workspace]) -> None:
+        """Say so when this launch is a new version, or when an update that
+        was meant to happen did not (workspace_restore.version_news decides)."""
+        last_run = load_settings().get("last_run_version")
+        save_setting("last_run_version", APP_VERSION)
+        news = workspace_restore.version_news(
+            ws, last_run, APP_VERSION,
+            release_page=f"{APP_URL}/releases/tag/v{APP_VERSION}")
+        if news is None:
+            return
+        if not news.updated:
+            self._report_unfinished_update(news.version)
+            return
+        self._whats_new = (news.notes, news.release_url)
+        self.update_bar.show_updated(APP_VERSION)
+
+    def _on_whats_new_requested(self) -> None:
+        notes, release_url = getattr(self, "_whats_new", ("", ""))
+        self.update_bar.hide()
+        if not notes:
+            self._open_external(release_url)
+            return
+        dlg = WhatsNewDialog(APP_VERSION, notes, release_url=release_url,
+                             is_dark=self.is_dark_theme, parent=self)
+        dlg.link_activated.connect(self._open_external)
+        dlg.finished.connect(dlg.deleteLater)
+        dlg.open()
+
+    def _report_unfinished_update(self, version: str) -> None:
+        inform(self, title=_("The update wasn’t installed"),
+               message=_("{app} {version} couldn’t replace this version, "
+                         "so you’re still using {current}. Your documents are open "
+                         "as you left them. To try again, choose Help > Check for "
+                         "Updates.").format(app=APP_DISPLAY_NAME, version=version,
+                                            current=APP_VERSION),
+               is_dark=self.is_dark_theme)
 
     def closeEvent(self, event):
         # An update relaunch already handled unsaved work, so skip the prompt.
-        if (not getattr(self, "_closing_for_update", False)
-                and not self._resolve_unsaved_before_closing()):
+        closing_for_update = getattr(self, "_closing_for_update", False)
+        if not closing_for_update and not self._resolve_unsaved_before_closing():
             event.ignore()
             return
+        # Quitting from here: a Save As still running stops, and its part
+        # file goes; nothing still on its way goes into a document.
+        self._media_saver.cancel()
+        for i in range(self.tabs.count()):
+            self._drop_media_reads(self._editor_from_widget(self.tabs.widget(i)))
         if hasattr(self, "_knit_runner"):
             self._knit_runner.kill()
         self._asset_manager.flush()
-        self._save_session()
+        update_ws = getattr(self, "_update_workspace", None) if closing_for_update else None
+        if update_ws is None:
+            # The workspace record, when there is one, supersedes the session.
+            self._save_session()
+            workspace.discard_workspace()
+        # Backups the restart will restore from must outlive this window.
+        claimed = update_ws.claimed_backups() if update_ws is not None else set()
         for i in range(self.tabs.count()):
             ed = self._editor_from_widget(self.tabs.widget(i))
             if ed and hasattr(ed, '_backup'):
-                ed._backup.delete()
+                if os.path.abspath(ed._backup.path) in claimed:
+                    ed._backup.release()
+                else:
+                    ed._backup.delete()
             viewer = self._pdf_viewer_from_widget(self.tabs.widget(i))
             if viewer is not None:
                 viewer.save_view_state()
-        # Publish any pending feed-subscription changes before the relay
-        # sockets go away (best effort; the local cache survives anyway).
-        if hasattr(self, "_drafts_panel"):
-            self._drafts_panel.feeds.flush_subscriptions()
+        # Publish any pending changes to the list of sources before the
+        # signer and the relay sockets go away, waiting a few seconds at
+        # most: a key kept here signs on a later turn of the event loop,
+        # and what does not arrive in time is sent on the next launch.
+        imports = getattr(self, "_imports", None)
+        if imports is not None:
+            imports.flush()
+            if imports.subscriptions.is_busy:
+                # The documents are settled and their backups gone: nothing
+                # typed now could be kept, so the window takes no more
+                # input while it says what it finishes (engine review M2).
+                self.setEnabled(False)
+                self.status.showMessage(_("Saving your list of sources…"))
+                imports.subscriptions.wait_until_settled(QUIT_SYNC_WAIT_MS)
+            # The inbox closes and its lock goes, so the next start (or a
+            # second MyEditor) finds it free.
+            imports.shutdown()
         # Close any warm relay sockets and bunker channels so the WebSocket
         # layer can flush close frames before the QApplication tears down.
         if hasattr(self, "_session_pool"):
@@ -3350,7 +6404,7 @@ class MainWindow(QMainWindow):
         passed in; otherwise the chip falls back to initials on a
         deterministic color disc.
         """
-        chip = self.header_widget.profile_chip
+        chip = self.profile_chip
         default = self._profile_store.default()
         if default is None:
             chip.set_disconnected()
@@ -3363,13 +6417,18 @@ class MainWindow(QMainWindow):
 
     def _refresh_profile_chip_menu(self):
         """Rebuild the chip's dropdown - fast and idempotent."""
-        menu = self.header_widget.profile_chip.menu()
+        menu = self.profile_chip.menu()
         menu.clear()
+        self._update_account_actions()
 
         profiles = self._profile_store.list()
         if not profiles:
-            act = menu.addAction("Connect Nostr signer…")
+            act = menu.addAction(_("Create Account\u2026"))
+            act.triggered.connect(self._on_create_account)
+            act = menu.addAction(_("Connect Signer App\u2026"))
             act.triggered.connect(self._on_nostr_connect)
+            act = menu.addAction(_("Restore Account\u2026"))
+            act.triggered.connect(self._on_restore_account)
             return
 
         active = self._profile_store.default()
@@ -3383,10 +6442,174 @@ class MainWindow(QMainWindow):
             )
 
         menu.addSeparator()
-        act_add = menu.addAction("Add profile…")
+        act_membership = menu.addAction(_("EINUNDZWANZIG Membership\u2026"))
+        act_membership.triggered.connect(self._open_membership_window)
+        menu.addSeparator()
+        if active is not None:
+            act_edit = menu.addAction(_("Edit Profile\u2026"))
+            act_edit.triggered.connect(self._on_edit_profile)
+        if active is not None and active.is_local:
+            act_backup = menu.addAction(_("Back Up Account\u2026"))
+            act_backup.triggered.connect(self._on_backup_account)
+            act_move = menu.addAction(_("Move Key to Signer App\u2026"))
+            act_move.triggered.connect(self._on_move_to_signer)
+        # Connecting offers creating and restoring an account too.
+        act_add = menu.addAction(_("Add Account\u2026"))
         act_add.triggered.connect(self._on_nostr_connect)
-        act_signout = menu.addAction("Sign out active profile")
+        menu.addSeparator()
+        act_signout = menu.addAction(_("Sign Out"))
         act_signout.triggered.connect(self._on_nostr_sign_out)
+
+    def _update_account_actions(self) -> None:
+        """Back Up Account and Move Key to Signer App are for an account
+        whose key is kept here. The menu bar is built after the first chip
+        refresh, so both call this.
+
+        Every change of the active account passes through here (connect,
+        switch, sign out, create, restore), so this is also where the one
+        "Nostr in use" signal is brought up to date."""
+        pool = getattr(self, "_relay_pool", None)
+        if pool is not None:
+            # One connection never carries two accounts (NIP-42): those
+            # signed in as anyone but the account in use now open anew.
+            active = self._profile_store.default()
+            pool.end_sign_ins(keep=active.user_pubkey.lower() if active else "")
+        state = getattr(self, "nostr_state", None)
+        if state is not None:
+            state.refresh()
+            imports = getattr(self, "_imports", None)
+            if imports is not None:
+                try:
+                    imports.account_changed(self._profile_store.default() if state.active
+                                            else None)
+                except Exception:  # noqa: BLE001, imports never stop the editor
+                    logging.getLogger(__name__).exception(
+                        "imports could not follow the account")
+        self._update_nostr_commands()
+
+    # The account's own commands that need its key kept on this computer.
+    _LOCAL_KEY_COMMANDS = frozenset({"nostr.backup_account", "nostr.move_to_signer"})
+
+    def _update_nostr_commands(self) -> None:
+        """The Nostr menu's commands that act for an account are dimmed while
+        none is in use, as the HIG asks of a command that cannot act; the
+        ways to an account (create, connect, restore) and the membership
+        stay available next to them. Back Up and Move Key also need the
+        key on this computer. A document command dimmed while the Imports
+        window is in front gets its new state when that window goes."""
+        if not hasattr(self, "commands"):
+            return
+        current = self._profile_store.default()
+        active = self.nostr_state.active
+        dimmed = getattr(self, "_document_commands_dimmed", False)
+        kept = self.__dict__.setdefault("_dimmed_were_enabled", {})
+        for command in self.commands.commands(NOSTR):
+            if not command.nostr:
+                continue
+            enabled = active
+            if command.id in self._LOCAL_KEY_COMMANDS:
+                enabled = active and current is not None and current.is_local
+            if dimmed and self._is_document_command(command.id):
+                kept[command.id] = enabled
+            else:
+                self.commands.action(command.id).setEnabled(enabled)
+        # Refresh Drafts also needs the panel shown.
+        self._update_refresh_command()
+
+    def _on_nostr_in_use_changed(self, active: bool) -> None:
+        """Nothing of Nostr stays on screen once no account is in use."""
+        if not active:
+            self._hide_drafts_panel()
+            details = getattr(self, "act_article_details", None)
+            if details is not None:
+                details.setChecked(False)
+        if getattr(self, "_settings_window", None) is not None:
+            self._settings_window.refresh()
+        if getattr(self, "_shortcuts_window", None) is not None:
+            self._shortcuts_window.set_groups(self._shortcut_groups())
+
+    # -- creating, restoring and backing up accounts ---------------------------
+    # The windows and the network work behind them are the account
+    # controller's (nostr/account_controller.py); it makes an account active
+    # through ``_on_nostr_profile_connected``.
+
+    def _on_create_account(self) -> None:
+        self._accounts.create_account()
+
+    def _offer_publishing_account(self) -> None:
+        self._offer_account(
+            title=_("Publishing needs a Nostr account"),
+            message=_("Notes and articles are published from your Nostr account."))
+
+    def _offer_media_account(self) -> None:
+        self._offer_account(
+            title=_("The media library needs a Nostr account"),
+            message=_("Images you upload are kept for your Nostr account."))
+
+    def _offer_account(self, *, title: str, message: str) -> None:
+        """A Nostr command without an account in use: say what it needs and
+        offer the ways in, the Nostr menu's own first two commands (Restore
+        Account is there too). Creating an account is the default: it needs
+        nothing but this app."""
+        choice = ask(self, title=title, message=message, is_dark=self.is_dark_theme,
+                     buttons=(Button(_("Create Account\u2026"), "create", DEFAULT),
+                              Button(_("Connect Signer App\u2026"), "connect", NORMAL),
+                              Button(_("Cancel"), None, CANCEL)))
+        if choice == "create":
+            self._on_create_account()
+        elif choice == "connect":
+            self._on_nostr_connect()
+
+    def _on_restore_account(self) -> None:
+        self._accounts.restore_account()
+
+    def _on_backup_account(self) -> None:
+        self._accounts.backup_account()
+
+    def _on_move_to_signer(self) -> None:
+        self._accounts.move_to_signer()
+
+    def _on_edit_profile(self) -> None:
+        """Edit Profile for the active account. The window reads the
+        profile fresh before anything can be changed (nostr/ui/profile_window.py)."""
+        active = self._profile_store.default()
+        if active is None:
+            self._offer_account(
+                title=_("Your profile needs a Nostr account"),
+                message=_("The name and picture people see belong to your Nostr account."))
+            return
+        editing = ProfileEditing(profile=active, pool=self._relay_pool,
+                                 session_pool=self._session_pool,
+                                 directory=self._relay_directory, parent=self)
+        media = (MediaServices(store=self._media_store, visibility=self._media_visibility,
+                               copy_maker=self._copy_maker,
+                               private_library=self._private_library,
+                               profile=self._profile_store.default, saver=self._media_saver)
+                 if self._media_store is not None else None)
+        window = ProfileWindow(read=editing.read, save=editing.save,
+                               signs_locally=active.is_local, media=media,
+                               load_image=self._profile_image_loader(active.user_pubkey),
+                               is_dark=self.is_dark_theme, parent=self)
+        # Closing the window ends what is still running for it.
+        editing.setParent(window)
+        window.setWindowFlag(Qt.Window, True)
+        window.setAttribute(Qt.WA_DeleteOnClose, True)
+
+        def saved() -> None:
+            self.status.showMessage(_("Profile saved."), 5000)
+            # Read back what was published, so the chip and menus show it.
+            self._metadata_fetcher.fetch(active)
+
+        window.saved.connect(saved)
+        window.show()
+
+    def _profile_image_loader(self, pubkey: str):
+        """Edit Profile's card loads its pictures as avatars are loaded (the
+        same checks and cache), each address under a key of its own."""
+        def load(kind: str, url: str, on_done) -> None:
+            key = f"{pubkey}-{kind}-{hashlib.sha256(url.encode('utf-8')).hexdigest()[:12]}"
+            self._avatar_loader.fetch(key, url, on_done)
+        return load
 
     def _on_nostr_connect(self):
         dialog = ConnectDialog(
@@ -3396,74 +6619,325 @@ class MainWindow(QMainWindow):
             is_dark=self.is_dark_theme,
         )
         dialog.profile_connected.connect(self._on_nostr_profile_connected)
+        # A key still kept here for the account is offered for deletion, and
+        # an account connected from a signer app may have no relay list yet.
+        dialog.profile_connected.connect(
+            lambda profile: QTimer.singleShot(0, lambda: self._accounts.signer_paired(profile)))
+        # No signer app yet: the dialog offers the other two ways in.
+        dialog.create_requested.connect(lambda: QTimer.singleShot(0, self._on_create_account))
+        dialog.restore_requested.connect(lambda: QTimer.singleShot(0, self._on_restore_account))
         dialog.exec()
+
+    # -- relays that ask for a sign-in (NIP-42) -------------------------------
+
+    def _on_relay_signing_in(self, relay: str) -> None:
+        self.status.showMessage(_("Signing in to {relay}…").format(relay=relay), 5000)
+
+    def _on_relay_sign_in_failed(self, relay: str, reason: str, answered: bool) -> None:
+        if reason == NOT_CHOSEN:
+            return
+        if answered:
+            text = _("{relay} didn’t accept your sign-in.")
+        elif reason == DECLINED:
+            text = _("{relay} asks you to sign in, and your signer app declined.")
+        else:
+            text = _("Couldn’t sign in to {relay}.")
+        self.status.showMessage(text.format(relay=relay), 8000)
 
     # -- association membership --------------------------------------------
 
-    def _active_benefits(self) -> Benefits:
-        """What the active profile is entitled to, as far as we know.
-
-        An unresolved membership yields no benefits rather than blocking,
-        so nothing in the app ever waits on a third-party host.
-        """
-        profile = self._profile_store.default()
-        if profile is None:
-            return NO_BENEFITS
-        return self._membership.cached_benefits(profile.user_pubkey) or NO_BENEFITS
-
     def _entitled_relays(self) -> list:
-        relay = self._active_benefits().relay
-        return [relay] if relay else []
+        """The relays the active account's membership adds."""
+        return self._membership.entitled_relays()
 
     def _entitled_blossom_servers(self) -> list:
-        server = self._active_benefits().blossom_server
-        return [server] if server else []
+        """The media servers the active account's membership adds."""
+        return self._membership.entitled_blossom_servers()
 
-    def _refresh_membership(self, profile: Optional[Profile]) -> None:
-        if profile is not None:
-            self._membership.resolve(profile.user_pubkey)
+    def _media_server_label(self, origin: str):
+        """The Media Library's name for a server, when it has a better one
+        than its host: the members' server is the association's."""
+        return self._membership.server_label(origin)
 
-    def _on_membership_resolved(self, pubkey: str, is_member: bool) -> None:
-        # The media library reads its targets on each call, so a member
-        # who resolves after startup still gets the server without a
-        # restart. Nothing is written to the user's configuration.
+    def _on_media_servers_adopted(self, _servers: list) -> None:
+        """Nothing was configured here, so the servers the account
+        publishes became its upload servers: a background change, shown
+        in Media Servers and nowhere else."""
+        if self._visible_media_library() is not None:
+            self._media_store.refetch_if_targets_changed()
+
+    def _media_server_suggestions(self) -> list:
+        """Servers the active account publishes and this app does not
+        upload to. Another account's list is never offered."""
         active = self._profile_store.default()
-        if active is None or active.user_pubkey.lower() != pubkey.lower():
+        if active is None or (self._server_list.discovered_pubkey.lower()
+                              != active.user_pubkey.lower()):
+            return []
+        return self._server_list.suggestions
+
+    def _on_media_server_suggestions(self, _servers: list) -> None:
+        sheet = self._media_servers_sheet
+        if sheet is not None and shiboken6.isValid(sheet):
+            sheet.offer(self._media_server_suggestions())
+
+    def _open_media_servers(self) -> None:
+        """Media Servers…, from the Media Library: which servers keep the
+        person's files, in which order, and sharing that list. A sheet on
+        the library window."""
+        parent = self._visible_media_library() or self
+        sheet = MediaServersDialog(
+            settings=self._media_store.settings,
+            entitled=self._entitled_blossom_servers(),
+            suggestions=self._media_server_suggestions(),
+            server_label=self._media_server_label,
+            is_dark=self.is_dark_theme, parent=parent)
+        sheet.changed.connect(self._media_store.refetch_if_targets_changed)
+        sheet.share_requested.connect(lambda s=sheet: self._share_media_server_list(s))
+        sheet.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+        sheet.destroyed.connect(lambda _obj=None: setattr(self, "_media_servers_sheet", None))
+        self._media_servers_sheet = sheet
+        # A sheet on the library window, as Draft Relays is on this one.
+        sheet.open()
+
+    def _share_media_server_list(self, parent=None) -> None:
+        """Publish the servers uploads go to as the account's media server
+        list (kind 10063), after asking: it replaces the list other apps
+        read now, if the account published one. The servers named are the
+        ones the list will hold (a plain-http one, or more than ten, is
+        left out of it)."""
+        active = self._profile_store.default()
+        if active is None:
             return
-        if is_member:
-            self.status.showMessage(
-                "Einundzwanzig membership recognised. Your association relay "
-                "and media server are available.", 6000,
-            )
+        servers = [url_safety.origin_of(s) or s for s in self._media_store.target_servers()]
+        hosts = ", ".join(url_safety.host_of(tag[1]) or tag[1]
+                          for tag in server_list_tags(servers, None))
+        parent = parent or self._visible_media_library() or self
+        choice = ask(parent, title=_("Tell Other Apps Where Your Media Is?"),
+                     message=_("Other Nostr apps then look on {hosts} for your pictures, "
+                               "in this order. This replaces the list they use now, if "
+                               "you shared one before.").format(hosts=hosts),
+                     buttons=(Button(_("Cancel"), False, CANCEL),
+                              Button(_("Share List"), True, DEFAULT)),
+                     is_dark=self.is_dark_theme)
+        if choice is not True:
+            return
+        try:
+            writer = publish_server_list(
+                servers=servers, pool=self._relay_pool, directory=self._relay_directory,
+                session_pool=self._session_pool, profile=active, parent=self)
+        except ValueError:
+            self.status.showMessage(_("There is no media server to share."), 5000)
+            return
+        messages = {
+            outbox_writer.WRITTEN: _("Your media server list is shared."),
+            outbox_writer.UNCHANGED: _("Other apps already have this list."),
+            outbox_writer.UNKNOWN_BASE: _("Your current list couldn’t be read, so nothing "
+                                          "was changed. Try again later."),
+        }
+
+        def finished(outcome) -> None:
+            self.status.showMessage(messages.get(outcome.status, _(
+                "The list wasn’t shared. Try again in a moment.")), 6000)
+            if outcome.status == outbox_writer.WRITTEN:
+                self._server_list.refresh(active, force=True)
+            writer.deleteLater()
+
+        writer.finished.connect(finished)
+        writer.start()
+
+    def _entitled_quota(self, origin: str):
+        """The space a membership gives on its media server, in bytes."""
+        return self._membership.quota(origin)
+
+    def _on_membership_benefits_changed(self) -> None:
+        """The active account's benefits changed (resolved, lapsed,
+        confirmed). Nothing is written to the user's configuration: the
+        relay and media layers read the providers above on each call."""
+        # An open Media Library lists the members' server as soon as it
+        # applies. The store walks again only when its servers changed,
+        # so a check that changed nothing costs no signer prompt.
+        if self._visible_media_library() is not None:
+            self._media_store.refetch_if_targets_changed()
+        # Drafts are written to the members' relay as well, so they are
+        # read there too (a no-op when the set of relays did not change),
+        # and the deletions other apps announce for them with them.
+        self._draft_sync.reroute()
+        self._draft_deletions.reroute()
+
+    def _visible_media_library(self):
+        """The Media Library dialog while it is open, else None.
+
+        It deletes itself on close, so the reference can outlive the
+        dialog; a deleted one is forgotten here rather than asked
+        anything, which would raise.
+        """
+        dialog = self._media_library_dialog
+        if dialog is not None and not shiboken6.isValid(dialog):
+            dialog = self._media_library_dialog = None
+        return dialog if dialog is not None and dialog.isVisible() else None
+
+    def _forget_media_library(self, dialog) -> None:
+        if self._media_library_dialog is dialog:
+            self._media_library_dialog = None
+
+    def _media_window_open(self) -> bool:
+        """Whether a Media Library window (the library or the picker) is
+        open, to say how a Save As goes itself."""
+        return self._visible_media_library() is not None or self._media_picker is not None
+
+    def _say_media_save_running(self) -> None:
+        """A library window closed: a Save As it started goes on, said here."""
+        if self._media_saver.current:
+            self._on_media_save_started(self._media_saver.current)
+
+    def _on_media_save_started(self, target: str) -> None:
+        if not self._media_window_open():
+            self._media_save_said = _("Saving “{name}”…").format(name=os.path.basename(target))
+            self.status.showMessage(self._media_save_said, 0)
+
+    def _on_media_save_finished(self, target: str, why: str) -> None:
+        """How a Save As went, when no library window is open to say it,
+        or when this bar still says it is saving (a library window opened
+        meanwhile): kept until the next message, as a saved document's
+        is."""
+        announced = self._media_save_announced()
+        self._media_save_said = ""
+        if why == "cancelled":
+            if announced:
+                self.status.clearMessage()
+            return
+        if announced or not self._media_window_open():
+            self._media_save_said = (save_failure(why, target) if why
+                                     else _("Saved: {path}").format(path=target))
+            self.status.showMessage(self._media_save_said, 0)
+
+    def _on_media_saves_finished(self, total: int, failures: list) -> None:
+        """A Save to Folder ended without every file: said at its end, where
+        its saves were said, with every reason in the tooltip."""
+        if not failures or not (self._media_save_announced() or not self._media_window_open()):
+            return
+        self._media_save_said, tip = saves_failure(total, failures)
+        self.status.showMessage(self._media_save_said, 0)
+        self._message_tip.set(self._media_save_said, tip)
+
+    def _media_save_announced(self) -> bool:
+        """Whether the status bar still shows what it last said about a save."""
+        return bool(self._media_save_said) and \
+            self.status.currentMessage() == self._media_save_said
+
+    def _open_membership_window(self) -> None:
+        """Nostr > EINUNDZWANZIG Membership."""
+        self._membership.open_window()
+
+    def _open_imports_window(self) -> None:
+        """Nostr > Imports: sources, their posts, and the open one. Without
+        an account, or when imports cannot be kept here, it says so; after
+        such a problem it tries once more first, so whatever the message
+        asked to fix (a folder, a full disk, another program) counts."""
+        imports = self._imports
+        if not imports.bound and imports.problem:
+            imports.retry()
+        if imports.bound:
+            imports.open_window()
+        elif imports.problem:
+            inform(self, title=_("Imports aren't available"), message=imports.problem,
+                   is_dark=self.is_dark_theme)
+        else:
+            self._offer_account(
+                title=_("Imports need a Nostr account"),
+                message=_("Imported posts become drafts in your Nostr account."))
+
+    def _update_imports_row(self, *_args) -> None:
+        """What the Drafts panel's Imports row says."""
+        imports = self._imports
+        job = imports.activity()
+        action = ""
+        if job is not None and not imports.read_only:
+            if job.status == "running":
+                action = "pause"
+            elif job.status == "paused":
+                action = "resume"
+            elif job.status == "partial":
+                action = "retry"
+        self._drafts_panel.set_imports_state(
+            available=imports.bound, new_posts=imports.counts().inbox,
+            activity=activity_line(job), action=action)
+
+    def _resume_import(self) -> None:
+        job = self._imports.activity()
+        if job is not None:
+            self._imports.resume_import(job.id)
+
+    def _make_imports_window(self, controller):
+        """The Imports window, remembered in settings.json between runs."""
+        window = ImportsWindow(
+            controller, dark=self.is_dark_theme,
+            load_settings=lambda: load_settings().get(IMPORTS_SETTINGS_KEY) or {},
+            save_settings=lambda value: save_setting(IMPORTS_SETTINGS_KEY, value),
+            open_url=lambda url: self._open_external(url.toString()),
+            show_drafts=self._show_drafts_from_imports, badge=self._imports_badge)
+        # The Edit menu says what it acts on there (Undo Skip, a sheet's field).
+        window.edit_changed.connect(self._update_undo_redo_buttons)
+        window.edit_changed.connect(self._update_clipboard_commands)
+        return window
+
+    def _on_imports_badge_toggled(self, on: bool) -> None:
+        """Nostr > Show New Posts on the App Icon, chosen (Q-7)."""
+        self._imports_badge.set_on(on)
+
+    def _on_imports_badge_changed(self, on: bool) -> None:
+        """Turned on where Imports offered it: the menu item follows."""
+        blocked = self.act_imports_badge.blockSignals(True)
+        self.act_imports_badge.setChecked(on)
+        self.act_imports_badge.blockSignals(blocked)
+
+    def _show_drafts_from_imports(self) -> None:
+        """Show Drafts, after an import: this window and its Drafts panel."""
+        self._show_drafts_panel()
+        self.raise_()
+        self.activateWindow()
 
     def _on_nostr_profile_connected(self, profile: Profile):
         # New (or re-connected) profile becomes the active one.
         previous = self._profile_store.default()
+        bound = self._draft_sync.active_profile
         if previous is not None and (
             previous.user_pubkey.lower() != profile.user_pubkey.lower()
         ):
             # Connecting a second account is a switch, so the first one's
             # drafts and media keys go with it.
             self._release_identity_state()
+        elif bound is not None and bound.user_pubkey == profile.user_pubkey and (
+            bound.signer != profile.signer
+        ):
+            # The same account signs another way now (its key restored here,
+            # or a signer app paired): whatever holds the old signer lets go.
+            self._release_identity_state()
         self._profile_store.set_default(profile.user_pubkey)
-        self._refresh_membership(profile)
+        self._membership.account_changed(profile)
         self._update_profile_chip()
         self._refresh_profile_chip_menu()
         self.status.showMessage(
-            f"Connected as {profile.display_name or profile.npub_short()}", 5000
+            _("Connected as {name}").format(name=profile.display_name or profile.npub_short()),
+            5000
         )
         # Kick off metadata + avatar fetch in the background. The chip will
         # refresh itself when the fetcher signals back.
         self._metadata_fetcher.fetch(profile)
         # Also prime the mentions cache from this profile's NIP-02 contact list.
-        self._contact_fetcher.fetch(profile.user_pubkey, profile.bunker_relays)
+        self._contact_fetcher.fetch(profile.user_pubkey)
+        self._server_list.refresh(profile)
         # Bind the draft pipeline to the new profile so the panel
         # (visible or not) starts collecting wraps from the relays.
         self._draft_sync.start_for(profile)
+        self._draft_deletions.start_for(profile)
         if self._drafts_panel is not None:
             self._drafts_panel.set_active_profile(profile)
             self._drafts_panel.set_signer_unsupported(False)
             self._drafts_panel.set_signer_unreachable(False)
+            self._follow_account_in_published()
+        # An account created here whose setup was left for later is finished.
+        self._accounts.profile_activated(profile)
 
     def _release_identity_state(self) -> None:
         """Drop everything that belonged to the account being left.
@@ -3479,7 +6953,15 @@ class MainWindow(QMainWindow):
         memory is a privacy problem and not merely untidy.
         """
         self._draft_sync.stop()
+        self._draft_deletions.stop()
         self._private_library.stop()
+        self._server_list.forget_account()
+        # The library lists one account's files; the next account must
+        # never see them, not even until its own fetch lands.
+        self._media_store.clear()
+        # The membership window speaks for one identity; never show one
+        # account's membership, invoice or name to another.
+        self._membership.close_window()
 
     def _on_nostr_select_profile(self, profile: Profile):
         previous = self._profile_store.default()
@@ -3487,7 +6969,6 @@ class MainWindow(QMainWindow):
             previous.user_pubkey.lower() != profile.user_pubkey.lower()
         )
         self._profile_store.set_default(profile.user_pubkey)
-        self._refresh_membership(profile)
         self._update_profile_chip()
         self._refresh_profile_chip_menu()
         # Only tear down when the account actually changes. Re-selecting
@@ -3495,28 +6976,28 @@ class MainWindow(QMainWindow):
         # decrypted and cost a fresh round of signer prompts.
         if leaving:
             self._release_identity_state()
+        # After the teardown, so the membership follows the account that
+        # stays rather than updating a window about to close.
+        self._membership.account_changed(profile)
         # ``DraftSync.start_for`` is idempotent if the same profile is
         # already active.
         self._draft_sync.start_for(profile)
+        self._draft_deletions.start_for(profile)
         if self._drafts_panel is not None:
             self._drafts_panel.set_active_profile(profile)
             self._drafts_panel.set_signer_unsupported(False)
             self._drafts_panel.set_signer_unreachable(False)
+            self._follow_account_in_published()
+        self._server_list.refresh(profile)
+        self._accounts.profile_activated(profile)
 
     def _on_nostr_sign_out(self):
         active = self._profile_store.default()
-        if active is None:
+        # The controller asks, then forgets every key kept for the account,
+        # its signer and its profile.
+        if active is None or not self._accounts.sign_out(active):
             return
-        if not confirm_destructive(
-                self,
-                title=f"Sign out of {active.display_name or active.npub_short()}?",
-                message=("Your key stays in your signer. MyEditor only forgets "
-                         "this connection."),
-                action="Sign Out"):
-            return
-        self._session_pool.drop(active.user_pubkey)
         self._avatars.pop(active.user_pubkey, None)
-        self._profile_store.remove(active.user_pubkey)
         self._update_profile_chip()
         self._refresh_profile_chip_menu()
         # Tear down everything scoped to the account just removed. If
@@ -3529,10 +7010,19 @@ class MainWindow(QMainWindow):
             self._drafts_panel.set_active_profile(remaining)
             self._drafts_panel.set_signer_unsupported(False)
             self._drafts_panel.set_signer_unreachable(False)
+            self._follow_account_in_published()
         if remaining is not None:
             self._draft_sync.start_for(remaining)
+            self._draft_deletions.start_for(remaining)
 
     # -- metadata / avatar updates ----------------------------------------
+
+    def _on_own_profile_published(self, pubkey: str):
+        """This app just changed the account's profile (its Nostr address):
+        read it back, so the chip and the menus show what was published."""
+        profile = self._profile_store.get(pubkey)
+        if profile is not None:
+            self._metadata_fetcher.fetch(profile)
 
     def _on_metadata_updated(self, profile: Profile):
         """Refreshed display name / picture URL landed - repaint the chip
@@ -3569,17 +7059,17 @@ class MainWindow(QMainWindow):
     def _on_nostr_publish_note(self):
         active = self._profile_store.default()
         if active is None:
-            inform(self, title="Connect a signer first",
-                   message=("Connect a Nostr signer before publishing. Use the avatar "
-                            "chip in the header or Nostr > Connect Signer\u2026"))
+            self._offer_publishing_account()
             return
 
         ed = self.current_editor()
         if not self._confirm_images_uploaded(ed):
             return
-        content = self._publish_text(ed, "note").strip() if ed is not None else ""
+        content, media = self._publish_payload(ed, "note") if ed is not None else ("", [])
+        content = content.strip()
         if not content:
-            inform(self, title="Nothing to publish", message="The current document is empty.")
+            inform(self, title=_("Nothing to publish"),
+                   message=_("The current document is empty."))
             return
 
         dialog = PublishNoteDialog(
@@ -3587,44 +7077,586 @@ class MainWindow(QMainWindow):
             active_profile=active,
             store=self._profile_store,
             relay_pool=self._relay_pool,
-            relay_list_cache=self._relay_list_cache,
+            relay_directory=self._relay_directory,
             session_pool=self._session_pool,
             entitled_relays=self._entitled_relays,
             known_people=self._known_people,
             search_client=self._search_client,
             avatars=self._avatars,
+            address_check=self._address_check,
+            media=media,
             parent=self,
             is_dark=self.is_dark_theme,
         )
         dialog.published.connect(self._on_nostr_note_published)
-        dialog.exec()
+        # Composed for sharing, as a share sheet is: the document is not
+        # changed by what is changed in it.
+        dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+        self._publish_sheet = dialog
+        dialog.open()
 
-    def _on_nostr_note_published(self, event_id_hex: str, results):
-        accepted = sum(1 for _, ok, _ in results if ok)
-        note_id = encode_note(event_id_hex) if event_id_hex else ""
-        if note_id:
-            msg = (
-                f"Published to Nostr: {accepted}/{len(results)} relays · "
-                f"{note_id[:16]}…"
-            )
+    def _toggle_ticks(self) -> None:
+        ed = self.current_editor()
+        if ed is not None:
+            ed.toggle_ticks()
+            self._update_format_buttons()
+
+    def _footnote_jump(self) -> None:
+        ed = self.current_editor()
+        if ed is not None:
+            ed.jump_to_footnote(ed.textCursor())
+
+    def _fill_insert_menu(self) -> None:
+        """The Insert menu as it opens: Nostr's insertions only while a
+        Nostr account is in use."""
+        active = bool(self.nostr_state.active)
+        for action in self._insert_nostr_actions:
+            self.m_insert.removeAction(action)
+        self._insert_nostr_separator.setVisible(active)
+        if active:
+            self.m_insert.addActions(self._insert_nostr_actions)
+
+    def _fill_view_menu(self) -> None:
+        """The View menu as it opens: Article Details only while a Nostr
+        account is in use (D-1)."""
+        active = bool(self.nostr_state.active)
+        self._view_nostr_separator.setVisible(active)
+        self.act_article_details.setVisible(active)
+
+    # -- Article Details ----------------------------------------------------------
+
+    def _show_article_details_panel(self, shown: bool) -> None:
+        panel = self._article_details_panel
+        if shown and self.nostr_state.active:
+            self._fill_article_details_panel()
+            panel.show()
+            self._give_panel_room(panel, ARTICLE_DETAILS_WIDTH)
         else:
-            msg = f"Published to Nostr: {accepted}/{len(results)} relays"
-        self.status.showMessage(msg, 8000)
+            if panel.isAncestorOf(QApplication.focusWidget()):
+                ed = self.current_editor()
+                if ed is not None:
+                    ed.setFocus()
+            panel.hide()
+
+    def _fill_article_details_panel(self) -> None:
+        """Article Details shows the article in the tab in front: its details
+        (_article_details_of), or why there are none."""
+        panel = getattr(self, "_article_details_panel", None)
+        if panel is None or not panel.isVisible() and not self.act_article_details.isChecked():
+            return
+        ed = self.current_editor()
+        binding = getattr(ed, "_draft_binding", None) if ed is not None else None
+        if ed is None:
+            panel.show_no_article(_("Article details belong to a document written here."))
+        elif binding is not None and binding.inner_kind == INNER_KIND_SHORT_NOTE:
+            panel.show_no_article(_("This is a note. Notes have no title, summary or cover; "
+                                    "save it as an article to give it some."))
+        else:
+            fixed = (binding is not None and binding.inner_kind == INNER_KIND_LONG_FORM) or \
+                self._published_article_of(ed) is not None
+            details = self._article_details_of(ed)
+            # The link name the sheet starts with for a file's article.
+            profile = self._profile_store.default()
+            made = (self._link_name_for_file(self.current_path(), profile.user_pubkey)
+                    if not details.identifier and profile is not None else "")
+            panel.show_article(details, fixed_identifier=fixed, kept_in_file=details.kept,
+                               document=ed, made_identifier=made)
+
+    def _cover_uploaded_for(self, ed, url: str) -> None:
+        """A picture dropped in Article Details as the cover of ``ed``'s
+        article is uploaded, with another tab in front now: ``ed``'s cover."""
+        if ed is not None and shiboken6.isValid(ed):
+            self._set_article_details(ed, self._article_details_of(ed).with_changes(image=url))
+
+    def _pick_coauthor(self, anchor, chosen) -> None:
+        """Who writes the article with its author, asked under ``anchor`` the
+        way a mention is: the people you follow first, then a search; their
+        Nostr address only once confirmed. ``chosen(person)`` answers."""
+        if self._coauthor_picker is None:
+            self._coauthor_picker = MentionPicker(
+                self._known_people, self._search_client, avatars=self._avatars,
+                parent=self, is_dark=self.is_dark_theme, address_check=self._address_check)
+            self._coauthor_picker.picked.connect(
+                lambda person: self._coauthor_chosen and self._coauthor_chosen(person))
+        self._coauthor_chosen = chosen
+        self._coauthor_picker.open_at(anchor.rect(), anchor)
+
+    def _person_name(self, pubkey: str) -> str:
+        """How a person is called: their name when known, else their short
+        Nostr address (KnownPeople.name_of)."""
+        return self._known_people.name_of(pubkey)
+
+    # -- mentions ----------------------------------------------------------------
+
+    def _mention_label(self, entity: str) -> Optional[str]:
+        """The name a mention shows: the person's, when known; None when
+        ``entity`` names no person."""
+        def name(pubkey: str):
+            person = self._known_people.get(pubkey)
+            return person.display_name if person is not None else None
+        return refs.person_name(entity, name)
+
+    def _ask_mention(self, ed, at: int) -> None:
+        """Who to mention, asked at the caret ("@" typed at ``at``, or -1
+        from Insert > Mention): the people you follow first, then a search;
+        their Nostr address only once confirmed. Escape keeps what was
+        typed."""
+        if ed is None or not self.nostr_state.active or self._editor_kind(ed) != "rich":
+            return
+        if self._mention_picker is None:
+            self._mention_picker = MentionPicker(
+                self._known_people, self._search_client, avatars=self._avatars,
+                parent=self, is_dark=self.is_dark_theme, address_check=self._address_check)
+            self._mention_picker.picked.connect(self._mention_picked)
+        self._mention_target = (ed, at)
+        self._mention_picker.open_at(ed.cursorRect(), ed.viewport())
+
+    def _mention_picked(self, person) -> None:
+        ed, at = getattr(self, "_mention_target", (None, -1))
+        if ed is None or not shiboken6.isValid(ed):
+            return
+        self.activateWindow()
+        ed.setFocus()
+        if person.relay_hint:
+            href = "nostr:" + encode_nprofile(person.pubkey, [person.relay_hint])
+        else:
+            href = "nostr:" + encode_npub(person.pubkey)
+        ed.insert_mention(at, href, person.display_name or refs.short_key(
+            encode_npub(person.pubkey)))
+
+    def _ask_reference(self, ed) -> None:
+        """Insert > Note or Article: a link to one asked at the caret, the
+        way Add Link asks for an address; it goes in as a paragraph of its
+        own (readers show it as a card)."""
+        if ed is None or not self.nostr_state.active or self._editor_kind(ed) != "rich":
+            return
+        popover = ReferencePopover(ed)
+        popover.chosen.connect(lambda reference: ed.insert_reference(reference.uri))
+        # Escape, Cancel or a click elsewhere: the writing goes on. (A
+        # method: Qt drops the connection if the editor goes first.)
+        popover.destroyed.connect(ed.take_focus_back)
+        popover.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+        popover.show_below(ed.cursorRect(), ed.viewport())
+
+    # -- audio and video ----------------------------------------------------------
+
+    def _may_insert_audio_video(self, ed) -> bool:
+        return (ed is not None and self.nostr_state.active
+                and self._editor_kind(ed) == "rich")
+
+    def _ask_audio_or_video(self) -> None:
+        """Insert > Audio or Video: a file chosen, uploaded to the media
+        servers, and put in the text as its own paragraph."""
+        ed = self.current_editor()
+        if not self._may_insert_audio_video(ed):
+            return
+        patterns = " ".join("*" + ext for ext in media_files.AUDIO_VIDEO_EXTENSIONS)
+        path, _filter = QFileDialog.getOpenFileName(
+            self, _("Insert Audio or Video"), "",
+            _("Audio and video ({patterns})").format(patterns=patterns))
+        if path:
+            self._upload_into(ed, file_paths.normalize(path))
+
+    def _upload_limit(self) -> int:
+        """The largest file one of the media servers takes."""
+        servers = self._media_store.target_servers()
+        largest = max((get_effective_max_file(server) for server in servers),
+                      default=BLOSSOM_MAX_FILE_SIZE)
+        return min(largest, BLOSSOM_MAX_FILE_SIZE)
+
+    def _upload_into(self, ed, path: str) -> None:
+        """Put the audio or video file ``path`` into ``ed`` as a paragraph of
+        its own and send it to the media servers. It is an object of the
+        text, as a picture is (an asset, named by its hash): finishing its
+        upload changes nothing the person wrote and no step of Undo, and it
+        outlives a crash or a restart. A file larger than every media server
+        takes is refused at once, saying the limit (nostrdesign: before a
+        long wait, not after)."""
+        name = os.path.basename(path)
+        mime = media_files.type_of(path)
+        try:
+            size = os.path.getsize(path)
+        except OSError:
+            size = 0
+        if size > self._upload_limit():
+            inform(self, title=_("“{name}” is too large").format(name=name),
+                   message=_("Your media servers take files up to {size}.").format(
+                       size=format_size(self._upload_limit())))
+            return
+        if media_files.kind_of(mime or "") is None or size <= 0:
+            self._say_cannot_add(name)
+            return
+        # Where it goes: the caret now, followed through what is typed while
+        # a large file is read and hashed off the UI thread (staying before
+        # what is typed there).
+        at = QTextCursor(ed.textCursor())
+        at.setKeepPositionOnInsert(True)
+        # Dropped when the document closes or the app quits meanwhile
+        # (close_tab, closeEvent): nothing is then kept or uploaded.
+        read = _MediaRead()
+        ed._media_reads = getattr(ed, "_media_reads", []) + [read]
+        run_for_size(size, lambda: self._asset_manager.store_media_file(
+                         path, read.keeping, read.kept),
+                     lambda stored: self._insert_media(ed, at, stored, mime, name, read),
+                     lambda _error: self._media_read_failed(ed, name, read), parent=self)
+
+    def _drop_media_reads(self, ed) -> None:
+        """The audio and video still being read for ``ed`` go nowhere, and
+        leave no copy, at whatever point they are (_MediaRead)."""
+        for read in getattr(ed, "_media_reads", []) if ed is not None else []:
+            sha = read.drop()
+            if sha is not None:
+                self._asset_manager.release_stored(sha)
+
+    def _media_read_failed(self, ed, name: str, read: "_MediaRead") -> None:
+        """Say a file couldn't be read, while the document it was for is
+        still open; once it is gone, the read ends quietly, as an operation
+        cancelled does in Mail and the Finder."""
+        if read.dropped or self._editor_widget_index(ed) < 0:
+            return
+        self._say_cannot_add(name)
+
+    def _say_cannot_add(self, name: str) -> None:
+        inform(self, title=_("Couldn’t add “{name}”").format(name=name),
+               message=_("MyEditor can read audio and video files of these kinds: "
+                         "{kinds}.").format(kinds=", ".join(media_files.AUDIO_VIDEO_EXTENSIONS)))
+
+    def _insert_media(self, ed, at, stored, mime: str, name: str,
+                      read: "_MediaRead") -> None:
+        """The file kept in the local store (``stored``: its sha256 and size)
+        as an object of ``ed``'s text, in a paragraph of its own at ``at``,
+        and on its way to the media servers."""
+        if stored is None:
+            return                         # dropped before it was kept
+        sha, size = stored
+        if self._editor_widget_index(ed) < 0 or not read.take_over():
+            # The document was closed, or the app quit, while the file was
+            # read: it goes nowhere, nothing is uploaded, nothing is kept.
+            dropped = read.drop()
+            if dropped is not None:
+                self._asset_manager.release_stored(dropped)
+            return
+        asset = self._asset_manager.adopt_stored_media(sha, size=size, mime=mime, name=name)
+        self._asset_manager.release_stored(sha, taken=asset is not None)
+        if asset is None:
+            self._say_cannot_add(name)
+            return
+        self._insert_media_card(ed, at, asset)
+        self._asset_manager.request_upload(asset.sha256)
+
+    def _insert_media_card(self, ed, at, asset) -> None:
+        """Audio or video ``asset`` as an object of ``ed``'s text: its card,
+        in a paragraph of its own at ``at``. The one way it goes in, from
+        Insert Audio or Video and from the Media Library alike."""
+        image = QTextImageFormat()
+        image.setName(asset.key)
+        image.setProperty(QTextImageFormat.ImageAltText, asset.alt)
+        image.setWidth(media_card.WIDTH)
+        image.setHeight(media_card.HEIGHT)
+        ed.document().addResource(QTextDocument.ImageResource, QUrl(asset.key),
+                                  self._media_card(asset))
+        caret_there = ed.textCursor().position() == at.position()
+        cursor = QTextCursor(ed.document())
+        cursor.setPosition(at.position())
+        with ed.undo_step(N_("Audio or Video")):
+            rich_text.insert_own_paragraph(cursor, image=image)
+        if caret_there:
+            ed.setTextCursor(cursor)
+
+    def _uploading(self, *editors) -> list:
+        """The audio and video in ``editors`` still on its way to the media
+        servers."""
+        return [asset for ed in editors for asset in self._media_not_uploaded(ed.document())
+                if asset.upload_state in (AssetState.QUEUED, AssetState.SIGNING,
+                                          AssetState.UPLOADING)]
+
+    def _library_uploads(self) -> list:
+        """Files added in the Media Library still on their way, as the
+        quit question names them (a failed one is not stopped by quitting:
+        nothing is moving)."""
+        return [SimpleNamespace(alt=added.name, library=True,
+                                finishing=added.state == "finishing")
+                for added in self._media_store.added_uploads() if added.state != "failed"]
+
+    def _media_saves(self) -> list:
+        """The Save As downloads quitting would stop: the one running and
+        the ones waiting, by the path each is saved to."""
+        return self._media_saver.pending()
+
+    @staticmethod
+    def _still_uploading(uploading: list, saving: list = ()) -> str:
+        if not saving:
+            return ngettext("“{name}” is still uploading.", "{count} files are still uploading.",
+                            len(uploading)).format(name=uploading[0].alt, count=len(uploading))
+        if not uploading:
+            return ngettext("A file is still being saved.", "{count} files are still being saved.",
+                            len(saving)).format(count=len(saving))
+        count = len(uploading) + len(saving)
+        return ngettext("{count} file is still uploading or being saved.",
+                        "{count} files are still uploading or being saved.",
+                        count).format(count=count)
+
+    @staticmethod
+    def _what_leaving_does(uploading: list = (), *, quitting: bool, saving: list = ()) -> str:
+        """What closing (or quitting) does to the uploads still running
+        (audio and video in a document, files added to the Media Library)
+        and, quitting, to the Save As downloads. A library file its first
+        server has is in the library already: quitting stops only its
+        copies to the other servers. Closing a document leaves a save
+        running."""
+        if quitting and saving:
+            if not uploading:
+                return ngettext("Quitting now stops the download, and the file isn’t saved.",
+                                "Quitting now stops the downloads, and the files aren’t saved.",
+                                len(saving))
+            return " ".join((
+                MainWindow._what_leaving_does(uploading, quitting=True),
+                ngettext("Quitting also stops saving “{name}”.",
+                         "Quitting also stops saving {count} files.",
+                         len(saving)).format(name=os.path.basename(saving[0]),
+                                             count=len(saving))))
+        copying = [u for u in uploading if getattr(u, "finishing", False)]
+        if quitting and copying and len(copying) == len(uploading):
+            return ngettext(
+                "Quitting now stops copying it to your other media servers. It’s already in "
+                "your Media Library.",
+                "Quitting now stops copying them to your other media servers. They’re already "
+                "in your Media Library.", len(copying))
+        uploading = [u for u in uploading if not getattr(u, "finishing", False)]
+        library = sum(1 for u in uploading if getattr(u, "library", False))
+        if quitting and library == len(uploading) and library:
+            return ngettext(
+                "Quitting now stops the upload, and the file isn’t added to your Media Library.",
+                "Quitting now stops the uploads, and the files aren’t added to your Media "
+                "Library.", library)
+        if quitting and library:
+            return _("Quitting now stops every upload: the documents won’t hold their files, "
+                     "and your Media Library won’t get its new ones.")
+        if quitting:
+            return _("Quitting now stops the upload, and the document won’t hold the file.")
+        return _("If you close the document now, the upload goes on to your media library, "
+                 "but the document doesn’t keep it.")
+
+    def _may_leave_uploads(self, uploading: list, *, quitting: bool,
+                           saving: list = ()) -> bool:
+        """With nothing unsaved, closing or quitting while audio or video
+        uploads (or, quitting, while a Save As downloads) asks this alone
+        (Cancel is the default). True to go on."""
+        saving = saving if quitting else []
+        if not uploading and not saving:
+            return True
+        return confirm_destructive(
+            self, title=self._still_uploading(uploading, saving),
+            message=self._what_leaving_does(uploading, quitting=quitting, saving=saving),
+            action=_("Quit Anyway") if quitting else _("Close Anyway"))
+
+    def _save_question_words(self, uploading: list, *, quitting: bool,
+                             saving: list = ()) -> str:
+        """The save question's words: with audio or video still uploading
+        (or, quitting, a Save As downloading), what leaving does to it
+        first, so it is one question, not two."""
+        saving = saving if quitting else []
+        if not uploading and not saving:
+            return ""
+        return " ".join((self._still_uploading(uploading, saving),
+                         self._what_leaving_does(uploading, quitting=quitting, saving=saving),
+                         _("Your changes will be lost if you don’t save them.")))
+
+    def _media_name(self, url: str) -> Optional[str]:
+        """The name an audio or video file had, by the address it was
+        uploaded to (its hash names it); None when it is not one of this
+        app's."""
+        sha = hash_from_url(url)
+        asset = self._asset_manager.get(sha) if sha else None
+        return asset.alt if asset is not None and asset.is_media and asset.alt else None
+
+    def _outside_of(self, name: str) -> Optional[paste.Outside]:
+        """How one of this app's objects (an asset) goes to another app on
+        the clipboard: by its address once uploaded, else audio or video by
+        its name and a picture by its bytes; None for any other object."""
+        sha = parse_asset_key(name)
+        asset = self._asset_manager.get(sha) if sha else None
+        if asset is None:
+            return None
+        address = _published_address(asset) if asset.is_uploaded else ""
+        if asset.is_media:
+            return paste.Outside(True, address or asset.alt, address)
+        data = None if address else self._asset_manager.resolve_bytes(asset.key)
+        return paste.Outside(False, address or asset.alt, address,
+                             address or (image_data_uri(data) or "" if data else ""))
+
+    def _media_not_uploaded(self, doc) -> list:
+        """The audio and video in ``doc`` not on a media server yet."""
+        found = []
+        for name in dict.fromkeys(iter_image_names(doc)):
+            sha = parse_asset_key(name)
+            asset = self._asset_manager.get(sha) if sha else None
+            if asset is not None and asset.is_media and not asset.is_uploaded:
+                found.append(asset)
+        return found
+
+    def _resolve_asset_image(self, name: str):
+        """What an object of the text shows: an audio or video file's card,
+        a picture's picture."""
+        sha = parse_asset_key(name)
+        asset = self._asset_manager.get(sha) if sha else None
+        if asset is not None and asset.is_media:
+            return self._media_card(asset)
+        return self._asset_manager.resolve_image(name)
+
+    def _media_card(self, asset):
+        """The card of an audio or video file, saying how its upload is."""
+        kind = media_files.kind_of(asset.mime)
+        title = (_("Audio · {name}") if kind == media_files.AUDIO
+                 else _("Video · {name}")).format(name=asset.alt or asset.sha256[:12])
+        state = asset.upload_state
+        if asset.is_uploaded:
+            words = ""
+        elif state is AssetState.FAILED:
+            words = _("Couldn’t upload. Publishing or saving as a draft tries again.")
+        elif state in (AssetState.QUEUED, AssetState.SIGNING, AssetState.UPLOADING):
+            percent = self._media_progress.get(asset.sha256)
+            words = (_("Uploading… {percent} %").format(percent=_number(percent))
+                     if percent is not None else _("Uploading…"))
+        else:
+            words = _("Not uploaded yet. Publishing or saving as a draft uploads it.")
+        return media_card.render(title, words, dark=self.is_dark_theme, mime=asset.mime)
+
+    def _redraw_media_cards(self) -> None:
+        """Draw the cards of the audio and video in the open documents
+        again, in the appearance now in use."""
+        shown = set()
+        for i in range(self.tabs.count()):
+            ed = self._editor_from_widget(self.tabs.widget(i))
+            for name in iter_image_names(ed.document()) if ed is not None else ():
+                media = _media_asset(self._asset_manager, name)
+                if media is not None and media.sha256 not in shown:
+                    shown.add(media.sha256)
+                    self._refresh_asset_in_documents(media.sha256)
+
+    def _on_library_upload_failed(self, name: str, reason: str) -> None:
+        """A file added in the Media Library did not upload while no
+        library window is open: counted in the status bar until the
+        library is opened. The next library window shows it with Retry."""
+        if self._media_store.can_retry(name) and self._visible_media_library() is None:
+            self._library_failures[name] = reason
+            self._show_library_failures()
+
+    def _clear_library_failures(self) -> None:
+        """The library is open, and shows each failure itself."""
+        self._library_failures.clear()
+        self._show_library_failures()
+
+    def _show_library_failures(self) -> None:
+        failures = self._library_failures
+        text = ngettext("“{name}” wasn’t added to your Media Library.",
+                        "{count} files weren’t added to your Media Library.",
+                        len(failures)).format(name=next(iter(failures), ""),
+                                              count=len(failures)) if failures else ""
+        self._library_problem.setText(text)
+        self._library_problem.setToolTip("\n".join(
+            _("“{name}” wasn’t added to your Media Library. {reason}").format(
+                name=name, reason=reason) for name, reason in failures.items()))
+        self._library_problem.setStyleSheet(
+            f"color: {theme.error_text_color(self.is_dark_theme)}; padding-right: 4px;")
+        link = theme.dialog_link_color(self.is_dark_theme)
+        self._library_open.setStyleSheet(
+            f"#LibraryOpen {{ color: {link}; border: none; background: transparent; "
+            f"padding: 0 4px; }} #LibraryOpen:hover {{ text-decoration: underline; }}")
+        self._library_open.setAccessibleDescription(text)
+        self._library_problem.setVisible(bool(text))
+        self._library_open.setVisible(bool(text))
+        self._fit_status_bar()
+
+    def _fit_status_bar(self) -> None:
+        """A message in the status bar keeps its room in a narrow window.
+        What says least steps aside first, while it doesn't fit beside
+        the message and what matters more: the word count, then the
+        caret's line; then the library failure line shortens, and where
+        not even a few letters of it fit, it steps aside (Open Media
+        Library too) until the message goes. Without a message, each
+        takes all it needs."""
+        label = self._library_problem
+        no_limit = 16777215                              # Qt's QWIDGETSIZE_MAX
+        for widget in (self._words_label, self._line_label, label, self._library_open):
+            widget.setMaximumWidth(no_limit)
+        message = self.status.currentMessage()
+        if not message:
+            return
+        spacing = self.status.layout().spacing()
+
+        def width_of(widget) -> int:
+            return widget.sizeHint().width() + spacing if widget.isVisible() else 0
+
+        needed = self.status.fontMetrics().horizontalAdvance(message) + 40   # its margins
+        room = (self.status.width() - needed
+                - sum(width_of(w) for w in (self._backup_problem, self._backup_retry,
+                                            self._library_open)))
+        # The failure line at its full width, then the caret's line, then
+        # the word count: each stays while it fits beside those before it.
+        kept = width_of(label)
+        for widget in (self._line_label, self._words_label):
+            if room - kept >= width_of(widget):
+                kept += width_of(widget)
+            else:
+                widget.setMaximumWidth(0)
+                kept += spacing
+        if label.isVisible():
+            fits = room - (kept - width_of(label))
+            if fits < label.minimumSizeHint().width():
+                fits = 0
+                self._library_open.setMaximumWidth(0)
+            label.setMaximumWidth(fits)
+
+    def _on_media_upload_progress(self, name: str, sent: int, total: int) -> None:
+        sha = parse_asset_key(name)
+        asset = self._asset_manager.get(sha) if sha else None
+        if asset is None or not asset.is_media or total <= 0:
+            return
+        percent = min(100, sent * 100 // total)
+        if self._media_progress.get(sha) != percent:
+            self._media_progress[sha] = percent
+            self._refresh_asset_in_documents(sha)
+
+    # -- secret keys: never pasted where Nostr is written ---------------------
+    # (nor published: nostr/ui/secret_key_check.py, at the publish sheets)
+
+    def _guard_paste(self, ed, text: str):
+        """A paste with a Nostr secret key in it, into prose while a Nostr
+        account is in use, is stopped with a warning (the key would be one
+        click from being published); the person may paste the link to the
+        key's owner instead. Plain text, code and other people's
+        documents without an account paste as they are."""
+        if (not refs.secret_keys_in(text) or not self.nostr_state.active
+                or not (self._editor_kind(ed) == "rich" or getattr(ed, "_markdown_source", False))):
+            return text
+        public = refs.without_secret_keys(text)
+        buttons = [Button(_("Don't Paste"), None, DEFAULT)]
+        if public is not None:
+            buttons.insert(0, Button(_("Paste Public Key"), public, NORMAL))
+        return ask(self, title=_("This is a secret key"), caution=True, buttons=buttons,
+                   message=_("Anyone who has it can publish as its owner and read their "
+                             "private messages, and once published it can never be taken "
+                             "back. MyEditor did not paste it. Keep it in a password "
+                             "manager or a signer app."))
+
+    def _on_nostr_note_published(self, _event_id_hex: str, results):
+        self._say_published(results, article=False)
 
     def _on_nostr_publish_article(self):
         active = self._profile_store.default()
         if active is None:
-            inform(self, title="Connect a signer first",
-                   message=("Connect a Nostr signer before publishing. Use the avatar "
-                            "chip in the header or Nostr > Connect Signer\u2026"))
+            self._offer_publishing_account()
             return
 
         ed = self.current_editor()
         if not self._confirm_images_uploaded(ed):
             return
-        body = self._publish_text(ed, "markdown").rstrip() if ed is not None else ""
+        body, media = self._publish_payload(ed, "markdown") if ed is not None else ("", [])
+        body = body.rstrip()
         if not body:
-            inform(self, title="Nothing to publish", message="The current document is empty.")
+            inform(self, title=_("Nothing to publish"),
+                   message=_("The current document is empty."))
             return
 
         # Pre-fill metadata. Precedence:
@@ -3632,55 +7664,105 @@ class MainWindow(QMainWindow):
         #      ``d`` and title from its draft, preserving the addressable
         #      coordinate so re-publishing replaces the draft in place).
         #   2. File path basename for disk-backed tabs.
-        #   3. First non-blank line as a heuristic title for free-form tabs.
-        binding = getattr(ed, "_draft_binding", None) if ed else None
-        default_title = ""
-        default_slug = ""
-        if binding is not None and binding.inner_kind == INNER_KIND_LONG_FORM:
-            default_title = binding.title
-            default_slug = binding.identifier
-        if not default_title:
-            first_line = next((ln for ln in body.splitlines() if ln.strip()), "")
-            default_title = first_line.lstrip("# ").strip()
+        #   3. The first heading, else the first line, as plain text, for
+        #      a title (article_details.default_title).
+        # A draft of an article (an import, an edit) brings all its details:
+        # summary, cover, hashtags, source, and when it first went out (a
+        # new version keeps that date).
+        details = self._article_details_of(ed)
+        title = details.title or default_title(body, self._preview_name)
+        default_slug = details.identifier
+        first_published = details.published_at
+        file_name = ""
         if not default_slug:
-            path = self.current_path()
-            default_slug = (
-                os.path.splitext(os.path.basename(path))[0] if path else ""
-            )
+            default_slug = self._link_name_for_file(self.current_path(), active.user_pubkey)
+            # The file's name as it is, which version 3.3 published files
+            # under: the sheet asks the relays about it at Publish.
+            file_name = self._file_name(self.current_path())
 
         dialog = PublishArticleDialog(
             body_markdown=body,
             active_profile=active,
             store=self._profile_store,
             relay_pool=self._relay_pool,
-            relay_list_cache=self._relay_list_cache,
+            relay_directory=self._relay_directory,
             session_pool=self._session_pool,
             entitled_relays=self._entitled_relays,
             known_people=self._known_people,
             search_client=self._search_client,
             avatars=self._avatars,
+            address_check=self._address_check,
+            can_receive_zaps=self._ask_can_receive_zaps,
             media_store=self._media_store,
             media_visibility=self._media_visibility,
             copy_maker=self._copy_maker,
             private_library=self._private_library,
-            default_title=default_title,
+            media_saver=self._media_saver,
+            default_title=title,
             default_slug=default_slug,
+            file_name=file_name,
+            first_published=first_published,
+            details=details,
+            first_publications=self._first_publications,
+            media=media,
             parent=self,
             is_dark=self.is_dark_theme,
         )
         dialog.published.connect(self._on_nostr_article_published)
-        dialog.exec()
+        dialog.finished.connect(lambda _result, d=dialog, e=ed: self._article_sheet_closed(d, e))
+        dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+        self._publish_sheet = dialog
+        dialog.open()
 
-    def _on_nostr_article_published(self, naddr: str, results):
-        accepted = sum(1 for _, ok, _ in results if ok)
-        if naddr:
-            msg = (
-                f"Published article to Nostr: {accepted}/{len(results)} relays · "
-                f"{naddr[:18]}…"
-            )
+    @staticmethod
+    def _file_name(path: str) -> str:
+        """A file's name without its extension ("My Post" for My Post.md)."""
+        return os.path.splitext(os.path.basename(path))[0] if path else ""
+
+    def _link_name_for_file(self, path: str, author: str) -> str:
+        """The link name a file-backed article starts with: made from the
+        file's name as a title's is ("Grüße an alle.md" is
+        "grusse-an-alle"), unless this computer published it under the
+        name as it is (as the file system gives it, or composed), which it
+        then keeps exactly (another would be another article). Published
+        elsewhere, or by version 3.3, which kept no record, the sheet finds
+        that out from the relays at Publish (file_name)."""
+        name = MainWindow._file_name(path)
+        if not name:
+            return ""
+        record = getattr(self, "_first_publications", None)
+        for own in file_link_names(name) if record is not None else ():
+            if record.get(author, own):
+                return own
+        return slugify(name)
+
+    def _article_sheet_closed(self, dialog, ed) -> None:
+        """Publish as Article closed, published or not: what was changed
+        there is the article's, as in Article Details."""
+        if ed is not None and shiboken6.isValid(ed) and dialog.details_changed():
+            self._set_article_details(ed, dialog.details())
+
+    def _on_nostr_article_published(self, _naddr: str, results):
+        self._say_published(results, article=True)
+
+    def _say_published(self, results, *, article: bool) -> None:
+        """That it went out, in the status bar, and how many relays took it
+        when not every one did. No event id, which the person has nothing
+        to do with: the Published list and the dialog itself say more."""
+        accepted = sum(1 for _relay, ok, _message in results if ok)
+        total = len(results)
+        if accepted >= total:
+            message = (_("Your article is published.") if article
+                       else _("Your note is published."))
+        elif article:
+            message = ngettext("Your article is published; {accepted} of {total} relay took it.",
+                               "Your article is published; {accepted} of {total} relays took "
+                               "it.", total).format(accepted=accepted, total=total)
         else:
-            msg = f"Published article to Nostr: {accepted}/{len(results)} relays"
-        self.status.showMessage(msg, 8000)
+            message = ngettext("Your note is published; {accepted} of {total} relay took it.",
+                               "Your note is published; {accepted} of {total} relays took it.",
+                               total).format(accepted=accepted, total=total)
+        self.status.showMessage(message, 8000)
 
     # -- media (Blossom) --------------------------------------------------
 
@@ -3689,9 +7771,7 @@ class MainWindow(QMainWindow):
         editing while uploads run in the background."""
         active = self._profile_store.default()
         if active is None:
-            inform(self, title="Connect a signer first",
-                   message=("Connect a Nostr signer (Nostr > Connect Signer\u2026) "
-                            "before browsing your Blossom media library."))
+            self._offer_media_account()
             return
         # Reading the private library is where the signer prompts are, so
         # it happens when the user opens their media and not before.
@@ -3702,9 +7782,18 @@ class MainWindow(QMainWindow):
             is_dark=self.is_dark_theme,
             pick_mode=False,
             visibility=self._media_visibility,
+            saver=self._media_saver,
             parent=self,
         )
         dialog.bind_private_library(self._private_library)
+        dialog.servers_requested.connect(self._open_media_servers)
+        self._clear_library_failures()
+        # The dialog deletes itself on close; forget it then, so nothing
+        # later asks a deleted object whether it is visible.
+        dialog.destroyed.connect(lambda _obj=None, d=dialog: self._forget_media_library(d))
+        # A Save As it started goes on: said here from now on.
+        dialog.destroyed.connect(lambda _obj=None: self._say_media_save_running())
+        self._media_library_dialog = dialog
         dialog.show()
 
     def _on_nostr_insert_image(self):
@@ -3713,9 +7802,7 @@ class MainWindow(QMainWindow):
         it at the current cursor in the active editor."""
         active = self._profile_store.default()
         if active is None:
-            inform(self, title="Connect a signer first",
-                   message=("Connect a Nostr signer (Nostr > Connect Signer\u2026) "
-                            "before inserting Blossom images."))
+            self._offer_media_account()
             return
         ed = self.current_editor()
         if ed is None:
@@ -3729,6 +7816,7 @@ class MainWindow(QMainWindow):
             is_dark=self.is_dark_theme,
             pick_mode=True,
             visibility=self._media_visibility,
+            saver=self._media_saver,
             parent=self,
         )
         dialog.bind_private_library(self._private_library)
@@ -3738,7 +7826,12 @@ class MainWindow(QMainWindow):
         dialog.file_picked.connect(
             lambda media, alt, e=ed: self._insert_media_at_cursor(media, e, alt)
         )
-        dialog.exec()
+        self._media_picker = dialog
+        try:
+            dialog.exec()
+        finally:
+            self._media_picker = None
+        self._say_media_save_running()
 
     def _insert_media_at_cursor(self, media: MediaFile, editor, alt_text: str = "") -> None:
         """Insert a library pick at the editor's cursor, immediately.
@@ -3766,31 +7859,54 @@ class MainWindow(QMainWindow):
                 self.status.showMessage(picked.reason, 8000)
             return
 
-        if not (picked.mime or "").startswith("image/"):
-            self._insert_url_as_text(editor, picked.url)
-            return
+        if media_files.kind_of(picked.mime) is not None \
+                and self._may_insert_audio_video(editor):
+            # Audio or video already on the servers: the same card as
+            # Insert Audio or Video makes, through the same record, with
+            # nothing downloaded or sent again. Its card names its own
+            # step of Undo (_insert_media_card).
+            asset = self._asset_manager.adopt_library_file(
+                sha256=picked.sha256, remote_url=picked.url, mime=picked.mime,
+                size=picked.size, alt=alt_text or self._library_name(media))
+            if asset is not None:
+                self._insert_media_card(editor, QTextCursor(editor.textCursor()), asset)
+                return
 
-        asset = self._asset_manager.adopt_library_file(
-            sha256=picked.sha256,
-            remote_url=picked.url,
-            mime=picked.mime,
-            size=picked.size,
-            alt=alt_text,
-        )
-        if asset is None:
-            self._insert_url_as_text(editor, picked.url)
-            return
-        self._insert_asset(editor, asset, alt=alt_text or "image")
+        # One step of Undo, called what was asked for.
+        with editor.undo_step(N_("Image")):
+            if not (picked.mime or "").startswith("image/"):
+                self._insert_url_as_text(editor, picked.url)
+                return
+
+            asset = self._asset_manager.adopt_library_file(
+                sha256=picked.sha256,
+                remote_url=picked.url,
+                mime=picked.mime,
+                size=picked.size,
+                alt=alt_text,
+            )
+            if asset is None:
+                self._insert_url_as_text(editor, picked.url)
+                return
+            self._insert_asset(editor, asset, alt=alt_text or "image")
+
+    def _library_name(self, media) -> str:
+        """The name a library file goes by: the one it was added with, a
+        private file's own, else the day it was added."""
+        name = self._media_store.name_of(media.hash) or self._media_visibility.name_of(media.hash)
+        uploaded = int(getattr(media, "uploaded_at_ms", 0) or 0)
+        if name or not uploaded:
+            return name
+        return i18n.format_day(QDateTime.fromMSecsSinceEpoch(uploaded), short_month=True)
 
     def _insert_url_as_text(self, editor, url: str) -> None:
         """Fallback for media that cannot be an inline image."""
         if not url_safety.is_safe_media_url(url):
-            self.status.showMessage("That link cannot be inserted.", 5000)
+            self.status.showMessage(_("That link cannot be inserted."), 5000)
             return
         cursor = editor.textCursor()
         cursor.insertText(url)
         editor.setTextCursor(cursor)
-        self.status.showMessage(f"Inserted URL only (non-image): {url}", 5000)
 
     def _insert_asset(self, editor, asset, *, alt: str) -> None:
         """Put one asset into the document. Local only, cannot fail.
@@ -3819,7 +7935,6 @@ class MainWindow(QMainWindow):
         cursor = editor.textCursor()
         cursor.insertImage(fmt)
         editor.setTextCursor(cursor)
-        self.status.showMessage(f"Inserted image · alt: {alt}", 5000)
 
     def _refresh_asset_in_documents(self, sha: str) -> None:
         """Repaint every open document that shows this asset.
@@ -3829,10 +7944,14 @@ class MainWindow(QMainWindow):
         a saved document stays saved and no backup is triggered.
         """
         key = asset_key(sha)
-        data = self._asset_manager.resolve_bytes(key)
-        if not data:
-            return
-        payload = QByteArray(data)
+        asset = self._asset_manager.get(sha)
+        if asset is not None and asset.is_media:
+            payload = self._media_card(asset)
+        else:
+            data = self._asset_manager.resolve_bytes(key)
+            if not data:
+                return
+            payload = QByteArray(data)
         for i in range(self.tabs.count()):
             ed = self._editor_from_widget(self.tabs.widget(i))
             if ed is None:
@@ -3847,7 +7966,8 @@ class MainWindow(QMainWindow):
         waiting = len(self._asset_manager.failed_assets())
         message = friendly_message(code)
         if waiting > 1:
-            message += f" {waiting} images are waiting."
+            message += " " + ngettext("{count} file is waiting.", "{count} files are waiting.",
+                                      waiting).format(count=waiting)
         self.status.showMessage(message, 8000)
 
     # -- Blossom: paste image from clipboard ------------------------------
@@ -3870,18 +7990,14 @@ class MainWindow(QMainWindow):
 
         asset = self._asset_manager.adopt_bytes(body, mime="image/png", alt="image")
         if asset is None:
-            self.status.showMessage("That image could not be added.", 5000)
+            self.status.showMessage(_("That image could not be added."), 5000)
             return
         self._insert_asset(editor, asset, alt="image")
 
         if asset.is_uploaded or self._profile_store.default() is None:
-            if not asset.is_uploaded:
-                self.status.showMessage(
-                    "Image added. Connect a signer to upload it.", 6000
-                )
-            return
+            return          # nothing of Nostr without an account
 
-        choice = load_settings().get(_PASTE_UPLOAD_SETTING, "ask")
+        choice = self._paste_choice()
         if choice == "never":
             return
         if choice != "always" and not self._confirm_paste_upload():
@@ -3895,20 +8011,32 @@ class MainWindow(QMainWindow):
         intent gesture, so the outcome of an accidental one has to be
         that nothing was published.
         """
-        hosts = ", ".join(
-            url_safety.host_of(s) or s for s in BlossomSettings().configured_servers()
-        )
-        # A paste is a quick, low-intent gesture, so Keep Local is the default.
+        # What the person decides is who can see it, which the message
+        # says; the servers are their own, listed in Media Servers. A
+        # paste is a quick, low-intent gesture, so Keep Local is the
+        # default.
         upload, remember = ask_with_checkbox(
             self,
-            title=f"Upload this image to {hosts or 'your Blossom servers'}?",
-            message=("Anyone with the link can view it. The image is already in "
-                     "your document and stays there either way."),
-            buttons=(Button("Upload", True, NORMAL), Button("Keep Local", False, DEFAULT)),
-            checkbox="Remember this choice")
+            title=_("Upload this image to your media servers?"),
+            message=_("Anyone with the link can view it. The image is already in "
+                      "your document and stays there either way."),
+            buttons=(Button(_("Upload"), True, NORMAL), Button(_("Keep Local"), False, DEFAULT)),
+            checkbox=_("Remember this choice"))
         if remember:
-            save_setting(_PASTE_UPLOAD_SETTING, "always" if upload else "never")
+            self._store_paste_choice("always" if upload else "never")
         return upload
+
+    def _paste_choice(self) -> str:
+        """What a pasted image does while an account is in use: "ask",
+        "always" (upload) or "never"."""
+        return load_settings().get(_PASTE_UPLOAD_SETTING, "ask")
+
+    def _store_paste_choice(self, value: str) -> None:
+        """The one place the choice is stored, from Settings or from the
+        alert's Remember This Choice; an open Settings window shows it."""
+        save_setting(_PASTE_UPLOAD_SETTING, value)
+        if getattr(self, "_settings_window", None) is not None:
+            self._settings_window.refresh()
 
     # ----------------------------------------------------------------------
     # NOSTR - drafts panel toggling
@@ -3924,9 +8052,23 @@ class MainWindow(QMainWindow):
         """
         if self._drafts_panel is None:
             return
-        if self._drafts_panel.isVisible():
+        panel = self._drafts_panel
+        if panel.isVisible() and panel.current_view() == panel.DRAFTS_VIEW:
             self._hide_drafts_panel()
         else:
+            panel.show_view(panel.DRAFTS_VIEW)
+            self._show_drafts_panel()
+
+    def _on_show_published(self) -> None:
+        """Nostr > Published: the panel on its Published view, or the
+        panel put away when that is what it shows."""
+        panel = self._drafts_panel
+        if panel is None:
+            return
+        if panel.isVisible() and panel.current_view() == PUBLISHED_VIEW:
+            self._hide_drafts_panel()
+        else:
+            panel.show_view(PUBLISHED_VIEW)
             self._show_drafts_panel()
 
     def _show_drafts_panel(self) -> None:
@@ -3936,27 +8078,197 @@ class MainWindow(QMainWindow):
         # If the panel currently has zero width (its first appearance),
         # split the central area so the panel gets its default width
         # while the editor keeps the remainder.
-        sizes = self._central_splitter.sizes()
-        if len(sizes) == 2 and sizes[1] <= 0:
-            total = max(sum(sizes), self._central_splitter.width())
-            panel_w = min(DEFAULT_PANEL_WIDTH, max(total - 360, 240))
-            self._central_splitter.setSizes([total - panel_w, panel_w])
+        self._give_panel_room(self._drafts_panel, DEFAULT_PANEL_WIDTH)
         self.act_nostr_drafts.setChecked(True)
         self._draft_sync.refresh()
+        self._draft_deletions.refresh()
+        self._follow_account_in_published()
+        self._update_refresh_command()
+
+    def _give_panel_room(self, panel, width: int) -> None:
+        """A side panel shown for the first time gets ``width`` from the
+        document's side; later, the width the person dragged it to."""
+        splitter = self._central_splitter
+        index = splitter.indexOf(panel)
+        sizes = splitter.sizes()
+        if index < 0 or sizes[index] > 0:
+            return
+        room = min(width, max(sizes[0] - 360, 240))
+        sizes[0] -= room
+        sizes[index] = room
+        splitter.setSizes(sizes)
 
     def _hide_drafts_panel(self) -> None:
         if self._drafts_panel is None:
             return
+        if self._drafts_panel.isAncestorOf(QApplication.focusWidget()):
+            # Its keys go back to the document, as Article Details' do.
+            target = self._pane_focus_target(self._central_splitter.widget(0))
+            if target is not None:
+                target.setFocus()
         self._drafts_panel.hide()
         self.act_nostr_drafts.setChecked(False)
+        self._update_refresh_command()
+
+    def _refresh_drafts_panel(self) -> None:
+        """Nostr > Refresh Drafts: the panel's view shown reads again."""
+        if self._drafts_panel is not None and self._drafts_panel.isVisible():
+            self._drafts_panel.refresh_shown_view()
+
+    def _update_refresh_command(self, *_view) -> None:
+        """Refresh is named for the panel's view shown, and offered while
+        the panel is shown with an account in use."""
+        action = getattr(self, "act_refresh_drafts", None)
+        panel = getattr(self, "_drafts_panel", None)
+        if action is None or panel is None:
+            return
+        action.setText(panel.refresh_name())
+        action.setEnabled(panel.isVisible() and self._profile_store.default() is not None)
 
     # ----------------------------------------------------------------------
     # NOSTR - drafts panel signal handlers
     # ----------------------------------------------------------------------
 
+    def _follow_account_in_published(self, *_view) -> None:
+        """The Published view shows the account in use. It reads the
+        relays only while it is shown: shown, it gets the account now;
+        hidden, it lets go of another account's items at once and reads
+        when it is shown next."""
+        view = getattr(self, "_published_view", None)
+        if view is None:
+            return
+        profile = self._profile_store.default()
+        shown = (self._drafts_panel.isVisible()
+                 and self._drafts_panel.current_view() == PUBLISHED_VIEW)
+        held = view.model.account
+        if shown:
+            view.set_account(profile)
+        elif held is not None and (profile is None or profile.user_pubkey.lower()
+                                   != held.user_pubkey.lower()):
+            view.set_account(None)
+
+    def _on_published_status(self, text: str) -> None:
+        if text:
+            self.status.showMessage(text, 8000)
+        else:
+            self.status.clearMessage()
+
+    def _on_published_open(self, item) -> None:
+        """Edit a published article in a tab bound to it: publishing the
+        tab replaces the article (same identifier) and keeps the date it
+        first went out, with its summary, cover and hashtags; saving it
+        as a draft offers the same article. A tab that already holds the
+        article, or a draft of it, comes forward instead.
+
+        An article published from here keeps its draft under the same
+        identifier, often with changes not published yet: that draft is
+        what opens when it holds the published text, and otherwise the
+        person chooses (Open Draft is the default), so the unpublished
+        words are never hidden behind the published ones."""
+        if not item.is_article:
+            return
+        author = str(item.event.get("pubkey") or "").lower()
+        for i in range(self.tabs.count()):
+            ed = self._editor_from_widget(self.tabs.widget(i))
+            if ed is not None and self._edits_article(ed, item.identifier, author):
+                self.tabs.setCurrentIndex(i)
+                return
+        draft = self._draft_of_published(item)
+        if draft is not None:
+            if draft.state is not DraftState.READY:
+                # Its words are not known yet (still being decrypted, or
+                # the signer app did not answer): nothing to compare, and
+                # nothing to open as the draft.
+                choice = ask(
+                    self, title=_("This article has a draft that can’t be shown yet."),
+                    message=_("The draft couldn’t be decrypted. Double-click it in the Drafts "
+                              "panel to try again, or open the version that is published now.")
+                    if draft.state is DraftState.FAILED else
+                    _("The draft is still being decrypted. Choose Edit again once its title "
+                      "shows in the Drafts panel, or open the version that is published now."),
+                    buttons=(Button(_("Open Published Version"), "published", NORMAL),
+                             Button(_("Cancel"), None, DEFAULT)))
+            elif draft.content == str(item.event.get("content") or ""):
+                choice = "draft"
+            else:
+                choice = ask(
+                    self, title=_("This article has a draft with changes you haven’t "
+                                  "published."),
+                    message=_("Open the draft to go on with it, or open the version that "
+                              "is published."),
+                    buttons=(Button(_("Cancel"), None, CANCEL),
+                             Button(_("Open Published Version"), "published", NORMAL),
+                             Button(_("Open Draft"), "draft", DEFAULT)))
+            if choice == "draft":
+                self._on_panel_open_draft(item.identifier)
+            if choice != "published":
+                return
+        self.new_tab()
+        ed = self.current_editor()
+        if ed is None:
+            return
+        self._load_markdown(ed, str(item.event.get("content") or ""))
+        ed.document().setModified(False)
+        details = ArticleDetails.from_tags(item.event.get("tags") or [],
+                                           signer=str(item.event.get("pubkey") or ""))
+        ed._published_article = details.with_changes(
+            identifier=item.identifier, title=details.title or item.title,
+            published_at=item.first_published)
+        ed._published_author = str(item.event.get("pubkey") or "").lower()
+        self._update_tab_title()
+
+    def _draft_of_published(self, item):
+        """The account's article draft with the published article's
+        identifier, or None (drafts are known for the account in use only)."""
+        author = str(item.event.get("pubkey") or "").lower()
+        if author != (self._draft_store.profile_pubkey or "").lower():
+            return None
+        record = self._draft_store.get(item.identifier)
+        return record if record is not None and record.is_article else None
+
+    def _edits_article(self, ed, identifier: str, author: str) -> bool:
+        """Whether a tab holds ``author``'s article ``identifier``: a draft
+        of it, or, with no draft, opened from the Published view. A draft
+        decides when there is one (saved under another identifier, the tab
+        is that other article now), as it does for the tab's details and
+        name. Another account's article of the same identifier is another
+        article."""
+        binding = getattr(ed, "_draft_binding", None)
+        if binding is not None:
+            return (binding.inner_kind == INNER_KIND_LONG_FORM
+                    and binding.identifier == identifier
+                    and binding.profile_pubkey.lower() in ("", author))
+        article = getattr(ed, "_published_article", None)
+        return (article is not None and article.identifier == identifier
+                and getattr(ed, "_published_author", "") == author)
+
+    def _open_draft_relays(self) -> None:
+        """Draft Relays…: where the account in use keeps its drafts, in a
+        sheet on this window."""
+        profile = self._profile_store.default()
+        if profile is None:
+            return
+        relays = PrivateDraftRelays(
+            profile=profile, pool=self._relay_pool, session_pool=self._session_pool,
+            directory=self._relay_directory, entitled_relays=self._entitled_relays)
+        sheet = DraftRelaysSheet(relays, is_dark=self.is_dark_theme, parent=self)
+        relays.setParent(sheet)                   # it goes with the sheet
+        sheet.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+        sheet.saved.connect(self._on_draft_relays_saved)
+        sheet.open()
+
+    def _on_draft_relays_saved(self, relays: list) -> None:
+        if relays:
+            text = ngettext("Drafts are now saved only on the relay you chose.",
+                            "Drafts are now saved only on the {count} relays you chose.",
+                            len(relays)).format(count=len(relays))
+        else:
+            text = _("Drafts are saved on your usual relays again.")
+        self.status.showMessage(text, 8000)
+
     def _on_panel_copy_event_id(self, event_id: str) -> None:
         if event_id:
-            self.status.showMessage(f"Copied event id {event_id[:10]}…", 3000)
+            self.status.showMessage(_("Copied event id {id}…").format(id=event_id[:10]), 3000)
 
     def _on_panel_open_draft(self, identifier: str) -> None:
         """Open a draft into a new editor tab.
@@ -3967,7 +8279,7 @@ class MainWindow(QMainWindow):
         record = self._draft_store.get(identifier)
         if record is None or record.state is not DraftState.READY:
             self.status.showMessage(
-                "Draft isn't ready to open yet - still decrypting.", 4000
+                _("Draft isn't ready to open yet - still decrypting."), 4000
             )
             return
 
@@ -3987,7 +8299,7 @@ class MainWindow(QMainWindow):
         ed = self.current_editor()
         if ed is None:
             return
-        ed.setPlainText(record.content)
+        self._load_draft_content(ed, record)
         ed.document().setModified(False)
         active = self._profile_store.default()
         ed._draft_binding = DraftBinding(
@@ -4008,7 +8320,7 @@ class MainWindow(QMainWindow):
     def _on_panel_publish_draft(self, identifier: str) -> None:
         """Promote a draft to a real (signed, public) Nostr publish.
 
-        Routes through the existing publish dialogs. The simplest path:
+        Routes through the existing publish sheets. The simplest path:
         open the draft into a tab (so all current-tab-reading plumbing
         keeps working) then trigger the appropriate publish action.
         """
@@ -4031,18 +8343,19 @@ class MainWindow(QMainWindow):
         signer round-trip - no relay re-fetch.
         """
         self._draft_sync.retry_decrypt(identifier)
-        self.status.showMessage("Retrying decryption - approve on your signer…", 6000)
+        self.status.showMessage(_("Trying again. Approve the request in your signer "
+                                  "app\u2026"), 6000)
 
     def _on_panel_delete_drafts(self, identifiers: list) -> None:
         """Delete one draft or twenty, through one question and one run.
 
         Drafts written by other Nostr clients can use inner kinds this
-        editor does not speak (kind 30024, used by Habla and Yakihonne
-        for long-form drafts, is the common one). Tombstoning one of
-        those from here could leave it visible in the client that made
-        it, so they are separated out before anything is confirmed and
-        named in the confirmation rather than failing partway through a
-        run the user already approved.
+        editor does not speak (an article draft, kind 30024, is read as
+        an article: nostr/drafts.py). Tombstoning one of those from here
+        could leave it visible in the client that made it, so they are
+        separated out before anything is confirmed and named in the
+        confirmation rather than failing partway through a run the user
+        already approved.
         """
         profile = self._profile_store.default()
         if profile is None or not identifiers:
@@ -4057,7 +8370,7 @@ class MainWindow(QMainWindow):
             if record.inner_kind in SUPPORTED_INNER_KINDS:
                 deletable.append((identifier, record.inner_kind))
             else:
-                skipped.append(record.title or "Untitled")
+                skipped.append(record.title or _("Untitled"))
 
         if not deletable:
             self._warn_all_drafts_foreign(skipped)
@@ -4070,13 +8383,13 @@ class MainWindow(QMainWindow):
         count = len(skipped)
         inform(
             self,
-            title=("This draft was created by another Nostr client"
-                   if count == 1 else
-                   f"These {count} drafts were created by other Nostr clients"),
-            message=("They use a draft format this editor doesn't recognise, so "
-                     "removing them from here might leave them visible in the other "
-                     "client.\n\nTo remove them cleanly, open them in the app that "
-                     "created them and delete them there."),
+            title=ngettext("This draft was created by another Nostr client",
+                           "These {count} drafts were created by other Nostr clients",
+                           count).format(count=count),
+            message=_("They use a draft format this editor doesn't recognise, so "
+                      "removing them from here might leave them visible in the other "
+                      "client.\n\nTo remove them cleanly, open them in the app that "
+                      "created them and delete them there."),
             details="\n".join(skipped))
 
     def _confirm_draft_deletion(
@@ -4085,37 +8398,77 @@ class MainWindow(QMainWindow):
         count = len(deletable)
         if count == 1:
             record = self._draft_store.get(deletable[0][0])
-            name = record.title if (record and record.title) else "this draft"
-            heading = f"Delete \u201c{name}\u201d from your Nostr drafts?"
+            if record and record.title:
+                heading = _("Delete \u201c{name}\u201d from your Nostr drafts?").format(
+                    name=record.title)
+            else:
+                heading = _("Delete \u201cthis draft\u201d from your Nostr drafts?")
+            action = _("Delete")
         else:
-            heading = f"Delete {count} drafts from your Nostr drafts?"
+            heading = ngettext("Delete {count} draft from your Nostr drafts?",
+                               "Delete {count} drafts from your Nostr drafts?",
+                               count).format(count=count)
+            action = ngettext("Delete {count} Draft", "Delete {count} Drafts",
+                              count).format(count=count)
 
-        lines = [
-            "A blank-content replacement will be published to your relays. "
-            "Other clients (and your other devices) will treat "
-            f"{'the draft' if count == 1 else 'them'} as removed. This action "
-            "can't be undone."
-        ]
-        if count > 1:
-            # Said before the first prompt appears rather than discovered
-            # at the fourth: each deletion is separately signed, so this
-            # is a row of approvals on the user's phone, not one.
-            lines.append(
-                f"Your signer will ask you to approve each one, so expect "
-                f"{count} requests. You can stop partway through."
-            )
+        # A draft whose slug holds a secret key is deleted by a request, not
+        # by a replacement (DraftDeleteJob), so the key isn't sent again.
+        keyed = sum(1 for identifier, _kind in deletable if refs.secret_keys_in(identifier))
+        replaced = count - keyed
+        lines = []
+        if replaced:
+            lines.append(ngettext(
+                "A blank-content replacement will be published to your relays. "
+                "Other clients (and your other devices) will treat the draft as removed. "
+                "This action can't be undone.",
+                "A blank-content replacement will be published to your relays. "
+                "Other clients (and your other devices) will treat them as removed. "
+                "This action can't be undone.", replaced))
+        if keyed:
+            lines.append(ngettext(
+                "A draft whose link name holds a secret key is deleted by a request instead, "
+                "which doesn't send the key again. Your other devices, and apps that "
+                "follow such requests, will treat it as removed. This action can't be "
+                "undone.",
+                "Drafts whose link names hold a secret key are deleted by a request each "
+                "instead, which doesn't send the keys again. Your other devices, and apps "
+                "that follow such requests, will treat them as removed. This action can't "
+                "be undone.", keyed))
+        # Said before the first prompt appears rather than discovered at
+        # the fourth: each deletion is separately signed, and an imported
+        # draft's takes a second request that tells other apps it is gone
+        # (engine review M7), so this is a row of approvals on the phone.
+        # (A keyed draft's one request is its deletion: no second one.)
+        imported = sum(1 for identifier in self._imported_draft_wraps(deletable)
+                       if not refs.secret_keys_in(identifier))
+        requests = count + imported
+        profile = self._profile_store.default()
+        signs_here = profile is not None and getattr(profile, "is_local", False)
+        if requests > 1 and not signs_here:
+            lines.append(ngettext(
+                "Your signer app will ask you to approve each one, so expect "
+                "{count} request. You can stop partway through.",
+                "Your signer app will ask you to approve each one, so expect "
+                "{count} requests. You can stop partway through.",
+                requests).format(count=requests))
+            if imported:
+                lines.append(ngettext(
+                    "An imported draft takes a second request, which tells other apps "
+                    "it is gone.",
+                    "Imported drafts take a second request each, which tells other "
+                    "apps they are gone.", imported))
         if skipped:
             n = len(skipped)
-            lines.append(
-                f"{n} draft{'' if n == 1 else 's'} from another Nostr client "
-                f"{'is' if n == 1 else 'are'} not included, and will be left "
-                "alone."
-            )
+            lines.append(ngettext(
+                "{count} draft from another Nostr client is not included, and will be "
+                "left alone.",
+                "{count} drafts from another Nostr client are not included, and will be "
+                "left alone.", n).format(count=n))
         return confirm_destructive(
             self, title=heading, message="\n\n".join(lines),
-            action="Delete" if count == 1 else f"Delete {count} Drafts",
+            action=action,
             caution=True,
-            details=("Not included:\n" + "\n".join(skipped)) if skipped else "")
+            details=(_("Not included:") + "\n" + "\n".join(skipped)) if skipped else "")
 
     def _run_draft_deletion(
         self, profile, deletable: List[Tuple[str, int]],
@@ -4123,16 +8476,18 @@ class MainWindow(QMainWindow):
         try:
             job = DraftBulkDeleteJob(
                 relay_pool=self._relay_pool,
-                relay_list_cache=self._relay_list_cache,
+                relay_directory=self._relay_directory,
                 session_pool=self._session_pool,
                 entitled_relays=self._entitled_relays(),
                 profile=profile,
                 targets=deletable,
+                announce=self._draft_wraps_to_name(deletable),
                 parent=self,
             )
         except ValueError as exc:
-            inform(self, title="Couldn't start the deletion",
-                   message=f"These drafts can't be removed from here.\n\n{exc}")
+            inform(self, title=_("Couldn't start the deletion"),
+                   message=_("These drafts can't be removed from here.\n\n{error}").format(
+                       error=exc))
             return
 
         total = job.total
@@ -4142,8 +8497,8 @@ class MainWindow(QMainWindow):
             # be able to see and get out of. A single deletion is fast
             # enough that a dialog would flash.
             progress = QProgressDialog(
-                "Deleting drafts…", "Stop", 0, total, self)
-            progress.setWindowTitle("Deleting drafts")
+                _("Deleting drafts…"), _("Stop"), 0, total, self)
+            progress.setWindowTitle(_("Deleting drafts"))
             progress.setWindowModality(Qt.WindowModal)
             progress.setMinimumDuration(0)
             progress.setAutoClose(False)
@@ -4153,17 +8508,55 @@ class MainWindow(QMainWindow):
 
         def on_progress(done: int, count: int) -> None:
             if progress is not None and not progress.wasCanceled():
-                progress.setLabelText(f"Deleting draft {min(done + 1, count)} of {count}…")
+                progress.setLabelText(_("Deleting draft {current} of {total}…").format(
+                    current=min(done + 1, count), total=count))
                 progress.setValue(done)
 
         job.progress.connect(on_progress)
-        job.tombstoned.connect(lambda d, _eid: self._draft_store.remove(d))
+        job.tombstoned.connect(self._on_draft_tombstoned)
         job.finished.connect(
             lambda deleted, failures: self._on_draft_deletion_finished(
                 deleted, failures, total, progress,
             )
         )
         job.start()
+
+    def _on_draft_tombstoned(self, identifier: str, event_id: str) -> None:
+        """A draft deleted here: remembered as deleted, as a request from
+        another app would be (engine review L13). Removing it only let an
+        older copy a slower relay still sends bring it back until the
+        blanked wrap came round; every version up to now is gone, and one
+        saved later on another device is a new draft and stays."""
+        self._draft_store.apply_deletion(identifier, int(time.time()), event_id,
+                                         request=True)
+
+    def _imported_draft_wraps(self, deletable: List[Tuple[str, int]]) -> dict:
+        """``{d: wrap id}`` for the imported drafts among ``deletable``.
+
+        Their deletion is announced to apps that read only NIP-09
+        requests too (EINUNDZWANZIG STANDUP), so a post deleted here is
+        never imported there again."""
+        found = {}
+        for identifier, _kind in deletable:
+            record = self._draft_store.get(identifier)
+            if record is None:
+                continue
+            if identifier.startswith(IMPORT_IDENTIFIER_PREFIX) or any(
+                    tag and tag[0] == IMPORT_SOURCE_TAG for tag in record.inner_tags):
+                found[identifier] = record.event_id
+        return found
+
+    def _draft_wraps_to_name(self, deletable: List[Tuple[str, int]]) -> dict:
+        """``{d: wrap id}`` for the drafts whose deletion names their wrap:
+        the imported ones, and those whose slug holds a secret key, which
+        are deleted by their wrap's id alone (DraftDeleteJob), so that the
+        deletion does not send the key again."""
+        found = self._imported_draft_wraps(deletable)
+        for identifier, _kind in deletable:
+            record = self._draft_store.get(identifier)
+            if record is not None and refs.secret_keys_in(identifier):
+                found[identifier] = record.event_id
+        return found
 
     def _on_draft_deletion_finished(
         self, deleted: int, failures: list, total: int, progress,
@@ -4172,21 +8565,27 @@ class MainWindow(QMainWindow):
             progress.close()
         if not failures:
             self.status.showMessage(
-                "Draft deleted." if deleted == 1
-                else f"{deleted} drafts deleted.", 5000,
+                ngettext("Draft deleted.", "{count} drafts deleted.",
+                         deleted).format(count=deleted), 5000,
             )
             return
 
         # A partial result reported as a whole one is how a user comes to
         # believe a draft is gone when it is not, so the count that did
         # not go is the headline and the reasons are one click away.
+        if deleted:
+            title = ngettext("{deleted} of {total} draft deleted",
+                             "{deleted} of {total} drafts deleted",
+                             total).format(deleted=deleted, total=total)
+        else:
+            title = _("No drafts were deleted")
         inform(
             self,
-            title=(f"{deleted} of {total} drafts deleted"
-                   if deleted else "No drafts were deleted"),
-            message=(f"{len(failures)} could not be removed and "
-                     f"{'is' if len(failures) == 1 else 'are'} still on your relays. "
-                     "You can try again."),
+            title=title,
+            message=ngettext("{count} could not be removed and is still on your relays. "
+                             "You can try again.",
+                             "{count} could not be removed and are still on your relays. "
+                             "You can try again.", len(failures)).format(count=len(failures)),
             caution=True,
             details="\n".join(
                 f"{identifier[:16]}: {reason}" for identifier, reason in failures))
@@ -4202,8 +8601,8 @@ class MainWindow(QMainWindow):
             # The panel may be closed, and this is the same condition that
             # makes publishing fail, so it belongs in the window too.
             self.status.showMessage(
-                "Your signer is not responding. Open your signer app and "
-                "make sure it is running.", 8000,
+                _("Your signer app is not responding. Open it and make sure it is "
+                  "running."), 8000,
             )
 
     def _on_draft_sync_bunker_error(self, message: str) -> None:
@@ -4262,8 +8661,9 @@ class MainWindow(QMainWindow):
                     # confirmation - surface and bail rather than fall
                     # through to a save under the wrong identity.
                     inform(
-                        self, title="That profile isn't connected anymore",
-                        message="Pair it again from Nostr > Connect Signer to save here.")
+                        self, title=_("That account isn\u2019t signed in anymore"),
+                        message=_("Connect it again with Nostr > Connect Signer "
+                                  "App\u2026 to save here."))
                     return
                 # After the switch, the binding now matches active, so
                 # we proceed normally below.
@@ -4316,9 +8716,11 @@ class MainWindow(QMainWindow):
             return
 
         prior: Optional[DraftBinding] = getattr(ed, "_draft_binding", None)
+        published = self._published_article_of(ed)
         default_kind = (
             StashKind.ARTICLE
-            if prior is not None and prior.inner_kind == INNER_KIND_LONG_FORM
+            if (prior is not None and prior.inner_kind == INNER_KIND_LONG_FORM)
+            or (prior is None and published is not None)
             else StashKind.NOTE
         )
         title_hint, slug_hint, summary_hint, existing_note_id = (
@@ -4331,6 +8733,7 @@ class MainWindow(QMainWindow):
             suggested_slug=slug_hint,
             suggested_summary=summary_hint,
             existing_note_identifier=existing_note_id,
+            kept=self._article_details_of(ed).kept_fields,
             is_dark=self.is_dark_theme,
             parent=self,
         )
@@ -4338,15 +8741,34 @@ class MainWindow(QMainWindow):
             return
 
         choice: StashChoice = dlg.choice
+        if not self._may_replace_draft(prior, choice.identifier):
+            return
         if not self._confirm_images_uploaded(ed):
             return
         flavor = "markdown" if choice.kind is StashKind.ARTICLE else "note"
         inner = self._build_inner_for_choice(
-            profile, choice, self._publish_text(ed, flavor)
+            profile, choice, self._publish_text(ed, flavor),
+            details=self._article_details_of(ed),
         )
         if inner is None:
             return
         self._fire_draft_publish_job(ed, profile, choice, inner)
+
+    def _may_replace_draft(self, prior: Optional[DraftBinding], identifier: str) -> bool:
+        """Saving as a draft under an identifier another draft has replaces
+        that draft on every device: asked first, the way Save As asks before
+        it replaces a file (Cancel is the default). A tab bound to that
+        draft just saves it again."""
+        if prior is not None and prior.identifier == identifier:
+            return True
+        existing = self._draft_store.get(identifier)
+        if existing is None:
+            return True
+        return confirm_destructive(
+            self, title=_("A draft named “{name}” already exists. Do you want to replace "
+                          "it?").format(name=existing.title or identifier),
+            message=_("Replacing it overwrites its text on all your devices."),
+            action=_("Replace"))
 
     def _restash_with_binding(self, ed, binding: DraftBinding) -> None:
         """Silent re-save of a draft-bound tab - no dialogs.
@@ -4364,15 +8786,10 @@ class MainWindow(QMainWindow):
         if profile is None:
             return
 
-        # Pull summary off the cached record so re-stashes don't drop
-        # metadata that's only stored in the inner event tags. Title is
-        # already on the binding.
-        summary = ""
-        record = self._draft_store.get(binding.identifier)
-        if record is not None:
-            for tag in record.inner_tags:
-                if len(tag) >= 2 and tag[0] == "summary" and not summary:
-                    summary = tag[1]
+        # Every detail the draft holds goes into the new version (review
+        # F4: an imported draft lost its cover, hashtags, first
+        # publication date and source here). The title is the binding's.
+        details = self._article_details_of(ed)
 
         kind = (
             StashKind.ARTICLE
@@ -4382,14 +8799,14 @@ class MainWindow(QMainWindow):
         choice = StashChoice(
             kind=kind,
             identifier=binding.identifier,
-            title=binding.title,
-            summary=summary,
+            title=details.title or binding.title,
+            summary=details.summary,
         )
         if not self._confirm_images_uploaded(ed):
             return
         flavor = "markdown" if kind is StashKind.ARTICLE else "note"
         inner = self._build_inner_for_choice(
-            profile, choice, self._publish_text(ed, flavor)
+            profile, choice, self._publish_text(ed, flavor), details=details
         )
         if inner is None:
             return
@@ -4418,8 +8835,8 @@ class MainWindow(QMainWindow):
         # ask the signer to encrypt nothing. Matches the same guard the
         # publish-note and publish-article flows already use.
         if not str(inner.get("content", "")).strip():
-            inform(self, title="Nothing to save as a draft",
-                   message="The current document is empty. Add some content first.")
+            inform(self, title=_("Nothing to save as a draft"),
+                   message=_("The current document is empty. Add some content first."))
             return
         # Pre-flight the plaintext cap with a friendly message rather
         # than letting the publish job fail mid-pipeline. The job also
@@ -4427,19 +8844,19 @@ class MainWindow(QMainWindow):
         try:
             payload_bytes = len(serialize_inner_event(inner).encode("utf-8"))
         except (KeyError, TypeError, ValueError):
-            inform(self, title="Couldn't prepare the draft",
-                   message="Its contents could not be prepared for encryption.")
+            inform(self, title=_("Couldn't prepare the draft"),
+                   message=_("Its contents could not be prepared for encryption."))
             return
         if payload_bytes > MAX_INNER_PAYLOAD_BYTES:
-            inform(self, title="This draft is too large",
-                   message=(f"It has {payload_bytes:,} bytes, and NIP-44 encryption "
-                            f"allows {MAX_INNER_PAYLOAD_BYTES:,}. Split it into smaller "
-                            "drafts or publish it directly."))
+            inform(self, title=_("This draft is too large"),
+                   message=_("It has {size} bytes, and encryption allows {limit}. "
+                             "Split it into smaller drafts or publish it directly.").format(
+                       size=_number(payload_bytes), limit=_number(MAX_INNER_PAYLOAD_BYTES)))
             return
 
         job = DraftPublishJob(
             relay_pool=self._relay_pool,
-            relay_list_cache=self._relay_list_cache,
+            relay_directory=self._relay_directory,
             session_pool=self._session_pool,
             entitled_relays=self._entitled_relays(),
             profile=profile,
@@ -4455,12 +8872,87 @@ class MainWindow(QMainWindow):
             self._on_draft_stashed(_ed, _choice, eid, ts, _inner)
         )
         job.failed.connect(
-            lambda reason: inform(self, title="Couldn't save the draft", message=reason)
+            lambda reason: inform(self, title=_("Couldn't save the draft"), message=reason)
         )
         # Register before starting so a synchronous failure path can't
         # leave the tab thinking nothing is in flight.
         self._attach_active_stash(ed, job)
         job.start()
+
+    def _published_article_of(self, ed) -> Optional[ArticleDetails]:
+        """The published article a tab edits (from the Published view),
+        while its author is the account in use; None otherwise. Under
+        another account the tab is a plain document: publishing it must
+        not take the other account's identifier or first date."""
+        article = getattr(ed, "_published_article", None) if ed is not None else None
+        if article is None:
+            return None
+        profile = self._profile_store.default()
+        author = getattr(ed, "_published_author", "")
+        if profile is None or author != profile.user_pubkey.lower():
+            return None
+        return article
+
+    def _article_details_of(self, ed) -> ArticleDetails:
+        """The details of the article in a tab. Those set in the tab win
+        (Article Details, the publish window, a Markdown file's front
+        matter): one model for all of them. Else those its draft holds (an
+        imported article's cover, hashtags, first publication date and
+        source among them), with the tab's own identifier and title.
+        Empty for a tab that is no article draft.
+
+        An article published from this computer since its draft was last
+        saved gets its first publication date from this computer's record,
+        so the next save puts it into the draft, and every device that
+        opens the draft keeps the date."""
+        own = tab_details.details_of(ed) if ed is not None else None
+        if own is not None:
+            return own
+        binding = getattr(ed, "_draft_binding", None) if ed is not None else None
+        if binding is None or binding.inner_kind != INNER_KIND_LONG_FORM:
+            # An article opened from the Published view carries its own.
+            return self._published_article_of(ed) or ArticleDetails()
+        record = self._draft_store.get(binding.identifier)
+        details = (ArticleDetails.from_tags(record.inner_tags, signer=binding.profile_pubkey)
+                   if record is not None
+                   else ArticleDetails())
+        details = details.with_changes(identifier=binding.identifier,
+                                       title=binding.title or details.title)
+        first_publications = getattr(self, "_first_publications", None)
+        profile = (self._profile_store.default()
+                   if getattr(self, "_profile_store", None) is not None else None)
+        if details.published_at is None and first_publications is not None and profile:
+            details = details.with_changes(published_at=first_publications.get(
+                profile.user_pubkey, binding.identifier))
+        return details
+
+    def _ask_can_receive_zaps(self, pubkey: str, hint: str, answer) -> None:
+        """Whether a co-author's profile names a lightning address."""
+        can_receive_zaps(self._relay_pool, self._relay_directory, pubkey, hint, answer,
+                         parent=self._article_details_panel)
+
+    def _author_of(self, profile) -> Tuple[str, str]:
+        """(pubkey, relay hint) of the account ``profile`` writes as: how
+        an article names its author and where they can be found."""
+        directory = getattr(self, "_relay_directory", None)
+        return (profile.user_pubkey,
+                directory.relay_hint(profile.user_pubkey) if directory is not None else "")
+
+    def _set_article_details(self, ed, details: ArticleDetails) -> None:
+        """The details of the article in ``ed``, as set in Article Details or
+        the publish window: kept with the tab (its next draft save, its
+        restart and crash records, a Markdown file's front matter), but for
+        those its file keeps as written (ArticleDetails.kept). A change
+        marks the tab modified, as a change to its text does."""
+        if ed is None:
+            return
+        details = self._article_details_of(ed).with_details_of(details)
+        if details == self._article_details_of(ed):
+            return
+        tab_details.hold(ed, details)
+        ed.document().setModified(True)
+        if ed is self.current_editor():
+            self._fill_article_details_panel()
 
     def _stash_defaults_for(
         self,
@@ -4491,6 +8983,17 @@ class MainWindow(QMainWindow):
                     if len(tag) >= 2 and tag[0] == "summary" and not summary:
                         summary = tag[1]
 
+        published = self._published_article_of(ed)
+        if prior is None and published is not None:
+            # An article opened from the Published view: the same article.
+            title, slug, summary = published.title, published.identifier, published.summary
+        own = tab_details.details_of(ed)
+        if own is not None:
+            # As set in Article Details (or a file's front matter).
+            title = own.title or title
+            summary = own.summary or summary
+            slug = slug or own.identifier
+
         if not title:
             # Fall back to the file basename without extension.
             path = getattr(ed, "_file_path", None)
@@ -4505,20 +9008,22 @@ class MainWindow(QMainWindow):
         profile: Profile,
         choice: StashChoice,
         content: str,
+        *,
+        details: Optional[ArticleDetails] = None,
     ) -> Optional[dict]:
         """Compose the inner unsigned event from the kind-picker choice.
 
-        For articles we also seed the ``title`` / ``summary`` / ``d``
-        tags so promoting the draft to a real NIP-23 publish later has
-        the metadata it needs.
+        An article draft carries all of the article's details (d, title,
+        summary, cover, hashtags, first publication date, source), so
+        publishing it later has every one of them. The choice's
+        identifier, title and summary win over ``details``; saved under
+        another identifier, it is another article, with a first
+        publication of its own.
         """
         tags: list[list[str]] = []
         if choice.kind is StashKind.ARTICLE:
-            tags.append(["d", choice.identifier])
-            if choice.title:
-                tags.append(["title", choice.title])
-            if choice.summary:
-                tags.append(["summary", choice.summary])
+            tags = _details_saved_as(details, choice).draft_tags(
+                content, author=self._author_of(profile))
         try:
             return build_inner_event(
                 kind=choice.kind.value,
@@ -4527,7 +9032,7 @@ class MainWindow(QMainWindow):
                 tags=tags,
             )
         except ValueError as exc:
-            inform(self, title="Couldn't prepare the draft", message=str(exc))
+            inform(self, title=_("Couldn't prepare the draft"), message=str(exc))
             return None
 
     def _on_draft_stashed(
@@ -4554,13 +9059,9 @@ class MainWindow(QMainWindow):
             title=choice.title or (choice.identifier if choice.kind is StashKind.NOTE else ""),
             profile_pubkey=active.user_pubkey.lower() if active else "",
         )
-        # A successful stash clears the modified flag - the tab's
-        # contents now match the latest draft snapshot on the network.
-        ed.document().setModified(False)
-        self._update_tab_title()
-
         # Optimistic store update - by the time the relay echo arrives
-        # via DraftSync, the panel already shows the row.
+        # via DraftSync, the panel already shows the row. First, so that
+        # nothing read after this point finds the draft as it was.
         self._draft_store.upsert_from_inner(
             identifier=choice.identifier,
             inner=inner,
@@ -4568,6 +9069,24 @@ class MainWindow(QMainWindow):
             created_at=created_at,
             expiration=None,
         )
+        # The tab's article is what was just saved: its model holds exactly
+        # that (title, summary, cover, hashtags, co-authors, zaps), so
+        # Article Details goes on showing it, never an older draft. The
+        # tab's own details as typed (hashtags in their case, which the
+        # draft's tags are not), else those the draft holds.
+        if choice.kind is StashKind.ARTICLE:
+            own = tab_details.details_of(ed)
+            tab_details.hold(ed, _details_saved_as(
+                own if own is not None else ArticleDetails.from_tags(
+                    inner.get("tags") or [], signer=str(inner.get("pubkey") or "")), choice))
+        # A successful stash clears the modified flag - the tab's
+        # contents now match the latest draft snapshot on the network.
+        ed._recovered_title = ""
+        ed.document().setModified(False)
+        self._update_tab_title()
+        if ed is self.current_editor():
+            # A note or an article now, with the draft's address.
+            self._fill_article_details_panel()
 
     def _editor_widget_index(self, ed) -> int:
         """Return the tab index that hosts ``ed``, or -1 if not found.
@@ -4596,7 +9115,7 @@ class MainWindow(QMainWindow):
         return getattr(ed, "_active_stash_job", None) is not None
 
     def _stash_already_running_message(self) -> None:
-        self.status.showMessage("Already saving this draft - wait for it to finish.", 4000)
+        self.status.showMessage(_("Already saving this draft - wait for it to finish."), 4000)
 
     def _attach_active_stash(self, ed, job) -> None:
         ed._active_stash_job = job
@@ -4658,24 +9177,27 @@ class MainWindow(QMainWindow):
             if p is not None:
                 return p.display_name or p.npub_short()
             if pk:
-                return f"{pk[:8]}…{pk[-4:]}"
-            return "(unknown profile)"
+                return short_npub(pk)
+            return _("(unknown account)")
 
         active_label = _label_for(active, active.user_pubkey if active else "")
         original_label = _label_for(original, original_pubkey)
 
         buttons = []
         if original is not None:
-            buttons.append(Button(f"Switch to {original_label} and Save", "switch", NORMAL))
+            buttons.append(Button(_("Switch to {name} and Save").format(name=original_label),
+                                  "switch", NORMAL))
         if allow_fork:
-            buttons.append(Button(f"Save a Copy as {active_label}", "fork", NORMAL))
-        buttons.append(Button("Cancel", "cancel", DEFAULT))
+            buttons.append(Button(_("Save a Copy as {name}").format(name=active_label),
+                                  "fork", NORMAL))
+        buttons.append(Button(_("Cancel"), "cancel", DEFAULT))
         return ask(
             self,
-            title=(f"This draft was last saved as {original_label}, but you're "
-                   f"signed in as {active_label}"),
-            message=("Saving under the current profile would create a separate "
-                     "draft. How would you like to handle it?"),
+            title=_("This draft was last saved as {original}, but you're "
+                    "signed in as {active}").format(original=original_label,
+                                                    active=active_label),
+            message=_("Saving under the current account would create a separate "
+                      "draft. How would you like to handle it?"),
             buttons=buttons, caution=True)
 
     def _switch_active_profile_to(self, pubkey_hex: str) -> bool:
@@ -4722,7 +9244,7 @@ class MainWindow(QMainWindow):
             # If the tab isn't dirty, silently refresh - there's
             # nothing to conflict with.
             if not ed.document().isModified():
-                ed.setPlainText(record.content)
+                self._load_draft_content(ed, record)
                 ed.document().setModified(False)
                 binding.event_id = record.event_id
                 binding.created_at = record.created_at
@@ -4731,6 +9253,43 @@ class MainWindow(QMainWindow):
                 continue
             # Local edits + remote update → show the banner.
             self._show_conflict_banner(container, ed, record)
+
+    @staticmethod
+    def _load_markdown(ed, content: str) -> None:
+        """Put Markdown in the editor so that nothing of it is lost.
+
+        Markdown the editor can hold all of opens with its formatting
+        shown (footnotes as their text), and is written back the same.
+        Anything else (raw HTML, an image without alt text, a footnote of
+        two paragraphs, a draft saved as plain text by an earlier version)
+        opens as its Markdown text, and is saved and published exactly as
+        written."""
+        if holds_faithfully(content):
+            read_markdown(ed.document(), content)
+            # Mentions, kept as bare addresses, read back as names; only
+            # while a Nostr account is in use (without one the editor shows
+            # nothing of Nostr, so an address stays as it is written).
+            if ed.nostr_in_use():
+                rich_text.link_references(
+                    ed.document(), getattr(ed, "_mention_label", None) or refs.person_name)
+            ed._loaded_as_markdown = True
+            ed._markdown_source = False
+        else:
+            ed.setPlainText(content)
+            ed._markdown_source = True
+        # Undo starts here: undoing the load would empty the tab.
+        ed.document().clearUndoRedoStacks()
+
+    @classmethod
+    def _load_draft_content(cls, ed, record) -> None:
+        """Put a draft's text in the editor the way it was written: an
+        article draft is Markdown, a note is plain text."""
+        if record.inner_kind == INNER_KIND_LONG_FORM:
+            cls._load_markdown(ed, record.content)
+        else:
+            ed.setPlainText(record.content)
+            ed._markdown_source = False
+            ed.document().clearUndoRedoStacks()
 
     def _show_conflict_banner(self, container, ed, record) -> None:
         """Insert (or update) the per-tab conflict banner."""
@@ -4764,15 +9323,25 @@ class MainWindow(QMainWindow):
         banner.deleteLater()
 
     def _on_conflict_view(self, identifier: str) -> None:
-        # View = open the remote version in a brand-new tab without
-        # touching the conflicted one.
-        self._on_panel_open_draft(identifier)
+        """View: the other device's version in a new tab of its own, not
+        bound to the draft, so comparing it changes nothing. (Opening the
+        draft would only bring the conflicted tab to the front.)"""
+        record = self._draft_store.get(identifier)
+        if record is None or record.state is not DraftState.READY:
+            return
+        self.new_tab()
+        ed = self.current_editor()
+        if ed is None:
+            return
+        self._load_draft_content(ed, record)
+        ed.document().setModified(False)
+        self._update_tab_title()
 
     def _on_conflict_reload(self, ed, identifier: str) -> None:
         record = self._draft_store.get(identifier)
         if record is None or record.state is not DraftState.READY:
             return
-        ed.setPlainText(record.content)
+        self._load_draft_content(ed, record)
         ed.document().setModified(False)
         binding = getattr(ed, "_draft_binding", None)
         if binding is not None:
@@ -4781,3 +9350,88 @@ class MainWindow(QMainWindow):
             binding.title = record.title
         self._update_tab_title()
         self._dismiss_conflict_banner(ed)
+
+
+def _details_saved_as(details: Optional[ArticleDetails], choice: StashChoice) -> ArticleDetails:
+    """An article's details as a draft is saved with them: the identifier,
+    title and summary chosen in Save as Draft win; under another identifier
+    it is another article, with a first publication of its own."""
+    base = details or ArticleDetails()
+    if base.identifier and base.identifier != choice.identifier:
+        base = base.with_changes(published_at=None)
+    return base.with_changes(identifier=choice.identifier, title=choice.title,
+                             summary=choice.summary)
+
+
+def _media_asset(assets, name: str):
+    """The audio or video asset the object named ``name`` is, or None."""
+    sha = parse_asset_key(name)
+    asset = assets.get(sha) if sha else None
+    return asset if asset is not None and asset.is_media else None
+
+
+class _MediaRead:
+    """An audio or video file being read for a document, off the UI thread,
+    which can be dropped (its document closes, the app quits) at whatever
+    point it has reached. Whether its copy is kept in the local store and
+    whether it is dropped are decided one at a time (the lock): a read
+    dropped before it keeps its copy keeps none; dropped while it keeps it
+    or after, its copy is known (``drop`` answers it) and taken out again,
+    whether or not its result is ever handled."""
+
+    WRITE_WAIT_S = 30.0       # the longest a copy of a file takes to be kept
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._written = threading.Event()
+        self._written.set()
+        self.dropped = False
+        self.handled = False
+        self._stored: Optional[str] = None
+
+    def keeping(self) -> bool:
+        """On the worker, once the file is read: whether to keep its copy."""
+        with self._lock:
+            if self.dropped:
+                return False
+            self._written.clear()
+            return True
+
+    def kept(self, sha: Optional[str]) -> None:
+        """On the worker: the copy is kept (``sha``), or failed (None)."""
+        with self._lock:
+            self._stored = sha
+            self._written.set()
+
+    def take_over(self) -> bool:
+        """On the UI thread, its result handled: the document takes the
+        copy over, unless it was dropped first. True when it did."""
+        with self._lock:
+            if self.dropped:
+                return False
+            self.handled = True
+            return True
+
+    def drop(self) -> Optional[str]:
+        """Drop it: the sha256 of a copy it kept that its result has not
+        taken over, to take out again; None when there is none. Waits for a
+        copy being kept right now."""
+        with self._lock:
+            self.dropped = True
+        self._written.wait(self.WRITE_WAIT_S)
+        with self._lock:
+            stored, self._stored = self._stored, None       # answered once
+            return None if self.handled else stored
+
+
+def _is_media(assets, name: str) -> bool:
+    """Whether the object named ``name`` is an audio or video asset."""
+    return _media_asset(assets, name) is not None
+
+
+def _published_address(asset) -> str:
+    """Where an uploaded asset is read: its address, an audio or video
+    file's with the extension of its type."""
+    if not asset.is_media:
+        return asset.remote_url
+    return media_files.address_with_extension(asset.remote_url, asset.mime)
