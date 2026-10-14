@@ -704,6 +704,31 @@ def test_a_files_own_name_is_asked_about_at_publish_and_not_before(
         assert (["d", MADE] in tags) if state == "unknown-new" else captured == []
 
 
+def test_when_nobody_can_tell_the_files_own_name_can_be_chosen_as_it_is(
+        tmp_path, captured, monkeypatch):
+    """Review round 4, L1: with no clear answer the person could wait or
+    make another article, never keep the one under the file's own name:
+    typing it gives the composed form, another name again for a Mac's
+    file. The alert offers both names, each as it would go out; Try Again
+    stays the default and Cancel backs out."""
+    from alerts import CANCEL, DEFAULT, NORMAL
+    from nostr.publisher import UNKNOWN, FirstPublication
+    alerts = []
+    monkeypatch.setattr(article_module, "ask", lambda *a, **k: alerts.append(k) or "file")
+    asked = []
+    sheet = file_article(tmp_path, asked)
+    before = int(__import__("time").time())
+    sheet._on_publish()
+    asked[-1][3](FirstPublication(UNKNOWN))
+    buttons = {button.label: button.role for button in alerts[0]["buttons"]}
+    assert buttons == {f"Publish as “{RAW}”": NORMAL, f"Publish as “{MADE}”": NORMAL,
+                       "Cancel": CANCEL, "Try Again": DEFAULT}
+    tags = captured[0]["tags"]
+    assert ["d", RAW] in tags                                  # exactly as it is
+    assert int(next(t[1] for t in tags if t[0] == "published_at")) >= before
+    assert sheet._slug_edit.text() == RAW and sheet._slug() == RAW
+
+
 @pytest.mark.parametrize("name, made", [(RAW, MADE), ("My Post", "my-post")])
 @pytest.mark.parametrize("state", ["found", "never"])
 def test_a_files_own_name_is_asked_about_also_with_a_date_in_its_front_matter(

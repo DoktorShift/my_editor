@@ -830,30 +830,43 @@ class PublishArticleDialog(QDialog):
     def _ask_when_nobody_can_tell(self, slug: str, body: str,
                                   file_names: Sequence[str] = (),
                                   known: Optional[int] = None) -> None:
-        """None of the relays the author publishes to answered: whether the
-        article went out before cannot be told, and a guess would either
-        re-date an edit or back-date a new article, or for a file's
-        article make a second one beside one under the file's own name.
-        The person decides."""
+        """The relays gave no clear answer: whether the article went out
+        before cannot be told, and a guess would either re-date an edit or
+        back-date a new article, or for a file's article make a second one
+        beside one under the file's own name. The person decides: for a
+        file's article between its own name, exactly as it is (typed, it
+        would be written in one form, another name for a Mac's file), and
+        the made one."""
         if file_names:
             message = _("None of the relays you publish to answered. Earlier versions of "
-                        "MyEditor published a file under its own name, “{name}”, so this "
-                        "article may be out already. Publishing it as new makes another "
-                        "article, dated today.").format(name=file_names[0])
+                        "MyEditor published this file under its own name, “{name}”, so the "
+                        "article may be out already under that name. Publishing it under "
+                        "another name makes a second article.").format(name=file_names[0])
+            choices = (Button(_("Publish as “{name}”").format(name=file_names[0]), "file",
+                              NORMAL),
+                       Button(_("Publish as “{name}”").format(name=slug), "new", NORMAL))
         else:
             message = _("None of the relays you publish to answered. If the article went "
                         "out before, publishing it as new gives it today's date, and "
                         "readers see it as a new article.")
+            choices = (Button(_("Publish as New"), "new", NORMAL),)
         choice = ask(
             self,
             title=_("Couldn't check whether this article was published before"),
             message=message,
-            buttons=(Button(_("Publish as New"), "new", NORMAL),
+            buttons=(*choices,
                      Button(_("Cancel"), "cancel", CANCEL),
                      Button(_("Try Again"), "again", DEFAULT)),
             is_dark=self._is_dark)
         if choice == "again":
             self._on_publish()
+        elif choice == "file":
+            slug = file_names[0]
+            self._slug_is_auto = False
+            self._kept_slug = slug
+            self._file_names = []                      # decided
+            self._slug_edit.setText(slug)
+            self._publish(slug, body, known or int(time.time()))
         elif choice == "new":
             self._publish(slug, body, known or int(time.time()))
 
