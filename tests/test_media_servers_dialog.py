@@ -310,12 +310,22 @@ def _ascii(host: str) -> str:
     "ꭺꮃ.com",                         # Cherokee
     "ıbm.com",                        # a Latin dotless ı
     "ɡoogle.com",                     # a Latin script g
+    "i̇bm.com",                        # an i with a combining dot above
+    "ꓑꓮꓬꓑꓮꓡ.com",                     # Lisu
+    "ᑭᗩᑭᗩᒪ.com",                      # Canadian Syllabics
+    "ⲣⲁⲩⲣⲁⲗ.com",                     # Coptic
+    "ⵔⵏⵔ.com",                        # Tifinagh
+    "g००gle.com",                     # digits of another script
+    "ıbm中文.com",                    # Latin mixed with Han
+    "media例え.jp",                   # Latin mixed with Japanese
 ])
 def test_a_host_that_could_pass_for_a_latin_one_is_shown_in_ascii(tmp_path, host):
-    """Whatever the domain: a label that mixes scripts, is written in a
-    script with letters that pass for Latin ones (outside that script's
-    own countries' domains), or uses a Latin letter that passes for
-    another, is shown in its ASCII form."""
+    """Whatever the domain, a label is shown as written only when its
+    letters are all of one script that passes for no Latin one (Han with
+    Hiragana and Katakana counting as one), Latin with no letter that
+    passes for another, or a script that does pass for Latin under its
+    own countries' domains; and its digits are ASCII. Any other is shown
+    in its ASCII form."""
     dialog, _settings, _changes = sheet(tmp_path)
     dialog.address.setText(f"https://{host}")
     dialog.add_button.click()
@@ -325,8 +335,8 @@ def test_a_host_that_could_pass_for_a_latin_one_is_shown_in_ascii(tmp_path, host
 
 @pytest.mark.parametrize("host", [
     "bücher.de", "münchen.com", "société.com", "straße.de", "smørrebrød.com",
-    "例え.jp", "ドメイン名例.jp", "media例え.jp", "例子.cn", "예시.kr",
-    "пример.рф", "παράδειγμα.gr", "مثال.com", "उदाहरण.com",
+    "例え.jp", "ドメイン名例.jp", "佐々木.jp", "例子.cn", "예시.kr",
+    "пример.рф", "παράδειγμα.gr", "مثال.com", "उदाहरण.com", "דוגמה.com", "ตัวอย่าง.com",
 ])
 def test_a_host_in_another_script_is_shown_as_written(tmp_path, host):
     dialog, _settings, _changes = sheet(tmp_path)

@@ -91,11 +91,13 @@ def server_address(text: str) -> Tuple[Optional[str], str]:
     return (origin, "") if url_safety.is_safe_media_url(origin) else (None, "https")
 
 
-# Scripts written together: Japanese, Korean and Chinese names mix their
-# own with Latin and Han.
-_WRITTEN_TOGETHER = (frozenset({"LATIN", "CJK", "HIRAGANA", "KATAKANA"}),
-                     frozenset({"LATIN", "CJK", "HANGUL"}),
-                     frozenset({"LATIN", "CJK", "BOPOMOFO"}))
+# Scripts with no letter that passes for a Latin one, as Safari lists
+# them: a label all in one of them is shown as written. Japanese writes
+# three of them together.
+_DISTINCT_SCRIPTS = frozenset({"ARABIC", "BOPOMOFO", "CJK", "DEVANAGARI", "GUJARATI",
+                               "GURMUKHI", "HANGUL", "HEBREW", "HIRAGANA", "KATAKANA",
+                               "TAMIL", "THAI"})
+_JAPANESE = frozenset({"CJK", "HIRAGANA", "KATAKANA"})
 # Scripts with letters that pass for Latin ones, and the domains of the
 # countries that write them, where a name in them is expected.
 _PASSES_FOR_LATIN = {
@@ -103,7 +105,6 @@ _PASSES_FOR_LATIN = {
                            "ru", "su", "ua", "bg", "rs", "by", "kz", "mk", "mn"}),
     "GREEK": frozenset({"gr", "ελ"}),
     "ARMENIAN": frozenset({"am", "հայ"}),
-    "CHEROKEE": frozenset(),
 }
 # Latin letters beyond ASCII and its accented forms that are their own
 # and don't pass for another (the dotless ı, a script ɡ, small capitals do).
@@ -127,26 +128,28 @@ def _display_host(host: str) -> str:
 
 
 def _lookalike(label: str, domain: str) -> bool:
-    """Whether a label could pass for another: it mixes scripts (beyond
-    those written together), is in a script with letters that pass for
-    Latin ones outside its own countries' domains, or has a Latin letter
-    that passes for another."""
-    letters = [ch for ch in label if ch.isalpha()]
-    scripts = {_script(ch) for ch in letters}
-    if len(scripts) > 1:
-        return not any(scripts <= together for together in _WRITTEN_TOGETHER)
-    if scripts == {"LATIN"}:
-        return any(not unicodedata.normalize("NFD", ch)[0].isascii()
-                   and ch not in _DISTINCT_LATIN for ch in letters)
-    script = next(iter(scripts), "")
-    return script in _PASSES_FOR_LATIN and domain not in _PASSES_FOR_LATIN[script]
+    """Whether a label could pass for another. It can't when its digits
+    are ASCII and its letters are all Latin with none that passes for
+    another, all of one script with no such letter (Japanese's three
+    count as one), or of a script with such letters under a domain of
+    a country that writes it."""
+    if any(unicodedata.category(ch)[0] == "N" and not ch.isascii() for ch in label):
+        return True
+    scripts = {_script(ch) for ch in label if ch.isalpha()}
+    if scripts <= {"LATIN"}:
+        return not all(ch.isascii() or ch in _DISTINCT_LATIN
+                       or (ch.isalpha() and unicodedata.normalize("NFD", ch)[0].isascii())
+                       for ch in label)
+    if scripts <= _JAPANESE or len(scripts) == 1 and scripts <= _DISTINCT_SCRIPTS:
+        return False
+    return len(scripts) > 1 or domain not in _PASSES_FOR_LATIN.get(scripts.pop(), ())
 
 
 def _script(ch: str) -> str:
     """The script a letter is written in, as its Unicode name begins."""
     name = unicodedata.name(ch, "")
     first = name.split(" ")[0] if name else "UNKNOWN"
-    return "KATAKANA" if first == "KATAKANA-HIRAGANA" else first
+    return {"KATAKANA-HIRAGANA": "KATAKANA", "IDEOGRAPHIC": "CJK"}.get(first, first)
 
 
 def _address_problem(problem: str) -> str:
