@@ -44,7 +44,7 @@ from PySide6.QtWidgets import (
 
 import theme
 from atomic_file import read_json, write_json
-from i18n import _, ngettext
+from i18n import N_, _, ngettext
 from url_safety import is_safe_external_url
 from commands import platform_keys, standard_and
 from widgets import FindBar
@@ -188,7 +188,7 @@ def _with_keys(words: str, keys: QKeySequence) -> str:
 # (Option-Command-1 and 2 on a Mac, see below).
 # Find (Ctrl+F) and Copy (Ctrl+C) are the window's Edit commands, which
 # act on the reader in a PDF tab; they are listed, not bound, here.
-MOVE, ZOOM, FIND = "Move Around", "Zoom", "Find and Copy"
+MOVE, ZOOM, FIND = N_("Move Around"), N_("Zoom"), N_("Find and Copy")
 
 
 def reader_keys():

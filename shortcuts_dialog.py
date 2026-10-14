@@ -1,597 +1,623 @@
 # SPDX-FileCopyrightText: 2026 rinbal
 # SPDX-License-Identifier: AGPL-3.0-or-later
-"""Keyboard-shortcuts cheat sheet - modal dialog with a "mega menu" feel.
+"""Help > Keyboard Shortcuts: every key MyEditor answers to, to look up
+and to learn.
 
-Style brief:
-  - Category cards laid out in two responsive columns.
-  - Each row reads ``[kbd-style key caps]  [action label]`` so the
-    shortcut is the first thing the eye lands on.
-  - A live search field at the top filters across all categories at
-    once; an empty result hides the corresponding card so the layout
-    doesn't have awkward gaps.
-  - Theme-aware (dark + light pair) and Unicode-only glyphs so the
-    dialog renders identically on macOS, Windows, and Linux.
+A window of its own beside the document, as the Character Viewer or a
+Help viewer is: not modal, one of it (the command brings it to the
+front), closed with Escape or Command-W (Ctrl+W), and where it was left
+the next time. Laid out after System Settings and Mail: a search field
+on top, a sidebar of categories below it (a pop-up menu instead when the
+window is narrow), and the category's keys on the right, in sections,
+the ones used most first. Each row names what a key does and draws the
+keys at the trailing end, as menus do, in the platform's own notation
+(shortcut_catalog.shown). A command that does nothing right now is
+dimmed, with the reason in a few words (Nostr's say it needs an account,
+rather than hiding).
 
-The window's commands and their shortcuts come from the command list
-(commands.py, see ``CommandRegistry.shortcut_groups``), so a new or
-changed shortcut shows here by itself. Only keys that are not commands
-(Tab, Esc, the PDF reader's keys) are listed in ``OTHER_KEYS`` below.
+The search finds a row by its words, in any case and without accents,
+and by its keys however they are typed ("cmd b", "⌘B", "ctrl+b").
+Type a Shortcut takes the next key combination pressed and shows what it
+does, or says that it does nothing. Down goes from the field to the
+list; Return or a double-click there does the command, in the document
+window, which comes to the front.
 
-Keys are shown the way the computer in use writes them: on a Mac in
-Apple's symbols and order (⌃⌥⇧⌘, as in menus), elsewhere as Ctrl+Shift+S
-with the key names of the reader's keyboard (Strg, Umschalt in German).
-The list is the one for this platform, since the commands' keys follow
-each platform's conventions.
+Native widgets only, in the app's palette and system font: the keys are
+drawn as quiet key caps in the palette's own colors. The rows come from
+shortcut_catalog.build_rows, which reads the command list and the
+in-window tables, so the window cannot list a key that does not work.
 """
 
 from __future__ import annotations
 
-import sys
-from dataclasses import dataclass
-from typing import List, Optional, Tuple
+from typing import Callable, List, Optional
 
-from PySide6.QtCore import Qt
-from PySide6.QtGui import QKeySequence, QShortcut
+from PySide6.QtCore import QEvent, QKeyCombination, QRect, QSize, Qt, QTimer
+from PySide6.QtGui import QFont, QFontMetrics, QKeySequence, QPainter, QPalette, QPen, QShortcut
 from PySide6.QtWidgets import (
+    QApplication,
+    QComboBox,
     QDialog,
-    QDialogButtonBox,
-    QFrame,
-    QGridLayout,
     QHBoxLayout,
     QLabel,
     QLineEdit,
-    QScrollArea,
+    QListWidget,
+    QListWidgetItem,
+    QStackedLayout,
+    QStyle,
+    QStyledItemDelegate,
+    QToolButton,
     QVBoxLayout,
     QWidget,
 )
 
-from i18n import _, pgettext
+import shortcut_catalog as catalog
+import theme
+from i18n import _
+from settings import load_settings, save_setting
+from shortcut_catalog import Row
+
+# The setting that keeps where the window was and how big.
+GEOMETRY_SETTING = "shortcuts_window_geometry"
+# Narrower than this, the sidebar gives way to a pop-up menu.
+NARROW = 600
+ALL = ""
+
+KIND_ROLE = Qt.ItemDataRole.UserRole + 1
+ROW_ROLE = Qt.ItemDataRole.UserRole + 2
+CATEGORY, SECTION, NOTE, ROW = "category", "section", "note", "row"
+
+_MODIFIER_KEYS = {Qt.Key.Key_Control, Qt.Key.Key_Shift, Qt.Key.Key_Alt, Qt.Key.Key_Meta,
+                  Qt.Key.Key_AltGr, Qt.Key.Key_CapsLock, Qt.Key.Key_unknown}
 
 
-# --------------------------------------------------------------------------- #
-# Shortcut catalogue - single source of truth for the help dialog             #
-# --------------------------------------------------------------------------- #
-
-@dataclass(frozen=True)
-class Shortcut:
-    keys: str       # the rendered key combo, e.g. "Ctrl+Shift+D"
-    action: str     # human-readable description
-
-
-@dataclass(frozen=True)
-class ShortcutGroup:
-    title: str
-    items: Tuple[Shortcut, ...]
-
-
-# Keys that are not commands of the window: the editor, the find bar
-# and the PDF reader handle them themselves. Everything that IS a command
-# (a menu item with a shortcut) comes from the command list in
-# commands.py, so the two can never disagree. Group names and keys are
-# written the command list's way (English); the window translates them
-# where it shows them.
-OTHER_KEYS: Tuple[Tuple[str, Tuple[Tuple[str, str], ...]], ...] = (
-    ("Editing", (
-        ("Tab", _("Nest a list item, or start a list")),
-        ("Shift+Tab", _("Move a list item out one level")),
-        ("Enter", _("New paragraph (on an empty list item: end the list)")),
-        ("Shift+Enter", _("Line break within the paragraph")),
-        ("Ctrl+Click", _("Open a link")),
-    )),
-    ("Search", (
-        ("Enter", _("Next match")),
-        ("Shift+Enter", _("Previous match")),
-        ("Esc", _("Close find bar")),
-    )),
-    ("PDF Reading", (
-        ("Ctrl+F", _("Find in PDF")),
-        ("Ctrl+C", _("Copy selected text")),
-        ("Esc", _("Clear selection")),
-        ("Space", _("Next screenful")),
-        ("Shift+Space", _("Previous screenful")),
-        ("J", _("Scroll down")),
-        ("K", _("Scroll up")),
-        ("N", _("Next page")),
-        ("P", _("Previous page")),
-        ("G", _("Go to page")),
-        ("Home", _("First page")),
-        ("End", _("Last page")),
-        ("Ctrl+=", _("Zoom in (also Ctrl+wheel)")),
-        ("Ctrl+-", _("Zoom out (also Ctrl+wheel)")),
-        ("Ctrl+0", _("Fit page width")),
-        ("Ctrl+1", _("Actual size")),
-        ("Ctrl+2", _("Fit whole page")),
-        ("F12", _("Toggle table of contents")),
-    )),
-)
-
-# A group's name on its card. Nostr is a name, the same in every language.
-_GROUP_TITLES = {
-    "File": pgettext("shortcut group", "File"),
-    "Editing": pgettext("shortcut group", "Editing"),
-    "Formatting": pgettext("shortcut group", "Formatting"),
-    "Insert": pgettext("shortcut group", "Insert"),
-    "Search": pgettext("shortcut group", "Search"),
-    "View": pgettext("shortcut group", "View"),
-    "Window": pgettext("shortcut group", "Window"),
-    "Help": pgettext("shortcut group", "Help"),
-    "PDF Reading": pgettext("shortcut group", "PDF Reading"),
-}
-
-# Keys as the reader's keyboard labels them (Strg and Umschalt on a
-# German one). Letters, digits and F-keys read the same everywhere.
-_KEY_NAMES = {
-    "Ctrl": pgettext("key", "Ctrl"),
-    "Shift": pgettext("key", "Shift"),
-    "Alt": pgettext("key", "Alt"),
-    "Enter": pgettext("key", "Enter"),
-    "Return": pgettext("key", "Return"),
-    "Space": pgettext("key", "Space"),
-    "Tab": pgettext("key", "Tab"),
-    "Esc": pgettext("key", "Esc"),
-    "Home": pgettext("key", "Home"),
-    "End": pgettext("key", "End"),
-    "PgUp": pgettext("key", "PgUp"),
-    "PgDown": pgettext("key", "PgDown"),
-    "Del": pgettext("key", "Del"),
-    "Backspace": pgettext("key", "Backspace"),
-    "Click": pgettext("key", "Click"),
-}
-
-IS_MAC = sys.platform == "darwin"
-
-# Apple's modifier symbols, in the order Apple writes them (HIG, Keyboards).
-# Qt names Command "Ctrl" and Control "Meta" on a Mac.
-_MAC_MODIFIERS = (("Meta", "\u2303"), ("Alt", "\u2325"), ("Shift", "\u21e7"),
-                  ("Ctrl", "\u2318"))
-_MAC_KEYS = {
-    "Enter": "\u21a9", "Return": "\u21a9", "Tab": "\u21e5", "Esc": "esc",
-    "Backspace": "\u232b", "Del": "\u2326", "Home": "\u2196", "End": "\u2198",
-    "PgUp": "\u21de", "PgDown": "\u21df", "Up": "\u2191", "Down": "\u2193",
-    "Left": "\u2190", "Right": "\u2192",
-}
+def _pressed_keys(event) -> List[str]:
+    """The combination ``event`` pressed, as the catalog writes keys
+    ("Ctrl+Shift+P"): Shift+Tab as itself, not Backtab, and, for a symbol
+    Shift makes ("}" on Shift-]), with and without the Shift."""
+    key = event.key()
+    modifiers = event.modifiers() & (Qt.KeyboardModifier.ControlModifier
+                                     | Qt.KeyboardModifier.ShiftModifier
+                                     | Qt.KeyboardModifier.AltModifier
+                                     | Qt.KeyboardModifier.MetaModifier)
+    if key == Qt.Key.Key_Backtab:
+        key = Qt.Key.Key_Tab
+        modifiers |= Qt.KeyboardModifier.ShiftModifier
+    combination = QKeySequence(QKeyCombination(modifiers, Qt.Key(key)))
+    texts = [combination.toString(QKeySequence.SequenceFormat.PortableText)]
+    symbol = not (Qt.Key.Key_A <= key <= Qt.Key.Key_Z or Qt.Key.Key_0 <= key <= Qt.Key.Key_9
+                  or key >= Qt.Key.Key_Escape)
+    if symbol and modifiers & Qt.KeyboardModifier.ShiftModifier:
+        plain = QKeySequence(QKeyCombination(modifiers & ~Qt.KeyboardModifier.ShiftModifier,
+                                             Qt.Key(key)))
+        texts.append(plain.toString(QKeySequence.SequenceFormat.PortableText))
+    return texts
 
 
-def _parts(keys: str) -> List[str]:
-    """"Ctrl+Shift+D" as its keys; "Ctrl++" (the plus key) keeps its "+"."""
-    parts = [p.strip() for p in keys.split("+")]
-    keys_found = [p for p in parts if p]
-    if keys.endswith("++"):
-        keys_found.append("+")
-    return keys_found
+class _RowDelegate(QStyledItemDelegate):
+    """Draws the list: section headings, and rows with their name at the
+    leading end and their keys as quiet key caps at the trailing end, the
+    focus ring around the row with the keyboard focus."""
+
+    def __init__(self, view: QListWidget) -> None:
+        super().__init__(view)
+        self._view = view
+
+    # -- sizes -------------------------------------------------------------------
+
+    def sizeHint(self, option, index) -> QSize:  # noqa: N802, Qt's name
+        metrics = QFontMetrics(self._view.font())
+        kind = index.data(KIND_ROLE)
+        if kind == CATEGORY:
+            return QSize(0, metrics.height() * 2 + 10)
+        if kind == SECTION:
+            return QSize(0, metrics.height() + 18)
+        if kind == NOTE:
+            lines = max(1, metrics.horizontalAdvance(index.data(Qt.ItemDataRole.DisplayRole))
+                        // max(1, self._view.viewport().width() - 40) + 1)
+            return QSize(0, metrics.lineSpacing() * lines + 14)
+        # As tall as a menu item with room to breathe: easy to read and hit.
+        return QSize(0, max(30, metrics.height() + 14))
+
+    # -- painting ----------------------------------------------------------------
+
+    def paint(self, painter: QPainter, option, index) -> None:
+        kind = index.data(KIND_ROLE)
+        palette = self._view.palette()
+        painter.save()
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        if kind == ROW:
+            self._paint_row(painter, option, index, palette)
+        else:
+            self._paint_heading(painter, option, index, palette, kind)
+        painter.restore()
+
+    def _paint_heading(self, painter, option, index, palette, kind) -> None:
+        font = QFont(self._view.font())
+        text = index.data(Qt.ItemDataRole.DisplayRole)
+        rect = option.rect.adjusted(12, 0, -12, -4)
+        if kind == CATEGORY:
+            font.setPointSizeF(font.pointSizeF() * 1.15)
+            font.setWeight(QFont.Weight.Bold)
+            color = palette.color(QPalette.ColorRole.Text)
+            flags = Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignBottom
+        elif kind == SECTION:
+            font.setWeight(QFont.Weight.DemiBold)
+            color = palette.color(QPalette.ColorRole.PlaceholderText)
+            flags = Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignBottom
+        else:
+            color = palette.color(QPalette.ColorRole.PlaceholderText)
+            flags = (Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
+                     | Qt.TextFlag.TextWordWrap)
+        painter.setFont(font)
+        painter.setPen(color)
+        painter.drawText(rect, int(flags), text)
+
+    def _paint_row(self, painter, option, index, palette) -> None:
+        row: Row = index.data(ROW_ROLE)
+        rect = option.rect.adjusted(6, 1, -6, -1)
+        selected = bool(option.state & QStyle.StateFlag.State_Selected)
+        focused = selected and self._view.hasFocus()
+        dark = theme.is_dark_active()
+        if selected:
+            fill = (palette.color(QPalette.ColorRole.Highlight) if focused
+                    else palette.color(QPalette.ColorRole.AlternateBase))
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(fill)
+            painter.drawRoundedRect(rect, 5, 5)
+        if focused:
+            # The ring stays visible on the highlight (a Mac's focus ring).
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            painter.setPen(QPen(QPalette().color(QPalette.ColorRole.Highlight) if False
+                                else _ring(dark, on_accent=True), 2))
+            painter.drawRoundedRect(rect.adjusted(1, 1, -1, -1), 5, 5)
+        text = palette.color(QPalette.ColorRole.HighlightedText if focused
+                             else QPalette.ColorRole.Text)
+        muted = text if focused else palette.color(QPalette.ColorRole.PlaceholderText)
+        if row.reason and not focused:
+            text = muted
+        font = QFont(self._view.font())
+        keys_width = self._keys_width(row, font)
+        inner = rect.adjusted(10, 0, -10, 0)
+        name_rect = QRect(inner.left(), inner.top(), inner.width() - keys_width - 16,
+                          inner.height())
+        metrics = QFontMetrics(font)
+        painter.setFont(font)
+        painter.setPen(text)
+        title = metrics.elidedText(row.title, Qt.TextElideMode.ElideRight, name_rect.width())
+        painter.drawText(name_rect, int(Qt.AlignmentFlag.AlignLeft
+                                        | Qt.AlignmentFlag.AlignVCenter), title)
+        if row.reason:
+            used = metrics.horizontalAdvance(title) + 12
+            small = QFont(font)
+            small.setPointSizeF(font.pointSizeF() * 0.9)
+            painter.setFont(small)
+            painter.setPen(muted)
+            reason_rect = name_rect.adjusted(used, 0, 0, 0)
+            reason = QFontMetrics(small).elidedText(row.reason, Qt.TextElideMode.ElideRight,
+                                                    max(0, reason_rect.width()))
+            painter.drawText(reason_rect, int(Qt.AlignmentFlag.AlignLeft
+                                              | Qt.AlignmentFlag.AlignVCenter), reason)
+        self._paint_keys(painter, row, QRect(inner.right() - keys_width, inner.top(),
+                                              keys_width, inner.height()),
+                         font, text, muted, palette, focused)
+
+    # -- key caps ----------------------------------------------------------------
+
+    def _pieces(self, row: Row):
+        """What the keys part shows: caps for each combination, with a quiet
+        "or" between two to choose from, or "to" across a run."""
+        pieces = []
+        for number, keys in enumerate(row.shown):
+            if number:
+                pieces.append(("word", _("to") if row.span else _("or")))
+            pieces.append(("keys", keys))
+        return pieces
+
+    @staticmethod
+    def _cap_font(font: QFont) -> QFont:
+        cap = QFont(font)
+        cap.setPointSizeF(font.pointSizeF() * 0.92)
+        return cap
+
+    def _keys_width(self, row: Row, font: QFont) -> int:
+        cap = QFontMetrics(self._cap_font(font))
+        plain = QFontMetrics(font)
+        width = 0
+        for kind, value in self._pieces(row):
+            if kind == "word":
+                width += plain.horizontalAdvance(value) + 12
+                continue
+            names = catalog.key_names(value)
+            width += sum(max(cap.height() + 2, cap.horizontalAdvance(n) + 12) for n in names)
+            width += 3 * (len(names) - 1)
+            if not catalog.is_mac():
+                width += (plain.horizontalAdvance("+") + 4) * (len(names) - 1)
+        return width
+
+    def _paint_keys(self, painter, row: Row, rect: QRect, font, text, muted, palette,
+                    focused) -> None:
+        cap_font = self._cap_font(font)
+        cap = QFontMetrics(cap_font)
+        plain = QFontMetrics(font)
+        height = cap.height() + 6
+        top = rect.top() + (rect.height() - height) // 2
+        x = rect.left()
+        border = text if focused else theme.check_box_border(palette)
+        fill = Qt.BrushStyle.NoBrush if focused else palette.color(QPalette.ColorRole.Base)
+        for kind, value in self._pieces(row):
+            if kind == "word":
+                painter.setFont(font)
+                painter.setPen(muted)
+                width = plain.horizontalAdvance(value) + 12
+                painter.drawText(QRect(x, rect.top(), width, rect.height()),
+                                 int(Qt.AlignmentFlag.AlignCenter), value)
+                x += width
+                continue
+            for number, name in enumerate(catalog.key_names(value)):
+                if number:
+                    if not catalog.is_mac():
+                        painter.setFont(font)
+                        painter.setPen(muted)
+                        plus = plain.horizontalAdvance("+") + 4
+                        painter.drawText(QRect(x + 1, rect.top(), plus, rect.height()),
+                                         int(Qt.AlignmentFlag.AlignCenter), "+")
+                        x += plus
+                    x += 3
+                width = max(cap.height() + 2, cap.horizontalAdvance(name) + 12)
+                box = QRect(x, top, width, height)
+                painter.setPen(QPen(border, 1))
+                painter.setBrush(fill)
+                painter.drawRoundedRect(box.adjusted(0, 0, -1, -1), 4, 4)
+                painter.setFont(cap_font)
+                painter.setPen(text)
+                painter.drawText(box, int(Qt.AlignmentFlag.AlignCenter), name)
+                x += width
 
 
-def _key_names(keys: str, *, mac: Optional[bool] = None) -> List[str]:
-    """The keys of "Ctrl+Shift+D", each named the way the computer in use
-    labels it (``mac`` says which, the one in use by default): on a Mac
-    Apple's symbols in Apple's order (⇧⌘D), elsewhere the reader's
-    keyboard's names (Strg, Umschalt)."""
-    parts = _parts(keys)
-    if not (IS_MAC if mac is None else mac):
-        return [_KEY_NAMES.get(part, part) for part in parts]
-    modifiers = dict(_MAC_MODIFIERS)
-    held = [symbol for name, symbol in _MAC_MODIFIERS if name in parts]
-    rest = [_MAC_KEYS.get(part, _KEY_NAMES.get(part, part))
-            for part in parts if part not in modifiers]
-    return held + rest
+def _ring(dark: bool, *, on_accent: bool = False):
+    from PySide6.QtGui import QColor
+    return QColor(theme.focus_ring_on_accent_color(dark) if on_accent
+                  else theme.focus_ring_color(dark))
 
 
-def groups_from(rows) -> Tuple[ShortcutGroup, ...]:
-    """``[(title, [(keys, action), ...]), ...]`` (as
-    CommandRegistry.shortcut_groups returns it) as dialog groups."""
-    return tuple(ShortcutGroup(title=title,
-                               items=tuple(Shortcut(keys, action) for keys, action in items))
-                 for title, items in rows)
+class _RingDelegate(QStyledItemDelegate):
+    """The sidebar's rows, as Qt draws them, with the focus ring around the
+    current one while the sidebar has the keyboard focus."""
+
+    def paint(self, painter, option, index) -> None:
+        super().paint(painter, option, index)
+        view = self.parent()
+        if view.hasFocus() and index == view.currentIndex():
+            painter.save()
+            painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+            painter.setPen(QPen(_ring(theme.is_dark_active()), 2))
+            painter.drawRoundedRect(option.rect.adjusted(2, 2, -2, -2), 4, 4)
+            painter.restore()
+
+    def sizeHint(self, option, index) -> QSize:  # noqa: N802, Qt's name
+        size = super().sizeHint(option, index)
+        return QSize(size.width() + 16, max(size.height(), 28))
 
 
-# --------------------------------------------------------------------------- #
-# Stylesheets                                                                 #
-# --------------------------------------------------------------------------- #
+class ShortcutsWindow(QDialog):
+    """Help > Keyboard Shortcuts (see the module docstring).
 
-_DARK_CSS = """
-QDialog#shortcuts_dialog { background: #1E1E1E; }
-QScrollArea#shortcuts_scroll { background: transparent; border: none; }
-QScrollArea#shortcuts_scroll > QWidget > QWidget { background: transparent; }
-
-QLabel#shortcuts_title { color: #FFFFFF; font-size: 16px; font-weight: 600; }
-QLabel#shortcuts_subtitle { color: #858585; font-size: 12px; }
-QLabel#shortcuts_no_results {
-    color: #858585; font-size: 12px; font-style: italic;
-    padding: 24px 0;
-}
-
-QLineEdit#shortcuts_search {
-    background: #252526;
-    color: #D4D4D4;
-    border: 1px solid #3C3C3C;
-    border-radius: 4px;
-    padding: 6px 10px;
-    selection-background-color: #264F78;
-    font-size: 12px;
-}
-QLineEdit#shortcuts_search:focus { border-color: #007ACC; }
-
-QFrame#shortcut_card {
-    background: #252526;
-    border: 1px solid #3C3C3C;
-    border-radius: 6px;
-}
-QLabel#shortcut_card_title {
-    color: #FFFFFF;
-    font-size: 12px;
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.7px;
-}
-QLabel#shortcut_action {
-    color: #D4D4D4;
-    font-size: 12px;
-    padding: 2px 0;
-}
-QLabel#shortcut_keycap {
-    background: #1E1E1E;
-    color: #DCDCDC;
-    border: 1px solid #3C3C3C;
-    border-bottom: 2px solid #2D2D30;
-    border-radius: 4px;
-    padding: 2px 6px;
-    font-family: "Noto Sans Mono", "Menlo", "Consolas", monospace;
-    font-size: 11px;
-}
-
-QPushButton {
-    background: #2D2D30;
-    color: #D4D4D4;
-    border: 1px solid #3C3C3C;
-    padding: 6px 14px;
-    border-radius: 4px;
-    min-width: 80px;
-}
-QPushButton:hover { background: #3C3C3C; }
-QPushButton:pressed { background: #1E1E1E; }
-QPushButton:default { background: #007ACC; color: #FFFFFF; border-color: #1177C7; }
-QPushButton:default:hover { background: #1177C7; }
-"""
-
-_LIGHT_CSS = """
-QDialog#shortcuts_dialog { background: #FFFFFF; }
-QScrollArea#shortcuts_scroll { background: transparent; border: none; }
-QScrollArea#shortcuts_scroll > QWidget > QWidget { background: transparent; }
-
-QLabel#shortcuts_title { color: #1A1A1A; font-size: 16px; font-weight: 600; }
-QLabel#shortcuts_subtitle { color: #777777; font-size: 12px; }
-QLabel#shortcuts_no_results {
-    color: #777777; font-size: 12px; font-style: italic;
-    padding: 24px 0;
-}
-
-QLineEdit#shortcuts_search {
-    background: #FFFFFF;
-    color: #333333;
-    border: 1px solid #CCCCCC;
-    border-radius: 4px;
-    padding: 6px 10px;
-    selection-background-color: #0078D4;
-    font-size: 12px;
-}
-QLineEdit#shortcuts_search:focus { border-color: #0078D4; }
-
-QFrame#shortcut_card {
-    background: #F8F8F8;
-    border: 1px solid #E1E1E1;
-    border-radius: 6px;
-}
-QLabel#shortcut_card_title {
-    color: #1A1A1A;
-    font-size: 12px;
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.7px;
-}
-QLabel#shortcut_action {
-    color: #333333;
-    font-size: 12px;
-    padding: 2px 0;
-}
-QLabel#shortcut_keycap {
-    background: #FFFFFF;
-    color: #1A1A1A;
-    border: 1px solid #CCCCCC;
-    border-bottom: 2px solid #BBBBBB;
-    border-radius: 4px;
-    padding: 2px 6px;
-    font-family: "Noto Sans Mono", "Menlo", "Consolas", monospace;
-    font-size: 11px;
-}
-
-QPushButton {
-    background: #ECECEC;
-    color: #333333;
-    border: 1px solid #CCCCCC;
-    padding: 6px 14px;
-    border-radius: 4px;
-    min-width: 80px;
-}
-QPushButton:hover { background: #E1E1E1; }
-QPushButton:pressed { background: #D0D0D0; }
-QPushButton:default { background: #0078D4; color: #FFFFFF; border-color: #1066B4; }
-QPushButton:default:hover { background: #1066B4; }
-"""
-
-
-# --------------------------------------------------------------------------- #
-# Internal widgets                                                            #
-# --------------------------------------------------------------------------- #
-
-def _make_keycap_row(keys: str) -> QWidget:
-    """Render a key combo as a row of pill-shaped key caps.
-
-    "Ctrl+Shift+D" becomes three caps with thin "+" separators in
-    between - closer to how Apple's Help shortcuts viewer or Sublime's
-    cheat sheet display key combos than a single bold string.
-    """
-    container = QWidget()
-    layout = QHBoxLayout(container)
-    layout.setContentsMargins(0, 0, 0, 0)
-    layout.setSpacing(3)
-    for i, part in enumerate(_key_names(keys)):
-        # A Mac writes its keys side by side (⇧⌘D), elsewhere with "+".
-        if i and not IS_MAC:
-            plus = QLabel("+")
-            plus.setObjectName("shortcut_action")
-            plus.setAlignment(Qt.AlignCenter)
-            layout.addWidget(plus)
-        cap = QLabel(part)
-        cap.setObjectName("shortcut_keycap")
-        cap.setAlignment(Qt.AlignCenter)
-        layout.addWidget(cap)
-    layout.addStretch(1)
-    return container
-
-
-class _ShortcutCard(QFrame):
-    """One titled group of shortcuts. Hides itself when its row count
-    drops to zero (used by the search filter)."""
-
-    def __init__(self, group: ShortcutGroup, parent: Optional[QWidget] = None) -> None:
-        super().__init__(parent)
-        self.setObjectName("shortcut_card")
-        self.setFrameShape(QFrame.NoFrame)
-        self._group = group
-        # Tracked separately from Qt's ``isHidden()`` because that
-        # property reports True for any widget that hasn't yet been
-        # shown - making it useless for "should this card take a grid
-        # slot?" decisions during initial construction.
-        self._filtered_out = False
-
-        outer = QVBoxLayout(self)
-        outer.setContentsMargins(14, 12, 14, 14)
-        outer.setSpacing(10)
-
-        header = QLabel(_GROUP_TITLES.get(group.title, group.title))
-        header.setObjectName("shortcut_card_title")
-        outer.addWidget(header)
-
-        # Two-column grid: keys on the left, action on the right. The
-        # action column stretches, the keys column hugs its content.
-        # Vertical spacing is generous so rows feel scannable rather
-        # than stacked tight on top of each other.
-        self._grid = QGridLayout()
-        self._grid.setContentsMargins(0, 0, 0, 0)
-        self._grid.setHorizontalSpacing(14)
-        self._grid.setVerticalSpacing(9)
-        self._grid.setColumnStretch(0, 0)
-        self._grid.setColumnStretch(1, 1)
-        outer.addLayout(self._grid)
-
-        self._rows: List[Tuple[QWidget, QLabel, Shortcut]] = []
-        for shortcut in group.items:
-            keycap = _make_keycap_row(shortcut.keys)
-            action = QLabel(shortcut.action)
-            action.setObjectName("shortcut_action")
-            action.setWordWrap(True)
-            action.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
-            row_idx = self._grid.rowCount()
-            self._grid.addWidget(keycap, row_idx, 0, Qt.AlignTop | Qt.AlignLeft)
-            # No alignment in the cell: the label then takes the column's
-            # width, and a long (or translated) action wraps onto a
-            # second line instead of being cut off.
-            self._grid.addWidget(action, row_idx, 1)
-            self._rows.append((keycap, action, shortcut))
-
-    def apply_filter(self, needle: str) -> int:
-        """Show only rows that contain ``needle`` (case-insensitive).
-
-        Returns the number of visible rows so the dialog can hide the
-        whole card when nothing matches.
-        """
-        needle = needle.strip().lower()
-        visible = 0
-        for keycap, action, shortcut in self._rows:
-            # The keys as written (Ctrl+S) and as shown (Strg+S, ⌘S) all match.
-            shown = "+".join(_key_names(shortcut.keys)) + " " + "".join(
-                _key_names(shortcut.keys))
-            text = f"{shortcut.keys} {shown} {shortcut.action}".lower()
-            match = (not needle) or (needle in text)
-            keycap.setVisible(match)
-            action.setVisible(match)
-            if match:
-                visible += 1
-        # Track whether this card should occupy a grid slot. The dialog
-        # reflows after every filter change; cards with ``_filtered_out``
-        # set are excluded from the layout so visible cards close ranks.
-        self._filtered_out = visible == 0
-        self.setVisible(not self._filtered_out)
-        return visible
-
-
-# --------------------------------------------------------------------------- #
-# Dialog                                                                      #
-# --------------------------------------------------------------------------- #
-
-class ShortcutsDialog(QDialog):
-    """Help → Keyboard Shortcuts.
-
-    A reference window styled like the keyboard-shortcuts pages found in
-    major desktop applications: category cards laid out in two columns,
-    kbd-style key caps, and a live search across all groups. It is not
-    modal: it stays open beside the document, so a key can be tried
-    while it is up.
+    ``rows`` gives the list as it is now (who can do what changes with the
+    tab in front and with Nostr); ``perform`` does a command by its id in
+    the document window and says whether it could; ``note`` gives the line
+    over a category, if any.
     """
 
-    def __init__(self, groups, *, is_dark: bool = True,
+    def __init__(self, rows: Callable[[], List[Row]], *,
+                 perform: Callable[[str], bool] = lambda _command: False,
+                 note: Callable[[str], str] = lambda _category: "",
                  parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
-        self._groups = tuple(groups)
-        self.setObjectName("shortcuts_dialog")
+        self.setObjectName("shortcuts_window")
         self.setWindowTitle(_("Keyboard Shortcuts"))
         self.setModal(False)
-        # Wide-and-tall by default so all six categories fit without
-        # scrolling on the common laptop resolutions. The dialog is
-        # resizable so users on small screens can still see everything.
-        self.resize(760, 620)
-        self._is_dark = is_dark
-        self._cards: List[_ShortcutCard] = []
-        self._build_ui()
-        self.apply_theme(is_dark)
+        self._source = rows
+        self._perform = perform
+        self._note = note
+        self._rows: List[Row] = []
+        self._captured: List[str] = []       # the keys Type a Shortcut took
+        self._build()
+        self.setMinimumSize(420, 340)
+        self._restore_geometry()
+        self.refresh()
 
-    # -- construction ------------------------------------------------------
+    # -- building ----------------------------------------------------------------
 
-    def _build_ui(self) -> None:
-        root = QVBoxLayout(self)
-        root.setContentsMargins(24, 22, 24, 18)
-        root.setSpacing(12)
-
-        title = QLabel(_("Keyboard Shortcuts"))
-        title.setObjectName("shortcuts_title")
-        root.addWidget(title)
-
-        subtitle = QLabel(_("Every key MyEditor answers to on this computer. Type to filter."))
-        subtitle.setObjectName("shortcuts_subtitle")
-        subtitle.setWordWrap(True)
-        root.addWidget(subtitle)
-
+    def _build(self) -> None:
         self._search = QLineEdit()
         self._search.setObjectName("shortcuts_search")
-        self._search.setPlaceholderText(_("Filter Shortcuts"))
+        self._search.setPlaceholderText(_("Search Shortcuts"))
         # A placeholder is not a name; a screen reader needs one of its own.
-        self._search.setAccessibleName(_("Filter Shortcuts"))
+        self._search.setAccessibleName(_("Search Shortcuts"))
         self._search.setClearButtonEnabled(True)
-        self._search.textChanged.connect(self._on_filter_changed)
-        root.addWidget(self._search)
+        self._search.textEdited.connect(self._on_search_edited)
+        self._search.installEventFilter(self)
 
-        # Scrollable area so a long category list never breaks the
-        # dialog on small displays.
-        scroll = QScrollArea()
-        scroll.setObjectName("shortcuts_scroll")
-        scroll.setWidgetResizable(True)
-        scroll.setFrameShape(QFrame.NoFrame)
-        scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
-        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self._capture = QToolButton()
+        self._capture.setText(_("Type a Shortcut"))
+        self._capture.setAccessibleName(_("Type a Shortcut"))
+        self._capture.setToolTip(_("Press a key combination to see what it does"))
+        self._capture.setCheckable(True)
+        self._capture.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        self._capture.toggled.connect(self._on_capture_toggled)
 
-        inner = QWidget()
-        self._cards_grid = QGridLayout(inner)
-        self._cards_grid.setContentsMargins(0, 0, 0, 0)
-        self._cards_grid.setHorizontalSpacing(12)
-        self._cards_grid.setVerticalSpacing(12)
-        self._cards_grid.setColumnStretch(0, 1)
-        self._cards_grid.setColumnStretch(1, 1)
+        top = QHBoxLayout()
+        top.setSpacing(8)
+        top.addWidget(self._search, 1)
+        top.addWidget(self._capture)
 
-        # Build every card up front; ``_reflow_cards`` decides where
-        # each one sits in the two-column grid. Reflow runs on every
-        # filter change so hidden cards don't leave holes in the layout.
-        self._make_cards()
+        names = [(ALL, _("All Shortcuts"))] + [(c, catalog.category_title(c))
+                                               for c in catalog.CATEGORIES]
+        self._sidebar = QListWidget()
+        self._sidebar.setObjectName("shortcuts_categories")
+        self._sidebar.setAccessibleName(_("Categories"))
+        self._sidebar.setItemDelegate(_RingDelegate(self._sidebar))
+        self._popup = QComboBox()
+        self._popup.setAccessibleName(_("Category"))
+        for key, title in names:
+            item = QListWidgetItem(title)
+            item.setData(Qt.ItemDataRole.UserRole, key)
+            self._sidebar.addItem(item)
+            self._popup.addItem(title, key)
+        width = max(self._sidebar.sizeHintForColumn(0), 140) + 24
+        self._sidebar.setFixedWidth(width)
+        self._sidebar.setCurrentRow(0)
+        self._sidebar.currentRowChanged.connect(self._on_category)
+        self._popup.currentIndexChanged.connect(self._on_category)
 
-        scroll.setWidget(inner)
-        root.addWidget(scroll, 1)
-        self._scroll = scroll
+        self._list = QListWidget()
+        self._list.setObjectName("shortcuts_list")
+        self._list.setAccessibleName(_("Shortcuts"))
+        self._list.setItemDelegate(_RowDelegate(self._list))
+        self._list.setVerticalScrollMode(QListWidget.ScrollMode.ScrollPerPixel)
+        self._list.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self._list.itemActivated.connect(lambda _item: self._perform_current())
+        self._list.installEventFilter(self)
 
-        self._no_results = QLabel(_("No shortcuts match your filter."))
-        self._no_results.setObjectName("shortcuts_no_results")
-        self._no_results.setAlignment(Qt.AlignCenter)
-        self._no_results.setVisible(False)
-        root.addWidget(self._no_results)
+        self._empty = QLabel()
+        self._empty.setObjectName("shortcuts_empty")
+        self._empty.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._empty.setWordWrap(True)
+        self._empty.setForegroundRole(QPalette.ColorRole.PlaceholderText)
+        holder = QWidget()
+        self._stack = QStackedLayout(holder)
+        self._stack.addWidget(self._list)
+        self._stack.addWidget(self._empty)
 
-        buttons = QDialogButtonBox(QDialogButtonBox.Close)
-        buttons.rejected.connect(self.reject)
-        buttons.accepted.connect(self.accept)
-        # Close is a "reject" role by default - wire its click to accept
-        # so Enter / Esc both dismiss cleanly.
-        close_btn = buttons.button(QDialogButtonBox.Close)
-        close_btn.setDefault(True)
-        close_btn.clicked.connect(self.accept)
-        root.addWidget(buttons)
-        # Command-W (Ctrl+W) closes it, as it does any window.
-        QShortcut(QKeySequence.StandardKey.Close, self).activated.connect(self.close)
+        body = QHBoxLayout()
+        body.setSpacing(12)
+        body.addWidget(self._sidebar)
+        body.addWidget(holder, 1)
 
-    def showEvent(self, event) -> None:
+        root = QVBoxLayout(self)
+        root.setContentsMargins(16, 16, 16, 16)
+        root.setSpacing(10)
+        root.addLayout(top)
+        root.addWidget(self._popup)
+        root.addLayout(body, 1)
+
+        # Visual order: the field, its toggle, the categories, the list.
+        QWidget.setTabOrder(self._search, self._capture)
+        QWidget.setTabOrder(self._capture, self._popup)
+        QWidget.setTabOrder(self._popup, self._sidebar)
+        QWidget.setTabOrder(self._sidebar, self._list)
+        # Command-W (Ctrl+W, and Ctrl+F4 on Windows) closes it, as any window.
+        close = QShortcut(QKeySequence.StandardKey.Close, self)
+        close.activated.connect(self.close)
+        self._fit_width()
+
+    # -- the list ----------------------------------------------------------------
+
+    def refresh(self) -> None:
+        """Read the list again: what works changes with the tab in front
+        and with Nostr coming into use or going out of it."""
+        self._rows = list(self._source())
+        self._fill()
+
+    def _category(self) -> str:
+        return self._sidebar.currentItem().data(Qt.ItemDataRole.UserRole)
+
+    def _visible_rows(self) -> List[Row]:
+        if self._captured:
+            found = []
+            for keys in self._captured:
+                found += [r for r in catalog.rows_for_keys(self._rows, keys) if r not in found]
+            return found
+        query = self._search.text()
+        if query.strip():
+            return [row for row in self._rows if catalog.matches(row, query)]
+        category = self._category()
+        return [row for row in self._rows if category in (ALL, row.category)]
+
+    def _fill(self) -> None:
+        current = self._list.currentItem()
+        was = current.data(ROW_ROLE) if current is not None else None
+        self._list.clear()
+        rows = self._visible_rows()
+        by_category = not self._captured and not self._search.text().strip() \
+            and self._category() != ALL
+        grouped = {}
+        for row in rows:
+            grouped.setdefault(row.category, {}).setdefault(row.section, []).append(row)
+        for category in catalog.CATEGORIES:
+            sections = grouped.get(category)
+            if not sections:
+                continue
+            if not by_category:
+                self._heading(CATEGORY, catalog.category_title(category))
+            note = self._note(category)
+            if note:
+                self._heading(NOTE, note)
+            for section, section_rows in sections.items():
+                self._heading(SECTION, section)
+                for row in section_rows:
+                    item = QListWidgetItem(row.title)
+                    item.setData(KIND_ROLE, ROW)
+                    item.setData(ROW_ROLE, row)
+                    item.setData(Qt.ItemDataRole.AccessibleTextRole, catalog.spoken_row(row))
+                    self._list.addItem(item)
+                    if row == was:
+                        self._list.setCurrentItem(item)
+        self._show_empty(not rows)
+
+    def _heading(self, kind: str, text: str) -> None:
+        item = QListWidgetItem(text)
+        item.setData(KIND_ROLE, kind)
+        item.setData(Qt.ItemDataRole.AccessibleTextRole, text)
+        # Not a stop for the arrow keys: they go from row to row.
+        item.setFlags(Qt.ItemFlag.NoItemFlags)
+        self._list.addItem(item)
+
+    def _show_empty(self, empty: bool) -> None:
+        if empty:
+            if self._captured:
+                keys = catalog.shown(self._captured[0])
+                self._empty.setText(_("{keys} does nothing in MyEditor.").format(keys=keys))
+            else:
+                self._empty.setText(_("No shortcuts for “{query}”").format(
+                    query=self._search.text().strip()))
+        self._stack.setCurrentWidget(self._empty if empty else self._list)
+
+    def rows_shown(self) -> List[Row]:
+        """The rows listed now, in order."""
+        return [self._list.item(i).data(ROW_ROLE) for i in range(self._list.count())
+                if self._list.item(i).data(KIND_ROLE) == ROW]
+
+    # -- choosing ----------------------------------------------------------------
+
+    def _on_category(self, index: int) -> None:
+        for widget in (self._sidebar, self._popup):
+            widget.blockSignals(True)
+        self._sidebar.setCurrentRow(index)
+        self._popup.setCurrentIndex(index)
+        for widget in (self._sidebar, self._popup):
+            widget.blockSignals(False)
+        if self._search.text() and not self._captured:
+            # A category chosen is a new place to look: the search ends.
+            self._search.clear()
+        self._fill()
+
+    def _on_search_edited(self, _text: str) -> None:
+        self._captured = []
+        self._fill()
+
+    def _select_first_row(self) -> bool:
+        for index in range(self._list.count()):
+            item = self._list.item(index)
+            if item.data(KIND_ROLE) == ROW:
+                self._list.setCurrentItem(item)
+                self._list.setFocus(Qt.FocusReason.TabFocusReason)
+                return True
+        return False
+
+    def _first_row_is_current(self) -> bool:
+        current = self._list.currentRow()
+        return all(self._list.item(i).data(KIND_ROLE) != ROW for i in range(current))
+
+    def _perform_current(self) -> None:
+        """Return or a double-click: the command of the row, done in the
+        document window, which comes to the front; a beep when it cannot
+        be done now or the row is a key a place handles itself."""
+        item = self._list.currentItem()
+        row = item.data(ROW_ROLE) if item is not None else None
+        if row is None or not row.command or row.reason or not self._perform(row.command):
+            QApplication.beep()
+
+    # -- Type a Shortcut ---------------------------------------------------------
+
+    def _on_capture_toggled(self, on: bool) -> None:
+        self._search.setPlaceholderText(_("Press the keys of a shortcut") if on
+                                        else _("Search Shortcuts"))
+        if on:
+            self._search.clear()
+            self._captured = []
+            self._search.setFocus(Qt.FocusReason.OtherFocusReason)
+            self._fill()
+
+    def _take_keys(self, event) -> None:
+        self._captured = _pressed_keys(event)
+        self._capture.setChecked(False)
+        self._search.setText(catalog.shown(self._captured[0]))
+        self._fill()
+
+    # -- keys --------------------------------------------------------------------
+
+    def eventFilter(self, watched, event) -> bool:  # noqa: N802, Qt's name
+        if watched is self._search and self._capture.isChecked():
+            if event.type() == QEvent.Type.ShortcutOverride:
+                event.accept()              # the keys are what to look up, not commands
+                return True
+            if event.type() == QEvent.Type.KeyPress:
+                if event.key() == Qt.Key.Key_Escape and not event.modifiers():
+                    self._capture.setChecked(False)
+                elif event.key() not in _MODIFIER_KEYS:
+                    self._take_keys(event)
+                return True
+        if event.type() != QEvent.Type.KeyPress:
+            return super().eventFilter(watched, event)
+        key = event.key()
+        if watched is self._search and key in (Qt.Key.Key_Down, Qt.Key.Key_Return,
+                                               Qt.Key.Key_Enter):
+            return self._select_first_row()
+        if watched is self._list:
+            if key in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
+                self._perform_current()
+                return True
+            if key == Qt.Key.Key_Up and self._first_row_is_current():
+                self._search.setFocus(Qt.FocusReason.BacktabFocusReason)
+                return True
+        return super().eventFilter(watched, event)
+
+    def keyPressEvent(self, event) -> None:  # noqa: N802, Qt's name
+        if event.key() == Qt.Key.Key_Escape and not event.modifiers():
+            self.close()
+            return
+        super().keyPressEvent(event)
+
+    # -- the window --------------------------------------------------------------
+
+    def showEvent(self, event) -> None:  # noqa: N802, Qt's name
         super().showEvent(event)
-        self._keep_cards_whole()
+        self._search.setFocus(Qt.FocusReason.ActiveWindowFocusReason)
+        QTimer.singleShot(0, self._update_narrow)
 
-    def _keep_cards_whole(self) -> None:
-        """Never narrower than the cards need. They do not scroll sideways,
-        so a longer translation widens the window instead of being cut off.
-        Measured when shown, once the cards have their style and fonts."""
-        cards = self._scroll.widget().minimumSizeHint().width()
-        self._scroll.setMinimumWidth(cards + self._scroll.verticalScrollBar().sizeHint().width())
-        self.setMinimumSize(max(560, self.minimumSizeHint().width()), 420)
+    def changeEvent(self, event) -> None:  # noqa: N802, Qt's name
+        super().changeEvent(event)
+        if event.type() == QEvent.Type.ActivationChange and self.isActiveWindow():
+            self.refresh()
 
-    # -- behaviour ---------------------------------------------------------
+    def resizeEvent(self, event) -> None:  # noqa: N802, Qt's name
+        super().resizeEvent(event)
+        self._update_narrow()
+
+    def _update_narrow(self) -> None:
+        narrow = self.width() < NARROW
+        self._sidebar.setVisible(not narrow)
+        self._popup.setVisible(narrow)
+
+    def _fit_width(self) -> None:
+        """Wide enough by default for the longest row in any language."""
+        self.resize(760, 560)
+
+    def _restore_geometry(self) -> None:
+        saved = load_settings().get(GEOMETRY_SETTING)
+        if isinstance(saved, str):
+            try:
+                self.restoreGeometry(bytes.fromhex(saved))
+            except ValueError:
+                pass
+
+    def hideEvent(self, event) -> None:  # noqa: N802, Qt's name
+        save_setting(GEOMETRY_SETTING, bytes(self.saveGeometry()).hex())
+        super().hideEvent(event)
 
     def apply_theme(self, is_dark: bool) -> None:
-        self._is_dark = is_dark
-        self.setStyleSheet(_DARK_CSS if is_dark else _LIGHT_CSS)
-
-    def set_groups(self, groups) -> None:
-        """List ``groups`` instead, keeping the filter typed: the window
-        stays open while Nostr comes into use or goes out of it, and lists
-        only the keys that work."""
-        for card in self._cards:
-            self._cards_grid.removeWidget(card)
-            card.deleteLater()
-        self._groups = tuple(groups)
-        self._make_cards()
-        self._on_filter_changed(self._search.text())
-
-    def _make_cards(self) -> None:
-        self._cards = [_ShortcutCard(group) for group in self._groups]
-        self._reflow_cards()
-
-    def _on_filter_changed(self, text: str) -> None:
-        total_visible = 0
-        for card in self._cards:
-            total_visible += card.apply_filter(text)
-        # Hidden cards left holes in the 2-column grid before - re-pack
-        # so the survivors fill the layout sequentially from the top.
-        self._reflow_cards()
-        self._no_results.setVisible(total_visible == 0)
-
-    def _reflow_cards(self) -> None:
-        """Re-pack visible cards into a tight two-column grid.
-
-        Qt's ``QGridLayout`` doesn't collapse empty cells when a child
-        is hidden - it preserves grid positions and leaves visible
-        gaps. Whenever the filter changes (or on first render) we
-        remove every card from the grid and re-add only the ones that
-        survived the filter, in sequential row-major order.
-        """
-        # Remove every card from its current cell. The widget objects
-        # stay alive; we just clear the layout's record of their
-        # positions so the next ``addWidget`` can place them fresh.
-        for card in self._cards:
-            self._cards_grid.removeWidget(card)
-        # Drop any row stretches left over from a previous pack so a
-        # smaller surviving set anchors at the top of the scroll area.
-        for row in range(self._cards_grid.rowCount()):
-            self._cards_grid.setRowStretch(row, 0)
-
-        visible_cards = [c for c in self._cards if not c._filtered_out]
-        for i, card in enumerate(visible_cards):
-            row = i // 2
-            col = i % 2
-            self._cards_grid.addWidget(card, row, col, Qt.AlignTop)
-        # Stretch the row just below the visible cards so survivors
-        # anchor at the top of the scroll area instead of expanding to
-        # fill it. Use ``rowCount()`` after re-adds for the right index.
-        trailing_row = max(self._cards_grid.rowCount(), 1)
-        self._cards_grid.setRowStretch(trailing_row, 1)
+        """The window draws in the app's palette; a new one only repaints it."""
+        self.update()
+        self._list.viewport().update()
