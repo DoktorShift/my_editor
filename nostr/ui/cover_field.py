@@ -22,6 +22,12 @@ servers as a public picture, with what it reveals besides its pixels
 (where and when it was taken) taken out first (media/scrub.py), and
 becomes the cover once it is there. Remove takes the cover away.
 
+The well uses the article card's wide framing and shows the source's
+dimensions, with guidance for a 16:9 cover at 1600 × 900 pixels. Adjust…
+opens a live crop: drag or use arrow keys to choose the subject's position,
+zoom, and reset. Applying uploads a separate, metadata-free still cover;
+the original is kept. The cover URL changes only when that upload succeeds.
+
 The well shows the picture of a cover from the account's media library;
 an address typed or pasted shows no preview, since downloading any
 address typed would be a surprise.
@@ -37,10 +43,11 @@ from typing import Callable, Optional
 from PySide6.QtCore import QSize, Qt, Signal
 from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import (
-    QBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton, QVBoxLayout, QWidget,
+    QBoxLayout, QLabel, QLineEdit, QPushButton, QVBoxLayout, QWidget,
 )
 
 import media_files
+from constants import DARK_MUTED_FG, LIGHT_MUTED_FG
 from i18n import _
 
 from ..blossom.hashes import hash_from_url
@@ -53,9 +60,11 @@ from ..profiles import Profile
 from .media_library_dialog import MediaLibraryDialog
 from .media_saver import MediaSaver
 from .publish_copy_dialog import resolve_pick
+from .cover_crop_dialog import CoverCropDialog
+from .flow_layout import FlowLayout
 from .thumbnail_loader import ThumbnailLoader
 
-THUMB = QSize(144, 84)
+THUMB = QSize(144, 81)             # the same 16:9 framing as the article card
 
 
 @dataclass(frozen=True)
@@ -208,8 +217,15 @@ class CoverImageField(QWidget):
         self.remove_button.setAccessibleName(_("Remove Cover Image"))
         self.remove_button.setAutoDefault(False)
         self.remove_button.clicked.connect(self.url_edit.clear)
+        self.adjust_button = QPushButton(_("Adjust…"))
+        self.adjust_button.setAccessibleName(_("Adjust Cover Image"))
+        self.adjust_button.setToolTip(_("Choose a cover format and move the frame to keep your subject in view."))
+        self.adjust_button.setAutoDefault(False)
+        self.adjust_button.clicked.connect(self.adjust)
+        self.adjust_button.setVisible(media_store is not None)
+        self.adjust_button.setEnabled(False)
 
-        buttons = [button for button in (self.pick_button, self.remove_button) if button]
+        buttons = [button for button in (self.pick_button, self.adjust_button, self.remove_button) if button]
         # Said under the field where there is room (stacked); never for a
         # cover kept as written in its file (setReadOnly).
         self._hint: Optional[QLabel] = None
@@ -223,12 +239,9 @@ class CoverImageField(QWidget):
             label.setBuddy(self.url_edit)
             column.addWidget(label)
             column.addWidget(self.url_edit)
-            row = QHBoxLayout()
-            row.setContentsMargins(0, 0, 0, 0)
-            row.setSpacing(6)
+            row = FlowLayout(spacing=6)
             for button in buttons:
                 row.addWidget(button)
-            row.addStretch(1)
             column.addLayout(row)
             hint = QLabel(_("Pictures you pick are uploaded to your media servers.")
                           if media_store is not None
@@ -238,7 +251,10 @@ class CoverImageField(QWidget):
             column.addWidget(hint)
             self._hint = hint
         else:
-            row = QBoxLayout(QBoxLayout.Direction.LeftToRight, self)
+            outer = QVBoxLayout(self)
+            outer.setContentsMargins(0, 0, 0, 0)
+            outer.setSpacing(4)
+            row = QBoxLayout(QBoxLayout.Direction.LeftToRight)
             row.setContentsMargins(0, 0, 0, 0)
             row.setSpacing(12)
             row.addWidget(self.preview, 0, Qt.AlignmentFlag.AlignTop)
@@ -249,8 +265,21 @@ class CoverImageField(QWidget):
                 column.addWidget(button, 0, Qt.AlignmentFlag.AlignLeft)
             column.addStretch(1)
             row.addLayout(column, 1)
+            outer.addLayout(row)
             # The address is the window's to place; until then it is not shown.
             self.url_edit.hide()
+        self._guidance = QLabel(_("Wide 16:9 is recommended. Aim for 1600 × 900 px."))
+        self._guidance.setWordWrap(True)
+        self._guidance.setObjectName("article_field_hint")
+        self.layout().addWidget(self._guidance)
+        self._dimensions = QLabel()
+        self._dimensions.setWordWrap(True)
+        self._dimensions.setObjectName("article_field_hint")
+        self.layout().addWidget(self._dimensions)
+        self._dimensions.hide()
+        self.set_dark(is_dark)
+        for previous, following in zip(buttons, buttons[1:]):
+            QWidget.setTabOrder(previous, following)
         self._show_placeholder(_("No cover\nselected"))
         self.remove_button.setVisible(False)
 
@@ -297,6 +326,8 @@ class CoverImageField(QWidget):
         self._read_only = read_only
         if self._hint is not None:
             self._hint.setVisible(not read_only)
+        self._guidance.setVisible(not read_only)
+        self.adjust_button.setVisible(not read_only and self._media_store is not None)
         self._enable()
 
     def setBusy(self, busy: bool) -> None:  # noqa: N802, Qt's name
@@ -312,11 +343,36 @@ class CoverImageField(QWidget):
         if self.pick_button is not None:
             self.pick_button.setEnabled(not fixed)
         self.remove_button.setEnabled(not fixed)
+        self.adjust_button.setEnabled(not fixed and not self.uploading() and not self._picture.isNull())
 
     def set_dark(self, is_dark: bool) -> None:
         self._is_dark = is_dark
+        muted = DARK_MUTED_FG if is_dark else LIGHT_MUTED_FG
+        for label in (self._guidance, self._dimensions):
+            label.setStyleSheet(f"color: {muted};")
 
     # -- choosing a picture -------------------------------------------------
+
+    def adjust(self) -> None:
+        """Upload a crop as a new cover; cancellation leaves the document untouched."""
+        if (self._read_only or self._busy or self.uploading() or self._media_store is None
+                or self._picture.isNull()):
+            return
+        owner, address = self._owner, self.text()
+        profile_key = getattr(self._profile(), "user_pubkey", None)
+        dialog = CoverCropDialog(self._picture.toImage(), is_dark=self._is_dark,
+                                 jpeg=(media_files.type_of(address) == "image/jpeg"), parent=self)
+        try:
+            accepted = dialog.exec()
+            cover = dialog.cover
+        finally:
+            dialog.deleteLater()
+        # A nested sheet still processes account/tab/cover changes.
+        if (not accepted or cover is None or owner is not self._owner or address != self.text()
+                or profile_key != getattr(self._profile(), "user_pubkey", None)
+                or self._read_only or self._busy or self.uploading()):
+            return
+        self._start_upload(cover.data, cover.mime, "cover" + media_files.extension_for(cover.mime))
 
     def choose(self) -> None:
         """The Media Library's picker for a cover (choose_picture; a cover
@@ -369,15 +425,17 @@ class CoverImageField(QWidget):
         except ScrubError as exc:
             self.problem.emit(_("This picture can’t be a cover: {reason}.").format(reason=exc))
             return
+        self._start_upload(public.data, public.mime, os.path.basename(path) or "cover")
+
+    def _start_upload(self, data: bytes, mime: str, name: str) -> None:
         # The upload is known by a name of its own: another upload of a
         # file of the same name (from the Media Library) is not this one.
-        stem, extension = os.path.splitext(os.path.basename(path) or "cover")
+        stem, extension = os.path.splitext(name)
         self._uploading = f"{stem}-{uuid.uuid4().hex[:8]}{extension}"
         self._upload_owner = self._owner
         self._show_placeholder(_("Uploading…"))
         self.uploading_changed.emit(True)
-        self._media_store.upload_bytes(public.data, name=self._uploading,
-                                       mime_type=public.mime)
+        self._media_store.upload_bytes(data, name=self._uploading, mime_type=mime)
 
     def _on_upload_progress(self, name: str, sent: int, total: int) -> None:
         if self.uploading() and name == self._uploading and total > 0:
@@ -442,6 +500,8 @@ class CoverImageField(QWidget):
         self._thumb_hash = ""
         had_picture = not self._picture.isNull()
         self._picture = QPixmap()
+        self._dimensions.hide()
+        self._enable()
         self.preview.setPixmap(QPixmap())
         self.preview.setText(words)
         if had_picture:
@@ -451,8 +511,15 @@ class CoverImageField(QWidget):
         if sha.lower() != self._thumb_hash or pix.isNull():
             return
         self._picture = pix
-        self.preview.setPixmap(pix.scaled(
-            THUMB.width() - 2, THUMB.height() - 2,
-            Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation))
+        size = THUMB - QSize(2, 2)
+        filled = pix.scaled(size, Qt.AspectRatioMode.KeepAspectRatioByExpanding,
+                            Qt.TransformationMode.SmoothTransformation)
+        self.preview.setPixmap(filled.copy((filled.width() - size.width()) // 2,
+                                           (filled.height() - size.height()) // 2,
+                                           size.width(), size.height()))
         self.preview.setText("")
+        self._dimensions.setText(_("Selected image: {width} × {height} px").format(
+            width=pix.width(), height=pix.height()))
+        self._dimensions.show()
+        self._enable()
         self.picture_changed.emit()
