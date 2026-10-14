@@ -41,7 +41,7 @@ from typing import List, NamedTuple, Optional, Sequence
 from PySide6.QtCore import (
     QDate, QDateTime, QLocale, QModelIndex, QPointF, QRect, QRectF, QSize, Qt,
 )
-from PySide6.QtGui import QColor, QFont, QFontMetrics, QPainter, QPainterPath, QPen
+from PySide6.QtGui import QColor, QFont, QFontMetrics, QPainter, QPainterPath, QPen, QPixmap
 from PySide6.QtWidgets import QAbstractItemView, QStyle, QStyledItemDelegate, QToolTip
 
 import format_icons
@@ -179,6 +179,21 @@ def row_height() -> int:
 def section_height() -> int:
     return (scaled(SECTION_PAD_TOP) + QFontMetrics(section_font()).height()
             + scaled(SECTION_PAD_BOTTOM))
+
+
+def symbol_pixmap(name: str, size: int, color: QColor, dpr: float = 2.0) -> QPixmap:
+    """A glyph (format_icons.paint) as a ``size`` point pixmap, for the
+    symbol over an empty list's title, as Apple's empty states have one."""
+    pixmap = QPixmap(round(size * dpr), round(size * dpr))
+    pixmap.setDevicePixelRatio(dpr)
+    pixmap.fill(Qt.GlobalColor.transparent)
+    painter = QPainter(pixmap)
+    format_icons.paint(name, painter, QRectF(0, 0, size, size), color)
+    painter.end()
+    return pixmap
+
+
+EMPTY_SYMBOL_SIZE = 34
 
 
 class PostRowDelegate(QStyledItemDelegate):

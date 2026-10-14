@@ -160,8 +160,8 @@ from .drafts_preview import (
 )
 from .eliding_label import ElidingLabel
 from .post_list import (
-    FAILED, LOADING, READY, ROW_ROLE, PostRow, PostRowDelegate, list_date, section_height,
-    section_starts, words_after_title,
+    EMPTY_SYMBOL_SIZE, FAILED, LOADING, READY, ROW_ROLE, PostRow, PostRowDelegate, list_date,
+    section_height, section_starts, symbol_pixmap, words_after_title,
 )
 from .imports_glyphs import glyph
 
@@ -1417,6 +1417,13 @@ class DraftsPanel(QFrame):
         empty_layout.setContentsMargins(GUTTER, 24, GUTTER, 24)
         empty_layout.setSpacing(8)
         empty_layout.addStretch(1)
+        # A quiet symbol over the title, as Apple's empty states have one;
+        # decoration, so a screen reader passes over it.
+        self._empty_symbol = QLabel()
+        self._empty_symbol.setAlignment(Qt.AlignCenter)
+        self._empty_symbol.setAccessibleName("")
+        self._empty_symbol_name = ""
+        empty_layout.addWidget(self._empty_symbol)
         self._empty_title = QLabel("")
         self._empty_title.setObjectName("drafts_panel_empty_title")
         self._empty_title.setAlignment(Qt.AlignCenter)
@@ -1526,6 +1533,8 @@ class DraftsPanel(QFrame):
         self._preview.apply_theme(is_dark)
         if hasattr(self, "_imports_row"):
             self._imports_row.update()
+        if hasattr(self, "_empty_symbol"):
+            self._paint_empty_symbol()
         if getattr(self, "_row_delegate", None) is not None:
             self._row_delegate.set_dark(is_dark)
 
@@ -1811,6 +1820,7 @@ class DraftsPanel(QFrame):
                 _("Your signer app can’t decrypt drafts"),
                 _("Drafts are encrypted in a way this signer app can’t open. To use "
                   "drafts, connect a signer app that can, such as Amber or nsec.app."),
+                symbol="alert",
             )
             return
         # Only when there is nothing readable to show. A signer that went
@@ -1823,8 +1833,9 @@ class DraftsPanel(QFrame):
                 _("Your signer app is not responding"),
                 _("Drafts stay encrypted until your signer app unlocks them. Open "
                   "your signer app, make sure it is running, then try again."),
-                action=_("Try again"),
+                action=_("Try Again"),
                 on_action=self.retry_signer.emit,
+                symbol="alert",
             )
             return
         if self._store is None or len(self._store) == 0:
@@ -1837,12 +1848,13 @@ class DraftsPanel(QFrame):
                 # the list and the banner narrates the wait.
                 self._body_stack.setCurrentIndex(0)
                 return
-            body = _("Press {shortcut} in any tab to save its contents "
-                     "as an encrypted draft on Nostr. Drafts sync to your other "
-                     "devices that use the same account.")
+            body = _("Press {shortcut} in any tab to save it as an encrypted draft. "
+                     "Your drafts appear here, on every computer you use with "
+                     "this account.")
             self._show_placeholder(
-                _("No private drafts yet"),
+                _("No Drafts"),
                 body.format(shortcut=_save_shortcut_text()),
+                symbol="pages",
             )
             return
         if self._list.count() == 0:
@@ -1852,6 +1864,7 @@ class DraftsPanel(QFrame):
                 _("Check the spelling or try a new search."),
                 action=_("Clear Search"),
                 on_action=self._search_edit.clear,
+                symbol="search",
             )
             return
         self._body_stack.setCurrentIndex(0)
@@ -1863,7 +1876,10 @@ class DraftsPanel(QFrame):
         *,
         action: str = "",
         on_action: Optional[Callable[[], None]] = None,
+        symbol: str = "",
     ) -> None:
+        self._empty_symbol_name = symbol
+        self._paint_empty_symbol()
         self._empty_title.setText(title)
         self._empty_body.setText(body)
         self._empty_action_handler = on_action if action else None
@@ -1871,14 +1887,23 @@ class DraftsPanel(QFrame):
         if action:
             button.setText(action)
             if button.parentWidget() is None:
-                # After the title and the body, before the space below.
-                self._empty_layout.insertWidget(3, button, 0, Qt.AlignHCenter)
+                # After the symbol, the title and the body, before the
+                # space below.
+                self._empty_layout.insertWidget(4, button, 0, Qt.AlignHCenter)
             button.show()
         elif button.parentWidget() is not None:
             self._empty_layout.removeWidget(button)
             button.hide()
             button.setParent(None)
         self._body_stack.setCurrentIndex(1)
+
+    def _paint_empty_symbol(self) -> None:
+        name = self._empty_symbol_name
+        self._empty_symbol.setVisible(bool(name))
+        if name:
+            self._empty_symbol.setPixmap(symbol_pixmap(
+                name, EMPTY_SYMBOL_SIZE, QColor(_THEME_TOKENS[bool(self._is_dark)]["muted"]),
+                self.devicePixelRatioF() or 2.0))
 
     def _on_empty_action(self) -> None:
         handler = self._empty_action_handler

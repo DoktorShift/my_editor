@@ -564,7 +564,8 @@ def test_rebuilding_the_list_while_a_row_is_selected_does_not_crash():
 def test_an_empty_store_names_the_shortcut_in_platform_notation():
     panel = bound_panel(DraftStore())
     assert panel._body_stack.currentIndex() == 1
-    assert panel._empty_title.text() == "No private drafts yet"
+    assert panel._empty_symbol_name == "pages"
+    assert panel._empty_title.text() == "No Drafts"
     native = QKeySequence("Ctrl+Shift+S").toString(QKeySequence.NativeText)
     assert native in panel._empty_body.text()
     # No action button: the panel does not own the remedy here.
@@ -583,6 +584,7 @@ def test_a_search_with_no_matches_offers_a_way_out():
     # Apple's own words for a search that found nothing.
     assert panel._empty_title.text() == "No Results for “zzz-no-such-draft”"
     assert panel._empty_body.text() == "Check the spelling or try a new search."
+    assert panel._empty_symbol_name == "search"            # Apple's empty state
     assert panel._empty_action.text() == "Clear Search"
     assert panel._empty_action.isVisibleTo(panel._empty_widget)
 
@@ -595,7 +597,7 @@ def test_a_search_with_no_matches_offers_a_way_out():
 def test_a_first_refresh_is_not_reported_as_an_empty_library():
     store = DraftStore()
     panel = bound_panel(store)
-    assert panel._empty_title.text() == "No private drafts yet"
+    assert panel._empty_title.text() == "No Drafts"
 
     store.set_loading(True)
     assert panel._body_stack.currentIndex() == 0
@@ -603,7 +605,7 @@ def test_a_first_refresh_is_not_reported_as_an_empty_library():
 
     store.set_loading(False)
     assert panel._body_stack.currentIndex() == 1
-    assert panel._empty_title.text() == "No private drafts yet"
+    assert panel._empty_title.text() == "No Drafts"
 
 
 def test_an_unsupported_signer_outranks_everything_else():

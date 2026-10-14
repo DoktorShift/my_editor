@@ -138,7 +138,7 @@ def test_loading_then_nothing_published_yet():
     assert model.state == LOADING
     assert shown(view) == ("", "Looking for your notes and articles…", True, False)
     relays.run()
-    assert shown(view) == ("Nothing published yet",
+    assert shown(view) == ("Nothing Published Yet",
                            "Notes and articles you publish appear here.", False, False)
     assert unnamed_controls(view) == []
 
@@ -359,7 +359,7 @@ def test_a_deletion_no_relay_took_offers_try_again(answered_alerts):
         ("Cancel", alerts.CANCEL), ("Try Again", alerts.DEFAULT)]
     assert R1 in failure["details"]
     relays.run()
-    assert shown(view) == ("Nothing published yet",
+    assert shown(view) == ("Nothing Published Yet",
                            "Notes and articles you publish appear here.", False, False)
 
 

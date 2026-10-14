@@ -150,7 +150,7 @@ def test_nothing_readable_gets_an_explanation_and_a_button():
     assert showing_placeholder(p)
     assert "not responding" in p._empty_title.text().lower()
     assert p._empty_action.isVisible() or p._empty_action.isVisibleTo(p)
-    assert p._empty_action.text() == "Try again"
+    assert p._empty_action.text() == "Try Again"
 
 
 def test_the_body_says_what_to_do_not_what_broke():

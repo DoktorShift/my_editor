@@ -432,6 +432,7 @@ class PublishedView(QWidget):
         self._is_dark = bool(is_dark)
         self.setStyleSheet(_view_css(self._is_dark))
         self._delegate.set_dark(self._is_dark)
+        self._paint_empty_symbol()
 
     # -- building ---------------------------------------------------------------
 
@@ -472,6 +473,11 @@ class PublishedView(QWidget):
         self._busy.setMaximumWidth(160)
         self._busy.setAccessibleName(_("Loading"))
         column.addWidget(self._busy, 0, Qt.AlignmentFlag.AlignHCenter)
+        # A quiet symbol over the title, as Apple's empty states have one.
+        self._empty_symbol = QLabel()
+        self._empty_symbol.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._empty_symbol_name = ""
+        column.addWidget(self._empty_symbol)
         self._empty_title = QLabel()
         self._empty_title.setObjectName("published_empty_title")
         self._empty_body = QLabel()
@@ -515,7 +521,7 @@ class PublishedView(QWidget):
         elif state == UNREACHABLE:
             self._show_placeholder(_("Couldn’t load what you published"),
                                    _("Check your internet connection, then try again."),
-                                   action=True)
+                                   action=True, symbol="alert")
         elif not self._model.items() and self._model.loading_more:
             # Reading on past pages that showed nothing (all deleted):
             # still the first read, as far as the person can tell.
@@ -523,11 +529,12 @@ class PublishedView(QWidget):
         elif self._search_text and not self._rows.rowCount():
             self._show_placeholder(
                 _("No Results for “{query}”").format(query=self._search_text),
-                _("Check the spelling or try a new search."))
+                _("Check the spelling or try a new search."), symbol="search")
         elif not self._model.items() and not (self._model.has_more
                                               or self._model.more_failed):
-            self._show_placeholder(_("Nothing published yet"),
-                                   _("Notes and articles you publish appear here."))
+            self._show_placeholder(_("Nothing Published Yet"),
+                                   _("Notes and articles you publish appear here."),
+                                   symbol="note")
         else:
             self._stack.setCurrentWidget(self._list)
             if not self._list.currentIndex().isValid():
@@ -537,13 +544,23 @@ class PublishedView(QWidget):
                     self._rows.index(0), self._list.selectionModel().SelectionFlag.NoUpdate)
 
     def _show_placeholder(self, title: str, body: str, *, busy: bool = False,
-                          action: bool = False) -> None:
+                          action: bool = False, symbol: str = "") -> None:
+        self._empty_symbol_name = symbol
+        self._paint_empty_symbol()
         self._empty_title.setText(title)
         self._empty_title.setVisible(bool(title))
         self._empty_body.setText(body)
         self._busy.setVisible(busy)
         self._empty_action.setVisible(action)
         self._stack.setCurrentWidget(self._placeholder)
+
+    def _paint_empty_symbol(self) -> None:
+        name = self._empty_symbol_name
+        self._empty_symbol.setVisible(bool(name))
+        if name:
+            self._empty_symbol.setPixmap(post_list.symbol_pixmap(
+                name, post_list.EMPTY_SYMBOL_SIZE, QColor(THEME_TOKENS[self._is_dark]["muted"]),
+                self.devicePixelRatioF() or 2.0))
 
     def _say_what_changed(self) -> None:
         """A sentence for the host when a read began, or ended short of

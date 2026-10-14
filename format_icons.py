@@ -393,14 +393,41 @@ def _draw_clock(painter: QPainter, ink: QColor) -> None:
     painter.drawLine(QPointF(9, 9), QPointF(11.8, 10.8))
 
 
-_GLYPHS = {"lock": _draw_lock, "video": _draw_video, "audio": _draw_audio,
+def _draw_search(painter: QPainter, ink: QColor) -> None:
+    """A magnifying glass: a search."""
+    painter.setPen(_pen(ink, 1.6))
+    painter.setBrush(Qt.BrushStyle.NoBrush)
+    painter.drawEllipse(QRectF(2.5, 2.5, 10, 10))
+    painter.drawLine(QPointF(11, 11), QPointF(15.5, 15.5))
+
+
+def _draw_pages(painter: QPainter, ink: QColor) -> None:
+    """Two pages, one behind the other: drafts."""
+    painter.setPen(_pen(ink, 1.5))
+    painter.setBrush(Qt.BrushStyle.NoBrush)
+    painter.drawRoundedRect(QRectF(2.5, 5, 9.5, 11.2), 1.6, 1.6)
+    back = QPainterPath()
+    back.moveTo(6.5, 3.6)
+    back.quadTo(6.5, 2, 7.9, 2)
+    back.lineTo(14.6, 2)
+    back.quadTo(16, 2, 16, 3.4)
+    back.lineTo(16, 11.6)
+    back.quadTo(16, 13, 14.6, 13)
+    back.lineTo(14.3, 13)
+    painter.drawPath(back)
+    for y, end in ((8.6, 9.5), (11.2, 9.5), (13.6, 7.6)):
+        painter.drawLine(QPointF(5, y), QPointF(end, y))
+
+
+_GLYPHS = {"search": _draw_search, "pages": _draw_pages, "lock": _draw_lock, "video": _draw_video, "audio": _draw_audio,
            "document": _draw_document, "alert": _draw_alert, "article": _draw_article,
            "note": _draw_note, "curation": _draw_curation, "clock": _draw_clock}
 
 
 def paint(name: str, painter: QPainter, rect: QRectF, color: QColor) -> None:
-    """Draw glyph ``name`` (lock, video, audio, document, alert, article,
-    note, curation, clock) to fill the square ``rect``, sharp at any size."""
+    """Draw glyph ``name`` (search, pages, lock, video, audio, document,
+    alert, article, note, curation, clock) to fill the square ``rect``,
+    sharp at any size."""
     painter.save()
     painter.setRenderHint(QPainter.RenderHint.Antialiasing)
     painter.translate(rect.topLeft())

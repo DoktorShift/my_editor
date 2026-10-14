@@ -530,8 +530,8 @@ msgstr "Neuer Tab"
 #: nostr/ui/draft_relays_sheet.py:613
 #: nostr/ui/drafts_panel.py:962
 #: nostr/ui/drafts_panel.py:1345
+#: nostr/ui/drafts_panel.py:1836
 #: nostr/ui/imports_activity.py:288
-#: nostr/ui/imports_window.py:1186
 msgid "Try Again"
 msgstr "Erneut versuchen"
 
@@ -839,7 +839,7 @@ msgstr "Neuer Versuch. Bestätige die Anfrage in deiner Signer-App …"
 #: main_window.py:5647
 #: nostr/ui/media_library_dialog.py:683
 #: nostr/ui/media_library_dialog.py:872
-#: nostr/ui/published_view.py:609
+#: nostr/ui/published_view.py:626
 msgid "Delete"
 msgstr "Löschen"
 
@@ -1135,7 +1135,7 @@ msgstr "Audio oder Video einfügen …"
 
 #: main_window.py:2416
 #: nostr/ui/published_view.py:372
-#: nostr/ui/published_view.py:444
+#: nostr/ui/published_view.py:445
 msgid "Published"
 msgstr "Veröffentlicht"
 
@@ -1315,8 +1315,8 @@ msgstr "Zaps zu gleichen Teilen mit den Mitautoren teilen"
 
 #: main_window.py:4224
 #: main_window.py:5457
-#: nostr/ui/published_view.py:590
-#: nostr/ui/published_view.py:597
+#: nostr/ui/published_view.py:607
+#: nostr/ui/published_view.py:614
 msgid "That link cannot be opened."
 msgstr "Dieser Link kann nicht geöffnet werden."
 
@@ -1372,7 +1372,7 @@ msgstr "Fenster schließen"
 #: main_window.py:5777
 #: nostr/ui/connect_dialog.py:212
 #: nostr/ui/media_library_dialog.py:673
-#: nostr/ui/published_view.py:666
+#: nostr/ui/published_view.py:683
 msgid "Copy Link"
 msgstr "Link kopieren"
 
@@ -4394,8 +4394,8 @@ msgstr[0] "{n} Entwurf geladen."
 msgstr[1] "{n} Entwürfe geladen."
 
 #: nostr/draft_sync.py:779
-#: nostr/ui/drafts_panel.py:1747
-#: nostr/ui/drafts_panel.py:1811
+#: nostr/ui/drafts_panel.py:1756
+#: nostr/ui/drafts_panel.py:1820
 msgid "Your signer app can’t decrypt drafts"
 msgstr "Signer-App kann Entwürfe nicht lesen"
 
@@ -6674,7 +6674,7 @@ msgstr "Alle Entwürfe auswählen"
 
 #: nostr/ui/drafts_panel.py:1245
 #: nostr/ui/drafts_panel.py:1267
-#: nostr/ui/drafts_panel.py:2279
+#: nostr/ui/drafts_panel.py:2304
 msgid "Delete Draft"
 msgstr "Entwurf löschen"
 
@@ -6683,46 +6683,46 @@ msgid "Hide Drafts"
 msgstr "Entwürfe ausblenden"
 
 #: nostr/ui/drafts_panel.py:1377
-#: nostr/ui/drafts_panel.py:1475
+#: nostr/ui/drafts_panel.py:1482
 #: nostr/ui/imports_window.py:363
 #: nostr/ui/media_library_dialog.py:350
 msgid "Search"
 msgstr "Suchen"
 
-#: nostr/ui/drafts_panel.py:1764
+#: nostr/ui/drafts_panel.py:1773
 #, python-brace-format
 msgid "{n} draft could not be decrypted"
 msgid_plural "{n} drafts could not be decrypted"
 msgstr[0] "{n} Entwurf nicht entschlüsselt"
 msgstr[1] "{n} Entwürfe nicht entschlüsselt"
 
-#: nostr/ui/drafts_panel.py:1773
+#: nostr/ui/drafts_panel.py:1782
 #, python-brace-format
 msgid "Decrypting {ready} of {total}"
 msgstr "Entschlüsselt: {ready} von {total}"
 
-#: nostr/ui/drafts_panel.py:1840
+#: nostr/ui/drafts_panel.py:1851
 #, python-brace-format
-msgid "Press {shortcut} in any tab to save its contents as an encrypted draft on Nostr. Drafts sync to your other devices that use the same account."
-msgstr "Drücke {shortcut} in einem beliebigen Tab, um seinen Inhalt als verschlüsselten Entwurf auf Nostr zu speichern. Entwürfe werden mit deinen anderen Geräten abgeglichen, die dasselbe Konto verwenden."
+msgid "Press {shortcut} in any tab to save it as an encrypted draft. Your drafts appear here, on every computer you use with this account."
+msgstr "Drücke {shortcut} in einem Tab, um ihn als verschlüsselten Entwurf zu speichern. Deine Entwürfe erscheinen hier, auf jedem Computer, auf dem du dieses Konto nutzt."
 
-#: nostr/ui/drafts_panel.py:2230
+#: nostr/ui/drafts_panel.py:2255
 msgid "Show Preview"
 msgstr "Vorschau anzeigen"
 
-#: nostr/ui/drafts_panel.py:2249
+#: nostr/ui/drafts_panel.py:2274
 msgid "Open in New Tab"
 msgstr "In neuem Tab öffnen"
 
-#: nostr/ui/drafts_panel.py:2254
+#: nostr/ui/drafts_panel.py:2279
 msgid "Publish…"
 msgstr "Veröffentlichen …"
 
-#: nostr/ui/drafts_panel.py:2260
+#: nostr/ui/drafts_panel.py:2285
 msgid "Copy Event ID"
 msgstr "Event-ID kopieren"
 
-#: nostr/ui/drafts_panel.py:2276
+#: nostr/ui/drafts_panel.py:2301
 #: nostr/ui/drafts_panel.py:1266
 #, python-brace-format
 msgid "Delete {n} Draft"
@@ -6739,37 +6739,37 @@ msgstr "Kein zusätzlicher Text"
 msgid "Your saved private drafts"
 msgstr "Deine gespeicherten privaten Entwürfe"
 
-#: nostr/ui/drafts_panel.py:1753
-#: nostr/ui/drafts_panel.py:1823
+#: nostr/ui/drafts_panel.py:1762
+#: nostr/ui/drafts_panel.py:1833
 msgid "Your signer app is not responding"
 msgstr "Deine Signer-App antwortet nicht"
 
-#: nostr/ui/drafts_panel.py:1804
+#: nostr/ui/drafts_panel.py:1813
 msgid "No Nostr account in use"
 msgstr "Kein Nostr-Konto aktiv"
 
-#: nostr/ui/drafts_panel.py:1805
+#: nostr/ui/drafts_panel.py:1814
 msgid "Create an account, connect your signer app or restore an account from its backup, all in the Nostr menu."
 msgstr "Erstelle ein Konto, verbinde deine Signer-App oder stelle ein Konto aus seiner Sicherung wieder her, alles im Nostr-Menü."
 
-#: nostr/ui/drafts_panel.py:1812
+#: nostr/ui/drafts_panel.py:1821
 msgid "Drafts are encrypted in a way this signer app can’t open. To use drafts, connect a signer app that can, such as Amber or nsec.app."
 msgstr "Entwürfe sind so verschlüsselt, dass diese Signer-App sie nicht öffnen kann. Um Entwürfe zu nutzen, verbinde eine Signer-App, die das kann, etwa Amber oder nsec.app."
 
-#: nostr/ui/drafts_panel.py:1824
+#: nostr/ui/drafts_panel.py:1834
 msgid "Drafts stay encrypted until your signer app unlocks them. Open your signer app, make sure it is running, then try again."
 msgstr "Entwürfe bleiben verschlüsselt, bis deine Signer-App sie entsperrt. Öffne deine Signer-App, stelle sicher, dass sie läuft, und versuche es dann noch einmal."
 
-#: nostr/ui/drafts_panel.py:1844
-msgid "No private drafts yet"
-msgstr "Noch keine privaten Entwürfe"
+#: nostr/ui/drafts_panel.py:1855
+msgid "No Drafts"
+msgstr "Keine Entwürfe"
 
-#: nostr/ui/drafts_panel.py:1852
-#: nostr/ui/published_view.py:526
+#: nostr/ui/drafts_panel.py:1864
+#: nostr/ui/published_view.py:532
 msgid "Check the spelling or try a new search."
 msgstr "Überprüfe die Schreibweise oder starte eine neue Suche."
 
-#: nostr/ui/drafts_panel.py:2243
+#: nostr/ui/drafts_panel.py:2268
 msgid "Retry Decryption"
 msgstr "Erneut entschlüsseln"
 
@@ -6795,15 +6795,11 @@ msgid_plural "{count} new"
 msgstr[0] "{count} neu"
 msgstr[1] "{count} neu"
 
-#: nostr/ui/drafts_panel.py:1771
+#: nostr/ui/drafts_panel.py:1780
 msgid "Refreshing drafts"
 msgstr "Entwürfe werden aktualisiert"
 
-#: nostr/ui/drafts_panel.py:1826
-msgid "Try again"
-msgstr "Erneut versuchen"
-
-#: nostr/ui/drafts_panel.py:1853
+#: nostr/ui/drafts_panel.py:1865
 msgid "Clear Search"
 msgstr "Suche löschen"
 
@@ -6814,8 +6810,8 @@ msgid_plural "Imports, {count} new posts"
 msgstr[0] "Importe, {count} neuer Beitrag"
 msgstr[1] "Importe, {count} neue Beiträge"
 
-#: nostr/ui/drafts_panel.py:1851
-#: nostr/ui/published_view.py:525
+#: nostr/ui/drafts_panel.py:1863
+#: nostr/ui/published_view.py:531
 #, python-brace-format
 msgid "No Results for “{query}”"
 msgstr "Keine Ergebnisse für „{query}“"
@@ -8071,7 +8067,7 @@ msgstr "Links kopieren"
 
 #: nostr/ui/media_library_dialog.py:676
 #: nostr/ui/media_preview.py:103
-#: nostr/ui/published_view.py:663
+#: nostr/ui/published_view.py:680
 msgid "Open in Browser"
 msgstr "Im Browser öffnen"
 
@@ -9103,23 +9099,23 @@ msgstr "Veröffentlichte Notizen und Artikel aktualisieren"
 msgid "Search Published"
 msgstr "Veröffentlichtes durchsuchen"
 
-#: nostr/ui/published_view.py:473
+#: nostr/ui/published_view.py:474
 msgid "Loading"
 msgstr "Wird geladen"
 
-#: nostr/ui/published_view.py:600
+#: nostr/ui/published_view.py:617
 msgid "Link copied."
 msgstr "Link kopiert."
 
-#: nostr/ui/published_view.py:671
+#: nostr/ui/published_view.py:688
 msgid "Delete from Nostr…"
 msgstr "Aus Nostr löschen …"
 
-#: nostr/ui/published_view.py:702
+#: nostr/ui/published_view.py:719
 msgid "The relays turned the request down. Show Details says why; you can try again later."
 msgstr "Die Relays haben die Anfrage abgelehnt. Unter „Details einblenden“ steht, warum; du kannst es später erneut versuchen."
 
-#: nostr/ui/published_view.py:705
+#: nostr/ui/published_view.py:722
 msgid "No relay accepted the request. Check your internet connection, then try again."
 msgstr "Kein Relay hat die Anfrage angenommen. Prüfe deine Internetverbindung und versuche es dann erneut."
 
@@ -9132,81 +9128,81 @@ msgstr "Wird gelöscht …"
 msgid "First published {time}"
 msgstr "Zuerst veröffentlicht am {time}"
 
-#: nostr/ui/published_view.py:510
+#: nostr/ui/published_view.py:516
 msgid "No account in use"
 msgstr "Kein Konto aktiv"
 
-#: nostr/ui/published_view.py:511
+#: nostr/ui/published_view.py:517
 msgid "Choose an account in the Nostr menu to see what you published."
 msgstr "Wähle im Nostr-Menü ein Konto, um zu sehen, was du veröffentlicht hast."
 
-#: nostr/ui/published_view.py:555
+#: nostr/ui/published_view.py:572
 msgid "Couldn’t load more notes. Check your internet connection, then try again."
 msgstr "Weitere Notizen konnten nicht geladen werden. Prüfe deine Internetverbindung und versuche es dann erneut."
 
-#: nostr/ui/published_view.py:559
+#: nostr/ui/published_view.py:576
 msgid "Refreshing what you published…"
 msgstr "Deine Veröffentlichungen werden aktualisiert …"
 
-#: nostr/ui/published_view.py:566
+#: nostr/ui/published_view.py:583
 msgid "Couldn’t refresh. Check your internet connection, then try again."
 msgstr "Die Liste konnte nicht aktualisiert werden. Prüfe deine Internetverbindung und versuche es dann erneut."
 
-#: nostr/ui/published_view.py:607
+#: nostr/ui/published_view.py:624
 msgid "Relays that keep it are asked to remove it. People and apps that already saved a copy may still have it. Your draft stays."
 msgstr "Relays, die es speichern, werden gebeten, es zu entfernen. Menschen und Apps, die schon eine Kopie gespeichert haben, können sie weiterhin haben. Dein Entwurf bleibt erhalten."
 
-#: nostr/ui/published_view.py:660
+#: nostr/ui/published_view.py:677
 msgid "Edit"
 msgstr "Bearbeiten"
 
-#: nostr/ui/published_view.py:713
+#: nostr/ui/published_view.py:730
 msgid "Your signer app didn’t approve the request. Try again, and approve it when your signer app asks."
 msgstr "Deine Signer-App hat die Anfrage nicht bestätigt. Versuche es erneut und bestätige sie, wenn deine Signer-App fragt."
 
-#: nostr/ui/published_view.py:514
-#: nostr/ui/published_view.py:522
+#: nostr/ui/published_view.py:520
+#: nostr/ui/published_view.py:528
 msgid "Looking for your notes and articles…"
 msgstr "Deine Notizen und Artikel werden gesucht …"
 
-#: nostr/ui/published_view.py:569
+#: nostr/ui/published_view.py:586
 msgid "Some relays didn’t answer, so something may be missing."
 msgstr "Einige Relays haben nicht geantwortet, daher fehlt vielleicht etwas."
 
-#: nostr/ui/published_view.py:692
+#: nostr/ui/published_view.py:709
 #, python-brace-format
 msgid "{accepted} of {total} relay accepted the request to delete “{title}”."
 msgid_plural "{accepted} of {total} relays accepted the request to delete “{title}”."
 msgstr[0] "Die Anfrage, „{title}“ zu löschen, wurde von {accepted} von {total} Relay angenommen."
 msgstr[1] "Die Anfrage, „{title}“ zu löschen, wurde von {accepted} von {total} Relays angenommen."
 
-#: nostr/ui/published_view.py:516
+#: nostr/ui/published_view.py:522
 msgid "Couldn’t load what you published"
 msgstr "Deine Veröffentlichungen konnten nicht geladen werden"
 
-#: nostr/ui/published_view.py:517
+#: nostr/ui/published_view.py:523
 msgid "Check your internet connection, then try again."
 msgstr "Prüfe deine Internetverbindung und versuche es dann erneut."
 
-#: nostr/ui/published_view.py:606
+#: nostr/ui/published_view.py:623
 #, python-brace-format
 msgid "Delete “{title}” from Nostr?"
 msgstr "„{title}“ aus Nostr löschen?"
 
-#: nostr/ui/published_view.py:719
+#: nostr/ui/published_view.py:736
 #, python-brace-format
 msgid "Couldn’t delete “{title}”"
 msgstr "„{title}“ konnte nicht gelöscht werden"
 
-#: nostr/ui/published_view.py:699
+#: nostr/ui/published_view.py:716
 msgid "no answer"
 msgstr "keine Antwort"
 
-#: nostr/ui/published_view.py:529
-msgid "Nothing published yet"
+#: nostr/ui/published_view.py:535
+msgid "Nothing Published Yet"
 msgstr "Noch nichts veröffentlicht"
 
-#: nostr/ui/published_view.py:530
+#: nostr/ui/published_view.py:536
 msgid "Notes and articles you publish appear here."
 msgstr "Notizen und Artikel, die du veröffentlichst, erscheinen hier."
 
