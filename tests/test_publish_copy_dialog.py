@@ -30,6 +30,7 @@ from __future__ import annotations
 import hashlib
 import os
 import sys
+from contextlib import contextmanager
 from types import SimpleNamespace
 
 import pytest
@@ -629,6 +630,14 @@ class _Window:
         self.assets.append((asset, alt))
 
 
+class _Editor:
+    """The editor a pick goes into: it only counts as one step of Undo."""
+
+    @contextmanager
+    def undo_step(self, name):
+        yield
+
+
 @pytest.fixture
 def gated(monkeypatch):
     """Patch the gate at the name main_window imported it under."""
@@ -652,7 +661,7 @@ def test_an_insert_goes_through_the_gate(gated):
     ))
     media = make_media(CIPHER_SHA, servers=(SERVER,))
 
-    window._insert_media_at_cursor(media, object(), "a beach")
+    window._insert_media_at_cursor(media, _Editor(), "a beach")
 
     assert len(window.asked) == 1
     asked_media, kwargs = window.asked[0]
@@ -668,7 +677,7 @@ def test_the_address_inserted_is_the_copy_and_never_the_original(gated):
     ))
     media = make_media(CIPHER_SHA, servers=(SERVER,))
 
-    window._insert_media_at_cursor(media, object(), "")
+    window._insert_media_at_cursor(media, _Editor(), "")
 
     assert window.adopted[0]["sha256"] == SCRUBBED_SHA
     assert window.adopted[0]["remote_url"] == f"{CDN}/{SCRUBBED_SHA}"
@@ -677,7 +686,7 @@ def test_the_address_inserted_is_the_copy_and_never_the_original(gated):
 
 def test_a_refused_pick_inserts_nothing_at_all(gated):
     window = gated(PickResolution(reason="This picture is private."))
-    window._insert_media_at_cursor(make_media(CIPHER_SHA), object(), "")
+    window._insert_media_at_cursor(make_media(CIPHER_SHA), _Editor(), "")
 
     assert window.adopted == []
     assert window.assets == []
@@ -688,7 +697,7 @@ def test_a_refused_pick_inserts_nothing_at_all(gated):
 def test_a_cancelled_pick_says_nothing_and_inserts_nothing(gated):
     # The user already knows what they did; a message would be a scold.
     window = gated(PickResolution(cancelled=True))
-    window._insert_media_at_cursor(make_media(CIPHER_SHA), object(), "")
+    window._insert_media_at_cursor(make_media(CIPHER_SHA), _Editor(), "")
     assert window.adopted == [] and window.urls == []
     assert window.messages == []
 
@@ -698,7 +707,7 @@ def test_a_public_pick_still_inserts_the_way_it_always_did(gated):
     window = gated(PickResolution(
         sha256=media.hash, url=media.url, mime="image/png", size=9, ok=True,
     ))
-    window._insert_media_at_cursor(media, object(), "alt words")
+    window._insert_media_at_cursor(media, _Editor(), "alt words")
     assert window.adopted[0]["sha256"] == media.hash
     assert window.assets[0][1] == "alt words"
 
@@ -707,7 +716,7 @@ def test_a_non_image_copy_falls_back_to_a_link(gated):
     window = gated(PickResolution(
         sha256="e" * 64, url=f"{CDN}/{'e' * 64}", mime="video/mp4", ok=True,
     ))
-    window._insert_media_at_cursor(make_media("e" * 64), object(), "")
+    window._insert_media_at_cursor(make_media("e" * 64), _Editor(), "")
     assert window.urls == [f"{CDN}/{'e' * 64}"]
     assert window.adopted == []
 
@@ -981,7 +990,7 @@ def test_an_insert_while_the_signer_prompt_is_open_embeds_nothing(tmp_path):
     ledger = PublicLedger(path=tmp_path / "public.json")
     window = _insert_window(library, ledger)
     window._insert_media_at_cursor(
-        make_media(CIPHER_SHA, servers=(SERVER,)), object(), "a photo")
+        make_media(CIPHER_SHA, servers=(SERVER,)), _Editor(), "a photo")
 
     # The private blob's own address and content hash reach nothing.
     assert window.adopted == []
@@ -1001,7 +1010,7 @@ def test_the_same_pick_is_gated_normally_once_the_signer_answers(tmp_path):
     ledger = PublicLedger(path=tmp_path / "public.json")
     window = _insert_window(library, ledger)
     window._insert_media_at_cursor(
-        make_media(CIPHER_SHA, servers=(SERVER,)), object(), "a photo")
+        make_media(CIPHER_SHA, servers=(SERVER,)), _Editor(), "a photo")
 
     # Still nothing embedded, but now for the reason the user can act on.
     assert window.urls == [] and window.adopted == []
@@ -1024,7 +1033,7 @@ def test_a_signer_that_never_answers_does_not_make_private_files_public(tmp_path
     ledger = PublicLedger(path=tmp_path / "public.json")
     window = _insert_window(library, ledger)
     window._insert_media_at_cursor(
-        make_media(CIPHER_SHA, servers=(SERVER,)), object(), "a photo")
+        make_media(CIPHER_SHA, servers=(SERVER,)), _Editor(), "a photo")
 
     assert window.adopted == [] and window.urls == [] and window.assets == []
     assert PRIVATE_URL not in str(window.messages)
@@ -1042,7 +1051,7 @@ def test_a_public_file_still_inserts_while_the_library_is_unreadable(tmp_path):
     ledger = PublicLedger(path=tmp_path / "public.json")
     window = _insert_window(library, ledger)
     ordinary = make_media("d" * 64, servers=(CDN,), mime="image/png", size=17)
-    window._insert_media_at_cursor(ordinary, object(), "alt words")
+    window._insert_media_at_cursor(ordinary, _Editor(), "alt words")
 
     assert window.adopted[0]["sha256"] == "d" * 64
     assert window.messages == []

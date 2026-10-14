@@ -190,3 +190,53 @@ def code_block(color: QColor) -> QIcon:
         painter.drawPath(right)
         painter.drawLine(QPointF(10.2, 3.5), QPointF(7.8, 14.5))
     return _icon(draw, color)
+
+
+def _turning_arrow(painter: QPainter, ink: QColor) -> None:
+    """An arrow that comes up from below and turns back to the left."""
+    painter.setPen(_pen(ink, 1.6))
+    painter.setBrush(Qt.BrushStyle.NoBrush)
+    path = QPainterPath()
+    path.moveTo(QPointF(15, 14.5))
+    path.cubicTo(QPointF(15, 9), QPointF(11.5, 6.5), QPointF(4, 6.5))
+    path.moveTo(QPointF(7.2, 3.2))
+    path.lineTo(QPointF(3.8, 6.5))
+    path.lineTo(QPointF(7.2, 9.8))
+    painter.drawPath(path)
+
+
+def undo(color: QColor) -> QIcon:
+    """An arrow turning back to the left: Undo."""
+    return _icon(_turning_arrow, color)
+
+
+def redo(color: QColor) -> QIcon:
+    """Undo's arrow, mirrored: Redo."""
+    def draw(painter: QPainter, ink: QColor) -> None:
+        painter.translate(SIZE, 0)
+        painter.scale(-1, 1)
+        _turning_arrow(painter, ink)
+    return _icon(draw, color)
+
+
+def plus(color: QColor) -> QIcon:
+    """A plus sign: Insert."""
+    def draw(painter: QPainter, ink: QColor) -> None:
+        painter.setPen(_pen(ink, 1.7))
+        painter.drawLine(QPointF(9, 3.5), QPointF(9, 14.5))
+        painter.drawLine(QPointF(3.5, 9), QPointF(14.5, 9))
+    return _icon(draw, color)
+
+
+def more(color: QColor) -> QIcon:
+    """Two chevrons to the right: a toolbar's buttons that have no room."""
+    def draw(painter: QPainter, ink: QColor) -> None:
+        painter.setPen(_pen(ink, 1.7))
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        path = QPainterPath()
+        for x in (3.0, 9.5):
+            path.moveTo(QPointF(x, 4))
+            path.lineTo(QPointF(x + 5, 9))
+            path.lineTo(QPointF(x, 14))
+        painter.drawPath(path)
+    return _icon(draw, color)

@@ -350,3 +350,99 @@ def test_find_next_and_replace_go_on_from_the_caret(tmp_path):
     assert r["replace_selects"] == "fish| D"            # Replace first finds the next one
     assert r["unchanged"] == "fish A, fish B!, fish C, fish D"
     assert r["replaced"] == "fish A, fish B!, fish C, cat D"
+
+
+FIND_SCRIPT = r"""
+import json, os, sys
+sys.path.insert(0, sys.argv[1])
+os.environ["QT_QPA_PLATFORM"] = "offscreen"
+from PySide6.QtCore import qInstallMessageHandler
+from PySide6.QtWidgets import QApplication
+app = QApplication(sys.argv[:1])
+import main_window
+warnings = []
+qInstallMessageHandler(lambda kind, context, message: warnings.append(message))
+w = main_window.MainWindow()
+w.resize(1000, 700)
+w.show()
+short = w.new_tab()
+short.setPlainText("one word")
+long = w.new_tab()
+long.setPlainText("word " * 400)
+w._show_find(replace=False)
+w.findbar.edit.setText("word")
+app.processEvents()
+w.tabs.setCurrentIndex(w._editor_widget_index(short))   # its view is laid out anew
+app.processEvents()
+r = {"warnings": [m for m in warnings if "out of range" in m],
+     "short_highlights": len(short.highlights("find"))}
+w.tabs.setCurrentIndex(w._editor_widget_index(long))
+app.processEvents()
+long.document().setModified(False)
+w.close_tab(w.tabs.currentIndex())                     # the tab with the matches
+app.processEvents()
+r["after_close"] = [m for m in warnings if "out of range" in m]
+for i in range(w.tabs.count()):
+    e = w._editor_from_widget(w.tabs.widget(i))
+    if e is not None:
+        e.document().setModified(False)
+w.close()
+print("RESULT " + json.dumps(r))
+"""
+
+
+def test_find_matches_of_one_tab_never_land_on_another(tmp_path):
+    """Switching tabs laid the new tab's view out before the old tab's
+    matches were forgotten, and they were painted on it: "Position out of
+    range" for a shorter text, wrong words for a longer one."""
+    from tests.app_process import run_window_script
+    r = run_window_script(FIND_SCRIPT, tmp_path)
+    assert r["warnings"] == [] and r["after_close"] == []
+    assert r["short_highlights"] == 1
+
+
+STALE_SCRIPT = r"""
+import json, os, sys
+sys.path.insert(0, sys.argv[1])
+os.environ["QT_QPA_PLATFORM"] = "offscreen"
+from PySide6.QtCore import Qt, qInstallMessageHandler
+from PySide6.QtGui import QTextCursor
+from PySide6.QtTest import QTest
+from PySide6.QtWidgets import QApplication
+app = QApplication(sys.argv[:1])
+import main_window
+warnings = []
+qInstallMessageHandler(lambda kind, context, message: warnings.append(message))
+w = main_window.MainWindow()
+w.resize(900, 500)
+w.show()
+ed = w.new_tab()
+ed.setFocus()
+ed.setPlainText("".join("line %d with the word find\n" % i for i in range(60)))
+w._show_find(replace=False)
+w.findbar.edit.setText("find")
+app.processEvents()
+found = len(w._search_matches)
+cursor = ed.textCursor()
+cursor.setPosition(24)                            # in the first match
+cursor.movePosition(QTextCursor.MoveOperation.End, QTextCursor.MoveMode.KeepAnchor)
+ed.setTextCursor(cursor)
+QTest.keyClick(ed, Qt.Key.Key_Backspace)          # the text shrinks
+ed.verticalScrollBar().setValue(0)
+w._on_visible_area_changed(ed)                    # before Find looks again
+QTest.qWait(600)                                  # then it does
+r = {"found": found, "warnings": [m for m in warnings if "out of range" in m],
+     "after": len(w._search_matches)}
+ed.document().setModified(False)
+w.close()
+print("RESULT " + json.dumps(r))
+"""
+
+
+def test_matches_from_before_an_edit_are_not_painted(tmp_path):
+    """Review 2: the matches found before an edit were painted at their
+    old places when the view scrolled before Find looked again, past the
+    end of a shorter text ("Position out of range")."""
+    from tests.app_process import run_window_script
+    r = run_window_script(STALE_SCRIPT, tmp_path)
+    assert r["found"] == 60 and r["warnings"] == [] and r["after"] == 0

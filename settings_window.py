@@ -10,8 +10,8 @@ the View menu, and a remembered answer about pasted images could not be
 changed at all once given.
 
 The window holds only what is chosen once and kept: the appearance, the
-language, the writing font, and, while a Nostr account is in use, what
-happens to a pasted image. Every command stays in its menu: the window
+language, the writing font, whether the format bar shows over a selection,
+and, while a Nostr account is in use, what happens to a pasted image. Every command stays in its menu: the window
 shows the menu commands' state and chooses through them (or through what
 they call), so the two never disagree, and it holds no feature logic of its
 own.
@@ -61,9 +61,10 @@ class SettingsWindow(QDialog):
     ``appearance`` maps "system", "light" and "dark" to View > Appearance's
     commands; ``languages`` lists View > Language's as ``(code, command)``;
     ``choose_language(code)`` remembers one; ``monospace`` is View > Use
-    Monospace Font for Writing; ``paste_choice()`` and ``choose_paste(value)``
-    read and store the pasted-image setting, offered while
-    ``nostr_in_use()``.
+    Monospace Font for Writing; ``format_bar()`` and
+    ``choose_format_bar(on)`` read and store whether the format bar shows
+    over a selection; ``paste_choice()`` and ``choose_paste(value)`` read
+    and store the pasted-image setting, offered while ``nostr_in_use()``.
     """
 
     def __init__(self, *, appearance: Dict[str, QAction],
@@ -73,6 +74,8 @@ class SettingsWindow(QDialog):
                  paste_choice: Callable[[], str],
                  choose_paste: Callable[[str], None],
                  nostr_in_use: Callable[[], bool],
+                 format_bar: Callable[[], bool],
+                 choose_format_bar: Callable[[bool], None],
                  is_dark: bool = True, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
         self.setWindowTitle(_("Settings"))
@@ -82,6 +85,7 @@ class SettingsWindow(QDialog):
         self._paste_choice = paste_choice
         self._choose_paste = choose_paste
         self._nostr_in_use = nostr_in_use
+        self._format_bar_shown = format_bar
 
         form = QFormLayout()
         form.setLabelAlignment(Qt.AlignRight)
@@ -123,13 +127,23 @@ class SettingsWindow(QDialog):
             _("MyEditor uses a new language the next time it opens.")))
         form.addRow(self._label(_("Language:"), self.language), language_box)
 
-        # Writing: the font, as View > Use Monospace Font for Writing.
+        # Writing: the font, as View > Use Monospace Font for Writing, and
+        # the format bar over text selected with the pointer.
         self.monospace = QCheckBox(_("Use a monospace font for writing"))
         self.monospace.setChecked(monospace.isChecked())
         self.monospace.toggled.connect(
             lambda on: on != monospace.isChecked() and monospace.setChecked(on))
         monospace.toggled.connect(self.monospace.setChecked)
-        form.addRow(self._label(_("Writing:")), self.monospace)
+        self.format_bar = QCheckBox(_("Show the format bar when selecting text"))
+        self.format_bar.setChecked(bool(format_bar()))
+        self.format_bar.toggled.connect(choose_format_bar)
+        writing_box = QWidget()
+        writing_column = QVBoxLayout(writing_box)
+        writing_column.setContentsMargins(0, 0, 0, 0)
+        writing_column.setSpacing(4)
+        writing_column.addWidget(self.monospace)
+        writing_column.addWidget(self.format_bar)
+        form.addRow(self._label(_("Writing:")), writing_box)
 
         # Pasted images: only while Nostr is in use (nothing of Nostr before).
         self.paste = QComboBox()
@@ -212,8 +226,10 @@ class SettingsWindow(QDialog):
             self._choose_language(code)
 
     def refresh(self) -> None:
-        """Read again what can change elsewhere: whether Nostr is in use, and
-        the pasted-image setting (an alert's Remember This Choice sets it)."""
+        """Read again what can change elsewhere: whether Nostr is in use, the
+        format bar's setting, and the pasted-image setting (an alert's
+        Remember This Choice sets it)."""
+        self.format_bar.setChecked(bool(self._format_bar_shown()))
         shown = bool(self._nostr_in_use())
         self._paste_label.setVisible(shown)
         self._paste_box.setVisible(shown)

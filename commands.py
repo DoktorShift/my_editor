@@ -36,19 +36,20 @@ from i18n import _
 ShortcutSpec = Union[None, str, QKeySequence, QKeySequence.StandardKey, Tuple[str, ...]]
 
 
-def undo_words(action: str = "") -> str:
+def undo_words(action: str = "", *, named: Optional[bool] = None) -> str:
     """Edit > Undo's words for taking back ``action`` (an N_ word:
     "Typing", "Paste", "Skip"): "Undo Typing" where the platform's own
     apps name what Undo takes back (macOS), else "Undo", as Notepad and
-    GNOME's Text Editor say."""
-    if action and sys.platform == "darwin":
+    GNOME's Text Editor say. ``named`` True names it on every platform
+    (a toolbar button's tip, as Word's says "Undo Typing" on Windows)."""
+    if action and (named if named is not None else sys.platform == "darwin"):
         return _("Undo {action}").format(action=_(action))
     return _("Undo")
 
 
-def redo_words(action: str = "") -> str:
-    """Edit > Redo's words, by the same rule as undo_words."""
-    if action and sys.platform == "darwin":
+def redo_words(action: str = "", *, named: Optional[bool] = None) -> str:
+    """Edit > Redo's words, by the same rules as undo_words."""
+    if action and (named if named is not None else sys.platform == "darwin"):
         return _("Redo {action}").format(action=_(action))
     return _("Redo")
 
@@ -89,6 +90,10 @@ class Command:
     # The slash menu's group it is offered in (slash_menu.SECTIONS); ""
     # keeps it out of the slash menu.
     slash_section: str = ""
+    # Its title in the Insert menu and the slash menu, where the menu's
+    # name says the verb ("Mention…" for "Insert Mention…"), as Pages'
+    # Insert menu says "Table", never "Insert Table"; "" for its title.
+    insert_title: str = ""
 
 
 def platform_keys(mac: ShortcutSpec, other: ShortcutSpec, *,
@@ -196,6 +201,28 @@ class CommandRegistry(QObject):
         for keys in all_keys:
             self._by_keys[keys] = command.id
         return action
+
+    def use_insert_titles(self, menu) -> None:
+        """While ``menu`` (named for the verb: Insert) is open, its commands
+        show their insert_title; the titles they had come back as it
+        closes. The same actions, so one key and one state for each,
+        whichever menu shows it."""
+        shown: Dict[QAction, str] = {}
+
+        def opening() -> None:
+            for action in menu.actions():
+                entry = self._entries.get(action.objectName())
+                if entry is not None and entry.command.insert_title and action not in shown:
+                    shown[action] = action.text()
+                    action.setText(entry.command.insert_title)
+
+        def closing() -> None:
+            for action, text in shown.items():
+                action.setText(text)
+            shown.clear()
+
+        menu.aboutToShow.connect(opening)
+        menu.aboutToHide.connect(closing)
 
     # -- reading -----------------------------------------------------------
 

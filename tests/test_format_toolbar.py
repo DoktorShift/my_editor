@@ -8,6 +8,11 @@ What must hold:
   so state, keys and availability are the menu's. Each says its key in
   the platform's notation. Underline has no button.
 
+  Undo and Redo come first, before the style pop-up, each with the list
+  of its steps beside it; their tips name the step ("Undo Typing (⌘Z)").
+  After the lists and the quote, one Insert button opens the window's own
+  Insert menu.
+
   The buttons show the style at the caret, and the pop-up names the
   paragraph style.
 
@@ -32,7 +37,7 @@ from PySide6.QtWidgets import QApplication, QMainWindow, QMenu, QToolButton  # n
 import commands  # noqa: E402
 from commands import Command, CommandRegistry  # noqa: E402
 from tests.accessibility import unnamed_controls  # noqa: E402
-from format_toolbar import LAYOUT, FormatToolbar, tooltip_for  # noqa: E402
+from format_toolbar import HISTORY, LAYOUT, FormatToolbar, tooltip_for  # noqa: E402
 from tests.app_process import run_window_script  # noqa: E402
 
 
@@ -48,19 +53,22 @@ def toolbar():
     keys = {"bold": "Ctrl+B", "italic": "Ctrl+I", "link": "Ctrl+K"}
     actions = {name: registry.add(Command(f"format.{name}", name.capitalize(),
                                           commands.FORMAT, keys.get(name), checkable=True))
-               for name in LAYOUT if name}
+               for name in (*HISTORY, *LAYOUT) if name}
     style_menu = QMenu()
     for title in ("Body", "Heading 1", "Heading 2", "Heading 3"):
         style_menu.addAction(title)
-    bar = FormatToolbar(actions, style_menu, dark=False, parent=window)
+    insert_menu = QMenu()
+    insert_menu.addAction("Table…")
+    bar = FormatToolbar(actions, style_menu, insert_menu, dark=False, parent=window)
     bar.window_ = window                     # keep the window alive with the bar
     bar.actions_ = actions
+    bar.insert_menu_ = insert_menu
     return bar
 
 
 def test_the_buttons_are_the_window_commands(toolbar):
     assert [a for a in toolbar.actions() if a in toolbar.actions_.values()] == [
-        toolbar.actions_[name] for name in LAYOUT if name]
+        toolbar.actions_[name] for name in (*HISTORY, *LAYOUT) if name]
     assert "underline" not in toolbar.buttons
     toolbar.actions_["bold"].setChecked(True)
     assert toolbar.buttons["bold"].isChecked()
@@ -87,10 +95,52 @@ def test_the_style_popup_names_the_style(toolbar):
     assert toolbar.style_button.menu() is not None
 
 
+def test_undo_and_redo_come_first_with_their_lists(toolbar):
+    from PySide6.QtWidgets import QWidgetAction
+    leading = toolbar.actions()[:4]
+    assert leading[:2] == [toolbar.actions_["undo"], toolbar.actions_["redo"]]
+    assert leading[2].isSeparator()
+    assert isinstance(leading[3], QWidgetAction) and \
+        leading[3].defaultWidget() is toolbar.style_button
+    for name, words, menu in (("undo", "Undo", toolbar.undo_menu),
+                              ("redo", "Redo", toolbar.redo_menu)):
+        button = toolbar.buttons[name]
+        assert button.defaultAction() is toolbar.actions_[name]
+        assert button.menu() is menu
+        assert button.popupMode() == QToolButton.ToolButtonPopupMode.MenuButtonPopup
+        assert button.accessibleName() == words
+
+
+def test_undo_and_redo_tips_name_the_step(toolbar):
+    toolbar.actions_["undo"].setShortcut(QKeySequence("Ctrl+Z"))
+    native = QKeySequence("Ctrl+Z").toString(QKeySequence.SequenceFormat.NativeText)
+    toolbar.describe_history("Undo Typing", "Redo")
+    assert toolbar.buttons["undo"].toolTip() == f"Undo Typing ({native})"
+    assert toolbar.buttons["redo"].toolTip() == "Redo"
+    toolbar.actions_["undo"].setEnabled(False)          # Qt's own tip comes back
+    assert toolbar.buttons["undo"].toolTip() == f"Undo Typing ({native})"
+
+
+def test_insert_opens_the_window_insert_menu(toolbar):
+    from PySide6.QtWidgets import QWidgetAction
+    trailing = toolbar.actions()[-2:]
+    assert toolbar.actions()[-3] is toolbar.actions_["quote"]
+    assert trailing[0].isSeparator()
+    assert isinstance(trailing[1], QWidgetAction)
+    button = trailing[1].defaultWidget()
+    assert button is toolbar.insert_button
+    assert button.menu() is toolbar.insert_menu_
+    assert button.popupMode() == QToolButton.ToolButtonPopupMode.InstantPopup
+    assert button.accessibleName() == "Insert" and button.toolTip() == "Insert"
+    for dark in (True, False):
+        toolbar.set_dark(dark)
+        assert not button.icon().isNull()
+
+
 def test_both_themes_draw_every_icon(toolbar):
     for dark in (True, False):
         toolbar.set_dark(dark)
-        for name in LAYOUT:
+        for name in (*HISTORY, *LAYOUT):
             if name:
                 assert not toolbar.actions_[name].icon().isNull()
                 assert not toolbar.actions_[name].isIconVisibleInMenu()
@@ -131,6 +181,7 @@ app.processEvents()
 r = {}
 tb = w.format_toolbar
 r["shown"] = tb.isVisible()
+r["insert_menu"] = tb.insert_button.menu() is w.m_insert
 cursor = ed.document().find("bold")
 ed.setTextCursor(cursor)
 app.processEvents()
@@ -208,6 +259,7 @@ def test_a_narrow_german_window_keeps_the_view_switch_in_sight(tmp_path):
 def test_the_toolbar_in_the_window(tmp_path):
     r = run_window_script(WINDOW_SCRIPT, tmp_path)
     assert r["shown"]
+    assert r["insert_menu"]
     assert r["bold_checked"]
     assert r["style_body"] == "Body" and r["style_heading"] == "Heading 1"
     assert r["hidden"] and r["remembered"] is False and r["back"]
@@ -235,10 +287,10 @@ def test_a_control_that_cannot_act_looks_it(dark):
     registry = CommandRegistry(window)
     actions = {name: registry.add(Command(f"format.{name}", name.capitalize(),
                                           commands.FORMAT, checkable=True))
-               for name in LAYOUT if name}
+               for name in (*HISTORY, *LAYOUT) if name}
     menu = QMenu()
     menu.addAction("Body")
-    bar = FormatToolbar(actions, menu, dark=dark, parent=window)
+    bar = FormatToolbar(actions, menu, QMenu(), dark=dark, parent=window)
     window.addToolBar(bar)
     window.show()
     QApplication.processEvents()
@@ -260,7 +312,173 @@ def test_a_button_that_is_on_has_a_visible_edge(dark):
     registry = CommandRegistry(window)
     actions = {name: registry.add(Command(f"format.{name}", name.capitalize(),
                                           commands.FORMAT, checkable=True))
-               for name in LAYOUT if name}
-    bar = FormatToolbar(actions, QMenu(), dark=dark, parent=window)
+               for name in (*HISTORY, *LAYOUT) if name}
+    bar = FormatToolbar(actions, QMenu(), QMenu(), dark=dark, parent=window)
     edge = DARK_MUTED_FG if dark else LIGHT_MUTED_FG
     assert "QToolButton:checked" in bar.styleSheet() and edge in bar.styleSheet()
+
+
+NARROWEST = r"""
+import json, os, sys
+sys.path.insert(0, sys.argv[1])
+os.environ["QT_QPA_PLATFORM"] = "offscreen"
+import i18n
+i18n.install(sys.argv[2])
+from PySide6.QtWidgets import QApplication, QToolButton
+app = QApplication(sys.argv[:1])
+import main_window
+
+w = main_window.MainWindow()
+w.show()
+ed = w.new_tab()
+w.resize(w.minimumSizeHint())
+app.processEvents()
+tb = w.format_toolbar
+more = tb.findChild(QToolButton, "qt_toolbar_ext_button")
+image = tb.grab(more.geometry()).toImage()
+ground = image.pixelColor(0, 0)
+drawn = sum(1 for x in range(image.width()) for y in range(image.height())
+            if abs(image.pixelColor(x, y).lightness() - ground.lightness()) > 60)
+r = {"undo": tb.buttons["undo"].isVisible(), "redo": tb.buttons["redo"].isVisible(),
+     "more": more.isVisible() and drawn > 4, "switch": w.view_switch.isVisible()}
+ed.document().setModified(False)
+w.close()
+print("RESULT " + json.dumps(r))
+"""
+
+
+@pytest.mark.parametrize("language", ["en", "de"])
+def test_undo_and_redo_stay_in_sight_in_the_narrowest_window(tmp_path, language):
+    # The rest of the buttons go into the chevron first, which shows its »
+    # (a pop-up button's room for its arrow once hid it).
+    r = run_window_script(NARROWEST, tmp_path, language)
+    assert r == {"undo": True, "redo": True, "more": True, "switch": True}
+
+
+OVERFLOW = r"""
+import json, os, sys
+sys.path.insert(0, sys.argv[1])
+os.environ["QT_QPA_PLATFORM"] = "offscreen"
+from PySide6.QtWidgets import QApplication, QToolButton
+app = QApplication(sys.argv[:1])
+import main_window
+
+w = main_window.MainWindow()
+w.show()
+ed = w.new_tab()
+w.resize(w.minimumSizeHint())
+app.processEvents()
+tb = w.format_toolbar
+menu = tb.findChild(QToolButton, "qt_toolbar_ext_button").menu()
+r = {}
+for _ in range(2):                                   # opened twice: no item twice
+    menu.aboutToShow.emit()
+    app.processEvents()
+    entries = [a for a in menu.actions() if not a.isSeparator()]
+    r.setdefault("menus", []).append([a.menu() is w.m_style for a in entries].count(True))
+    r["insert"] = [a.menu() is w.m_insert for a in entries].count(True)
+    r["first"] = entries[0].menu() is w.m_style
+    r["last"] = entries[-1].menu() is w.m_insert
+    r["bold"] = w.act_bold in entries
+w.resize(1200, 600)
+app.processEvents()
+menu.aboutToShow.emit()
+app.processEvents()
+r["wide"] = [a.menu() is not None for a in menu.actions()].count(True)
+ed.document().setModified(False)
+w.close()
+print("RESULT " + json.dumps(r))
+"""
+
+
+def test_the_chevron_holds_the_style_and_insert_popups_it_hides(tmp_path):
+    r = run_window_script(OVERFLOW, tmp_path)
+    assert r == {"menus": [1, 1], "insert": 1, "first": True, "last": True, "bold": True,
+                 "wide": 0}
+
+
+@pytest.mark.parametrize("dark", [True, False])
+def test_every_popup_has_the_same_small_disclosure_arrow(toolbar, dark):
+    """Qt's own arrows drew a dot (the style pop-up) or a heavy chevron
+    (Undo, Redo, Insert) on a Mac: each pop-up shows one drawn arrow
+    instead, of one size, in the theme's quiet ink, dimmed with it."""
+    from format_toolbar import Disclosure, PopupButton
+    toolbar.set_dark(dark)
+    toolbar.window_.setCentralWidget(toolbar)
+    toolbar.window_.resize(900, 60)
+    toolbar.window_.show()
+    QApplication.processEvents()
+    buttons = [toolbar.buttons["undo"], toolbar.buttons["redo"], toolbar.insert_button,
+               toolbar.style_button]
+    sizes = set()
+    for button in buttons:
+        arrows = [c for c in button.children() if isinstance(c, Disclosure)]
+        assert len(arrows) == 1, button
+        arrow = arrows[0]
+        assert arrow.isVisible() and button.rect().contains(arrow.geometry())
+        assert arrow.geometry().right() >= button.width() - 24      # at the end
+        sizes.add(arrow.size().width())
+    assert len(sizes) == 1
+    sheet = toolbar.styleSheet()
+    assert "::menu-arrow { image: none; }" in sheet
+    assert "#InsertButton::menu-indicator { image: none;" in sheet
+    assert isinstance(toolbar.style_button, PopupButton)          # no Qt dot
+    toolbar.actions_["undo"].setEnabled(False)
+    undo_arrow = next(c for c in toolbar.buttons["undo"].children() if isinstance(c, Disclosure))
+    assert undo_arrow.ink().alphaF() < 0.5
+    toolbar.window_.hide()
+
+
+def test_the_style_popup_follows_the_style_menu(toolbar):
+    """One state for Format > Style, wherever it is offered: the menu's own
+    action says whether it can be used, and the pop-up follows it."""
+    from PySide6.QtWidgets import QMenu as Menu
+    style_menu = toolbar.style_button.menu()
+    assert isinstance(style_menu, Menu)
+    style_menu.menuAction().setEnabled(False)
+    assert not toolbar.style_button.isEnabled()
+    style_menu.menuAction().setEnabled(True)
+    assert toolbar.style_button.isEnabled()
+
+
+SHOWN_WHOLE = r"""
+import json, os, sys
+sys.path.insert(0, sys.argv[1])
+os.environ["QT_QPA_PLATFORM"] = "offscreen"
+from PySide6.QtCore import QEvent, QObject
+from PySide6.QtWidgets import QApplication, QToolButton
+app = QApplication(sys.argv[:1])
+import main_window
+
+w = main_window.MainWindow()
+w.show()
+ed = w.new_tab()
+app.processEvents()
+w.resize(w.minimumSizeHint())          # its layout still to be done when it opens
+tb = w.format_toolbar
+menu = tb.findChild(QToolButton, "qt_toolbar_ext_button").menu()
+seen = []
+
+class Count(QObject):
+    def eventFilter(self, obj, event):
+        if event.type() in (QEvent.Type.Show, QEvent.Type.Paint):
+            seen.append(len([a for a in menu.actions() if a.menu() is not None]))
+        return False
+
+count = Count()
+menu.installEventFilter(count)
+menu.popup(tb.mapToGlobal(tb.rect().bottomLeft()))
+app.processEvents()
+app.processEvents()
+menu.hide()
+ed.document().setModified(False)
+w.close()
+print("RESULT " + json.dumps({"seen": seen}))
+"""
+
+
+def test_the_chevron_menu_is_whole_from_its_first_paint(tmp_path):
+    # Review H3: Style and Insert went in after it showed, so it painted,
+    # then grew by two rows.
+    r = run_window_script(SHOWN_WHOLE, tmp_path)
+    assert r["seen"] and all(count == 2 for count in r["seen"]), r

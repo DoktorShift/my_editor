@@ -2,12 +2,20 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 """The format toolbar: the few text controls writers reach for most.
 
-The paragraph style (Body, Heading 1 to 3), bold, italic, strikethrough,
-a link, the two kinds of list and a quote. Everything else is in the
-menus, and the menus hold everything; this bar repeats only what is used
-all the time, the way TextEdit's and Pages' format bars do. Underline has
-no button: Markdown and Nostr have no underline (it stays in the Format
-menu, for local files).
+Undo and Redo, the paragraph style (Body, Heading 1 to 3), bold, italic,
+strikethrough, a link, the two kinds of list, a quote, and one Insert
+button that opens the Insert menu itself (as Pages' toolbar has). Everything
+else is in the menus, and the menus hold everything; this bar repeats only
+what is used all the time, the way TextEdit's and Pages' format bars do.
+Underline has no button: Markdown and Nostr have no underline (it stays in
+the Format menu, for local files).
+
+Undo and Redo each have an arrow beside them, as Pages' and Word's do: it
+lists the steps they take back (or bring back), newest first, to go
+several at once. The window fills those lists as they open (undo_menu,
+redo_menu); they open with a right-click (Control-click on a Mac) too, and
+with Down while the button has the keyboard focus, which Qt gives such a
+button no key for.
 
 Every button is the window's own command (commands.py): the same action,
 so its state, its key and whether it applies right now are the same here
@@ -20,9 +28,12 @@ from __future__ import annotations
 
 from typing import Dict, Optional
 
-from PySide6.QtCore import QSize, Qt
-from PySide6.QtGui import QAction, QColor, QKeySequence
-from PySide6.QtWidgets import QHBoxLayout, QMenu, QPushButton, QToolBar, QToolButton, QWidget
+from PySide6.QtCore import QEvent, QPointF, QSize, Qt
+from PySide6.QtGui import QAction, QColor, QKeySequence, QPainter, QPainterPath, QPen
+from PySide6.QtWidgets import (
+    QHBoxLayout, QMenu, QPushButton, QStyle, QStyleOptionButton, QStylePainter, QToolBar,
+    QToolButton, QWidget,
+)
 
 import format_icons
 from constants import (
@@ -31,25 +42,194 @@ from constants import (
 )
 from i18n import _, pgettext
 
-# The buttons, in order; None is a separator.
+# The buttons before the style pop-up, each with its list of steps.
+HISTORY = ("undo", "redo")
+# The buttons after it, in order; None is a separator.
 LAYOUT = ("bold", "italic", "strike", None, "link", None, "bullets", "numbers", "checklist",
           "quote")
 
 
-def tooltip_for(action: QAction) -> str:
-    """"Bold (⌘B)": the command's name and its key, as the platform
-    writes keys, or only the name when it has none."""
-    title = action.text().replace("&", "").rstrip("…").rstrip()
+# How each command's button is drawn, on the toolbar and on the format bar
+# over a selection (selection_bar.py), in the ink it is given.
+ICONS = {
+    "undo": format_icons.undo,
+    "redo": format_icons.redo,
+    "bold": lambda ink: format_icons.letter(pgettext("format button", "B"), ink, bold=True),
+    "italic": lambda ink: format_icons.letter(pgettext("format button", "I"), ink,
+                                              italic=True),
+    # A letter whose struck form still reads as a letter crossed out (a
+    # struck D reads as the letter Đ).
+    "strike": lambda ink: format_icons.letter(pgettext("format button", "S"), ink,
+                                              strike=True),
+    "code": format_icons.code_block,
+    "link": format_icons.link,
+    "bullets": format_icons.bulleted_list,
+    "numbers": format_icons.numbered_list,
+    "checklist": format_icons.checklist,
+    "quote": format_icons.quote,
+}
+
+
+def draw_icons(actions: Dict[str, QAction], dark: bool) -> None:
+    """Give each of ``actions`` (by ICONS' names) its icon, in the theme's
+    ink. The menus stay text, as menus on every platform are."""
+    ink = QColor(DARK_FG if dark else LIGHT_FG)
+    for name, action in actions.items():
+        action.setIcon(ICONS[name](ink))
+        action.setIconVisibleInMenu(False)
+
+
+def button_rules(scope: str, dark: bool) -> str:
+    """The style of the command buttons inside ``scope`` (a selector): quiet
+    until the pointer is over one, and one that is on shows an edge of at
+    least 3:1 against what is behind it (WCAG 1.4.11), not a faint fill
+    alone."""
+    hover, checked = (("rgba(255, 255, 255, 0.08)", "rgba(255, 255, 255, 0.16)") if dark
+                      else ("rgba(0, 0, 0, 0.06)", "rgba(0, 0, 0, 0.11)"))
+    checked_edge = DARK_MUTED_FG if dark else LIGHT_MUTED_FG
+    text = DARK_FG if dark else LIGHT_FG
+    selection = DARK_SELECTION if dark else LIGHT_SELECTION
+    return f"""
+        {scope} QToolButton {{
+            color: {text};
+            background: transparent;
+            border: 1px solid transparent;
+            border-radius: 5px;
+            padding: 3px;
+        }}
+        {scope} QToolButton:hover {{ background: {hover}; }}
+        {scope} QToolButton:checked {{
+            background: {checked};
+            border-color: {checked_edge};
+        }}
+        {scope} QToolButton:focus {{ border-color: {selection}; }}
+    """
+
+
+class Disclosure(QWidget):
+    """The small arrow at the end of a button that opens a menu: the style
+    pop-up, Undo's and Redo's lists, Insert. Drawn here, one size and in
+    the theme's quiet ink everywhere, dimmed with its button: the styles'
+    own drew a dot on a Mac for the pop-up and a chevron as heavy as the
+    icons for the others (the sheets hide theirs). It lets every click
+    through to its button."""
+
+    WIDTH = 9          # the arrow's room, as small as a Mac pop-up button's
+    INK = {True: DARK_MUTED_FG, False: LIGHT_MUTED_FG}
+
+    def __init__(self, button: QWidget, *, end: int, dark: bool) -> None:
+        super().__init__(button)
+        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+        self._end = end              # from the button's right edge to the arrow's
+        self._dark = dark
+        button.installEventFilter(self)
+        self._fit()
+        self.show()
+
+    def set_dark(self, dark: bool) -> None:
+        self._dark = dark
+        self.update()
+
+    def ink(self) -> QColor:
+        ink = QColor(self.INK[self._dark])
+        return ink if self.parentWidget().isEnabled() else format_icons.dimmed(ink)
+
+    def _fit(self) -> None:
+        button = self.parentWidget()
+        self.setGeometry(button.width() - self._end - self.WIDTH, 0, self.WIDTH,
+                         button.height())
+
+    def eventFilter(self, watched, event) -> bool:  # noqa: N802, Qt's name
+        if event.type() == QEvent.Type.Resize:
+            self._fit()
+        elif event.type() == QEvent.Type.EnabledChange:
+            self.update()
+        return False
+
+    def paintEvent(self, _event) -> None:  # noqa: N802, Qt's name
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        pen = QPen(self.ink(), 1.4)
+        pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+        pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+        painter.setPen(pen)
+        middle = self.height() / 2
+        path = QPainterPath()
+        path.moveTo(QPointF(1.5, middle - 1.5))
+        path.lineTo(QPointF(self.WIDTH / 2, middle + 1.8))
+        path.lineTo(QPointF(self.WIDTH - 1.5, middle - 1.5))
+        painter.drawPath(path)
+        painter.end()
+
+
+class PopupButton(QPushButton):
+    """A pop-up button (the paragraph style's) drawn without Qt's own menu
+    indicator, which is a dot on a Mac: its Disclosure is its arrow."""
+
+    def follow(self, menu: QMenu) -> None:
+        """Be usable while ``menu`` (Format > Style) is: its own action says
+        so, and the button follows it, so the menu has one state on the menu
+        bar, the toolbar and every format bar."""
+        self._followed = menu.menuAction()
+        self._followed.changed.connect(self._follow)
+        self._follow()
+
+    def _follow(self) -> None:
+        self.setEnabled(self._followed.isEnabled())
+
+    def paintEvent(self, _event) -> None:  # noqa: N802, Qt's name
+        painter = QStylePainter(self)
+        option = QStyleOptionButton()
+        self.initStyleOption(option)
+        option.features &= ~QStyleOptionButton.ButtonFeature.HasMenu
+        painter.drawControl(QStyle.ControlElement.CE_PushButton, option)
+
+
+# Where the style pop-up's arrow ends, from the button's right edge, in the
+# room its padding keeps (style_popup_rules).
+STYLE_ARROW_END = 9
+
+
+def style_popup_rules(dark: bool) -> str:
+    """The paragraph style pop-up's own sheet: it reads left to right, its
+    name first and the arrow (a Disclosure) at the end, as in TextEdit and
+    Pages. (A ::menu-indicator rule would make Qt drop the padding: the
+    PopupButton leaves Qt's indicator out instead.)"""
+    text, border, selection = ((DARK_FG, DARK_BORDER, DARK_SELECTION) if dark
+                               else (LIGHT_FG, LIGHT_BORDER, LIGHT_SELECTION))
+    hover = "rgba(255, 255, 255, 0.08)" if dark else "rgba(0, 0, 0, 0.06)"
+    dim = format_icons.dimmed(QColor(text))
+    dim_text = f"rgba({dim.red()}, {dim.green()}, {dim.blue()}, {dim.alphaF():.2f})"
+    return f"""
+        QPushButton {{
+            color: {text};
+            background: transparent;
+            border: 1px solid {border};
+            border-radius: 5px;
+            padding: 4px 24px 4px 9px;
+            text-align: left;
+        }}
+        QPushButton:hover {{ background: {hover}; }}
+        QPushButton:focus {{ border-color: {selection}; }}
+        QPushButton:disabled {{ color: {dim_text}; background: transparent; }}
+    """
+
+
+def tooltip_for(action: QAction, title: str = "") -> str:
+    """"Bold (⌘B)": the command's name (or ``title``) and its key, as the
+    platform writes keys, or only the name when it has none."""
+    title = title or action.text().replace("&", "").rstrip("…").rstrip()
     keys = action.shortcut().toString(QKeySequence.SequenceFormat.NativeText)
     return _("{command} ({keys})").format(command=title, keys=keys) if keys else title
 
 
 class FormatToolbar(QToolBar):
-    """The format toolbar. ``actions`` maps LAYOUT's names to the
-    window's commands; ``style_menu`` is Format > Style."""
+    """The format toolbar. ``actions`` maps HISTORY's and LAYOUT's names
+    to the window's commands; ``style_menu`` is Format > Style and
+    ``insert_menu`` the Insert menu."""
 
-    def __init__(self, actions: Dict[str, QAction], style_menu: QMenu, *,
-                 dark: bool = True, parent: Optional[QWidget] = None) -> None:
+    def __init__(self, actions: Dict[str, QAction], style_menu: QMenu, insert_menu: QMenu,
+                 *, dark: bool = True, parent: Optional[QWidget] = None) -> None:
         super().__init__(_("Format"), parent)
         self.setObjectName("FormatToolbar")
         self.setAccessibleName(_("Format"))
@@ -60,11 +240,35 @@ class FormatToolbar(QToolBar):
         self._actions = actions
         self._dark = dark
 
+        # Undo and Redo first, at the leading edge (the last a narrow window
+        # moves into the chevron): a click takes one step, the arrow beside
+        # lists them (the module docstring).
+        self.buttons: Dict[str, QToolButton] = {}
+        self._history_titles: Dict[str, str] = {}
+        for name in HISTORY:
+            action = actions[name]
+            self.addAction(action)
+            button = self.widgetForAction(action)
+            button.setMenu(QMenu(button))
+            button.setPopupMode(QToolButton.ToolButtonPopupMode.MenuButtonPopup)
+            button.setFocusPolicy(Qt.FocusPolicy.TabFocus)
+            button.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+            button.customContextMenuRequested.connect(lambda _at, b=button: b.showMenu())
+            button.installEventFilter(self)
+            button.setAccessibleName(_("Undo") if name == "undo" else _("Redo"))
+            self.buttons[name] = button
+            action.changed.connect(lambda n=name: self._describe_history(n))
+            self._describe_history(name)
+        self.undo_menu = self.buttons["undo"].menu()
+        self.redo_menu = self.buttons["redo"].menu()
+        self.addSeparator()
+
         # The paragraph style, as a pop-up button that says which it is.
-        self.style_button = QPushButton(self)
+        self.style_button = PopupButton(self)
         self.style_button.setObjectName("StyleButton")
         self._style_menu = style_menu        # the window's; kept while the bar uses it
         self.style_button.setMenu(style_menu)
+        self.style_button.follow(style_menu)
         self.style_button.setAccessibleName(_("Style"))
         self.style_button.setToolTip(_("Paragraph style"))
         names = [a.text() for a in style_menu.actions()] + [pgettext("paragraph style", "Mixed")]
@@ -73,7 +277,6 @@ class FormatToolbar(QToolBar):
         self.addWidget(self.style_button)
         self.addSeparator()
 
-        self.buttons: Dict[str, QToolButton] = {}
         for name in LAYOUT:
             if name is None:
                 self.addSeparator()
@@ -84,14 +287,63 @@ class FormatToolbar(QToolBar):
             self.buttons[name] = button
             action.changed.connect(lambda a=action, b=button: self._describe(a, b))
             self._describe(action, button)
+        self.addSeparator()
+
+        # Insert: the window's Insert menu itself, so the same items in the
+        # same order, the Nostr ones only while an account is in use (the
+        # menu fills itself as it opens).
+        self.insert_button = QToolButton(self)
+        self.insert_button.setObjectName("InsertButton")
+        self.insert_button.setMenu(insert_menu)
+        self.insert_button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        self.insert_button.setFocusPolicy(Qt.FocusPolicy.TabFocus)
+        self.insert_button.setAccessibleName(_("Insert"))
+        self.insert_button.setToolTip(_("Insert"))
+        self.addWidget(self.insert_button)
         # The chevron that holds the buttons a narrow window has no room
         # for: Qt gives it no name, so a screen reader would say "button".
+        self._insert_menu = insert_menu
+        self._popup_entries: list = []
         more = self.findChild(QToolButton, "qt_toolbar_ext_button")
         if more is not None:
             more.setAccessibleName(_("More Formatting"))
             more.setToolTip(_("More Formatting"))
+            if more.menu() is not None:
+                # Before it shows, so it paints whole the first time.
+                self._more_menu = more.menu()
+                self._more_menu.aboutToShow.connect(self._hold_hidden_popups)
         self.set_style_name(_("Body"))
+        # Each pop-up's arrow, drawn (Disclosure): in the room the sheet
+        # gives Undo's, Redo's and Insert's menu, and the style pop-up's.
+        self._arrows = [Disclosure(button, end=2, dark=dark) for button in (
+            self.buttons["undo"], self.buttons["redo"], self.insert_button)]
+        self._arrows.append(Disclosure(self.style_button, end=STYLE_ARROW_END, dark=dark))
         self.set_dark(dark)
+
+    def minimumSizeHint(self) -> QSize:  # noqa: N802, Qt's name
+        """Room for Undo and Redo both, before the chevron: the narrowest
+        window keeps them in sight, every other button going into the
+        chevron first (Qt's own minimum holds the first button only)."""
+        hint = super().minimumSizeHint()
+        redo = self.buttons["redo"].sizeHint().width() + self.layout().spacing()
+        return QSize(hint.width() + redo, hint.height())
+
+    def _hold_hidden_popups(self) -> None:
+        """The chevron's menu, as it opens: the style pop-up and Insert too
+        when they have no room, as submenus (Qt lists the hidden buttons
+        only, not the pop-ups)."""
+        menu = self._more_menu
+        # A layout still to be done would fill the menu again once shown,
+        # without them: it is done now, before they go in.
+        self.layout().activate()
+        for entry in self._popup_entries:
+            menu.removeAction(entry)
+        self._popup_entries = []
+        first = next((a for a in menu.actions() if not a.isSeparator()), None)
+        if not self.style_button.isVisible():
+            self._popup_entries.append(menu.insertMenu(first, self._style_menu))
+        if not self.insert_button.isVisible():
+            self._popup_entries.append(menu.addMenu(self._insert_menu))
 
     def add_trailing(self, widget: QWidget) -> QWidget:
         """A holder for ``widget`` (the Write, Preview and Split switch), to
@@ -124,34 +376,40 @@ class FormatToolbar(QToolBar):
         """The paragraph style at the caret ("Heading 2"), on the pop-up."""
         self.style_button.setText(name)
 
+    def describe_history(self, undo: str, redo: str) -> None:
+        """What Undo and Redo take now, for their tips ("Undo Typing"), on
+        every platform."""
+        self._history_titles = {"undo": undo, "redo": redo}
+        for name in HISTORY:
+            self._describe_history(name)
+
+    def _describe_history(self, name: str) -> None:
+        # Also when the command changes, which sets Qt's own tip again.
+        self.buttons[name].setToolTip(tooltip_for(self._actions[name],
+                                                  self._history_titles.get(name, "")))
+
+    def eventFilter(self, watched, event) -> bool:  # noqa: N802, Qt's name
+        # Down (Option-Down, Alt+Down) opens Undo's or Redo's list from the
+        # keyboard, as it opens a pop-up menu; Space takes one step.
+        if (event.type() == QEvent.Type.KeyPress and event.key() == Qt.Key.Key_Down
+                and watched in (self.buttons["undo"], self.buttons["redo"])):
+            watched.showMenu()
+            return True
+        return super().eventFilter(watched, event)
+
     def set_dark(self, dark: bool) -> None:
         self._dark = dark
+        draw_icons({name: self._actions[name] for name in (*HISTORY, *LAYOUT) if name}, dark)
         ink = QColor(DARK_FG if dark else LIGHT_FG)
-        icons = {
-            "bold": format_icons.letter(pgettext("format button", "B"), ink, bold=True),
-            "italic": format_icons.letter(pgettext("format button", "I"), ink, italic=True),
-            # A letter whose struck form still reads as a letter crossed out
-            # (a struck D reads as the letter Đ).
-            "strike": format_icons.letter(pgettext("format button", "S"), ink, strike=True),
-            "link": format_icons.link(ink),
-            "bullets": format_icons.bulleted_list(ink),
-            "numbers": format_icons.numbered_list(ink),
-            "checklist": format_icons.checklist(ink),
-            "quote": format_icons.quote(ink),
-        }
-        for name, icon in icons.items():
-            self._actions[name].setIcon(icon)
-            # The menus stay text, as menus on every platform are.
-            self._actions[name].setIconVisibleInMenu(False)
-        background, border, selection = (
-            (DARK_MENU_BG, DARK_BORDER, DARK_SELECTION) if dark
-            else (LIGHT_MENU_BG, LIGHT_BORDER, LIGHT_SELECTION))
+        self.insert_button.setIcon(format_icons.plus(ink))
+        # The chevron in the theme's ink too: the style's own barely shows
+        # on a dark toolbar.
+        more = self.findChild(QToolButton, "qt_toolbar_ext_button")
+        if more is not None:
+            more.setIcon(format_icons.more(ink))
+        background, border = (DARK_MENU_BG, DARK_BORDER) if dark else (LIGHT_MENU_BG,
+                                                                       LIGHT_BORDER)
         hover = "rgba(255, 255, 255, 0.08)" if dark else "rgba(0, 0, 0, 0.06)"
-        checked = "rgba(255, 255, 255, 0.16)" if dark else "rgba(0, 0, 0, 0.11)"
-        # A button that is on shows it with an edge of at least 3:1 against
-        # the toolbar (WCAG 1.4.11), not with a faint fill alone.
-        checked_edge = DARK_MUTED_FG if dark else LIGHT_MUTED_FG
-        text = DARK_FG if dark else LIGHT_FG
         self.setStyleSheet(f"""
             #FormatToolbar {{
                 background: {background};
@@ -160,47 +418,31 @@ class FormatToolbar(QToolBar):
                 padding: 3px 8px;
                 spacing: 2px;
             }}
-            #FormatToolbar QToolButton {{
-                color: {text};
+            {button_rules("#FormatToolbar", dark)}
+            #FormatToolbar QToolButton[popupMode="1"],
+            #FormatToolbar #InsertButton {{ padding-right: 13px; }}
+            #FormatToolbar #qt_toolbar_ext_button {{ padding: 1px; }}
+            #FormatToolbar #InsertButton::menu-indicator {{ image: none; width: 0px; }}
+            #FormatToolbar QToolButton::menu-button {{
                 background: transparent;
-                border: 1px solid transparent;
-                border-radius: 5px;
-                padding: 3px;
+                border: none;
+                width: 12px;
             }}
-            #FormatToolbar QToolButton:hover {{ background: {hover}; }}
-            #FormatToolbar QToolButton:checked {{
-                background: {checked};
-                border-color: {checked_edge};
+            #FormatToolbar QToolButton::menu-arrow {{ image: none; }}
+            #FormatToolbar QToolButton::menu-button:hover {{
+                background: {hover};
+                border-radius: 4px;
             }}
-            #FormatToolbar QToolButton:focus {{ border-color: {selection}; }}
             #FormatToolbar::separator {{
                 background: {border};
                 width: 1px;
                 margin: 5px 6px;
             }}
         """)
-        self._style_style_button(text, border, hover, selection)
+        self.style_button.setStyleSheet(style_popup_rules(dark))
+        for arrow in self._arrows:
+            arrow.set_dark(dark)
         self._style_trailing()
-
-    def _style_style_button(self, text: str, border: str, hover: str, selection: str) -> None:
-        dim = format_icons.dimmed(QColor(text))
-        dim_text = f"rgba({dim.red()}, {dim.green()}, {dim.blue()}, {dim.alphaF():.2f})"
-        # Its own sheet: a pop-up button reads left to right, its name
-        # first and the arrow at the end, as in TextEdit and Pages. (A
-        # ::menu-indicator rule would make Qt drop the padding.)
-        self.style_button.setStyleSheet(f"""
-            QPushButton {{
-                color: {text};
-                background: transparent;
-                border: 1px solid {border};
-                border-radius: 5px;
-                padding: 4px 24px 4px 9px;
-                text-align: left;
-            }}
-            QPushButton:hover {{ background: {hover}; }}
-            QPushButton:focus {{ border-color: {selection}; }}
-            QPushButton:disabled {{ color: {dim_text}; background: transparent; }}
-        """)
 
     @staticmethod
     def _describe(action: QAction, button: QToolButton) -> None:

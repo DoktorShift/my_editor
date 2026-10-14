@@ -752,7 +752,8 @@ class PdfViewerTab(QWidget):
         if self._reload_pending:
             return
         self._reload_pending = True
-        QTimer.singleShot(400, self._do_scheduled_reload)
+        # Tied to the tab: dropped if it is closed meanwhile.
+        QTimer.singleShot(400, self, self._do_scheduled_reload)
 
     def _do_scheduled_reload(self):
         self._reload_pending = False
@@ -773,6 +774,16 @@ class PdfViewerTab(QWidget):
             self.jump_to_page(min(page, self.document.pageCount() - 1))
             self.page_changed.emit()
 
+    def release(self) -> None:
+        """Let go of the document as the tab closes, before it is deleted:
+        Find's results leave the view, and the file is closed, which stops
+        the view rendering it and Find scanning it. (Taking the document
+        from the view or the search instead makes Qt connect to nothing,
+        and say so in the log.)"""
+        self._reload_pending = False
+        self.view.setSearchModel(None)
+        self.document.close()
+
     def document_title(self) -> str:
         """Title from PDF metadata, or the file name without extension."""
         title = self.document.metaData(QPdfDocument.MetaDataField.Title)
@@ -786,7 +797,7 @@ class PdfViewerTab(QWidget):
             self._restore_pending = False
             # Deferred one event-loop turn so the first layout pass has
             # assigned the view its real size before we jump.
-            QTimer.singleShot(0, self._restore_view_state)
+            QTimer.singleShot(0, self, self._restore_view_state)
 
     def _restore_view_state(self):
         state = load_view_state(self._file_path)

@@ -44,6 +44,7 @@ from constants import (
 )
 from widgets import ElidedLabel, FindBar, LineNumberGutter, FileChangedBar, UpdateBar
 from format_toolbar import FormatToolbar
+from selection_bar import SelectionBar
 from atomic_file import (
     newline_of, read_json, read_text_as_written, save_document, save_text_document,
     with_newlines, write_json,
@@ -1226,6 +1227,7 @@ class MainWindow(QMainWindow):
         ed.set_context_menu_filler(self._fill_editor_context_menu)
         ed.set_structure_check(lambda e=ed: self._editor_kind(e) == "rich")
         ed.set_local_formats_check(lambda e=ed: self._keeps_underline(e))
+        ed.set_pictures_check(lambda e=ed: self._keeps_pictures(e))
         ed.set_paste_guard(lambda text, e=ed: self._guard_paste(e, text))
         ed.mention_requested.connect(lambda at, e=ed: self._ask_mention(e, at))
         # Mentions read back from Markdown get their names (rich_text.link_references).
@@ -1234,7 +1236,28 @@ class MainWindow(QMainWindow):
         ed.set_slash_items(self._slash_items)
         ed.set_link_opener(self._open_link)
         ed.set_nostr_check(lambda: self.nostr_state.active)
+        ed.selection_bar = SelectionBar(
+            ed, {"bold": self.act_bold, "italic": self.act_italic, "strike": self.act_strike,
+                 "code": self.act_code, "link": self.act_link},
+            self.m_style, dark=lambda: self.is_dark_theme,
+            wanted=lambda e=ed: self._wants_selection_bar(e))
         return ed
+
+    def _wants_selection_bar(self, ed) -> bool:
+        """Whether the format bar may show over ``ed``'s selection: chosen
+        in Settings, in the tab in front, where formatting applies (a
+        document that holds Markdown), while it is being written."""
+        return (self.format_bar_on_selection and ed is self.current_editor()
+                and self._editor_kind(ed) == "rich" and not self._shows_preview_only(ed)
+                and not ed.isReadOnly())
+
+    def _set_format_bar_on_selection(self, on: bool) -> None:
+        """Settings' Show the Format Bar When Selecting Text, remembered."""
+        self.format_bar_on_selection = bool(on)
+        save_setting("format_bar_on_selection", self.format_bar_on_selection)
+        ed = self.current_editor()
+        if not on and ed is not None:
+            ed.selection_bar.hide()
 
     def _resolve_local_image(self, editor, name: str):
         """QImage for an image named relative to the editor's own file.
@@ -1451,12 +1474,15 @@ class MainWindow(QMainWindow):
             return
         imports = self._imports_in_front()
         field = _text_field(QApplication.focusWidget())
+        toolbar = getattr(self, "format_toolbar", None)
         if imports is not None:
             # What Undo undoes in the window in front (Undo Skip there).
             self.act_undo.setText(imports.undo_text())
             self.act_redo.setText(redo_words())
             self.act_undo.setEnabled(imports.can_undo())
             self.act_redo.setEnabled(field is not None and _field_history(field)[1])
+            if toolbar is not None:
+                toolbar.describe_history(imports.undo_text(), redo_words())
             return
         undo_name = redo_name = ""
         if field is not None:
@@ -1476,6 +1502,45 @@ class MainWindow(QMainWindow):
         self.act_redo.setText(redo_words(redo_name if can_redo else ""))
         self.act_undo.setEnabled(can_undo)
         self.act_redo.setEnabled(can_redo)
+        if toolbar is not None:
+            # The toolbar's tips name the step on every platform.
+            toolbar.describe_history(undo_words(undo_name if can_undo else "", named=True),
+                                     redo_words(redo_name if can_redo else "", named=True))
+
+    # How many steps the toolbar's Undo and Redo lists show, as Word's.
+    HISTORY_LENGTH = 15
+
+    def _fill_history(self, menu: QMenu, *, redo: bool) -> None:
+        """The toolbar's list of what Undo (or Redo) takes one step after
+        another, newest first, as the arrow beside the button opens it:
+        choosing the third takes three steps, exactly as three Undos would.
+        Only a document's steps have names; for a text field or the
+        Imports window, the list holds the one step the button takes, by
+        the Edit menu's words."""
+        menu.clear()
+        action = self.act_redo if redo else self.act_undo
+        if not action.isEnabled():
+            return
+        ed = self.current_editor()
+        names = []
+        if (ed is not None and self._imports_in_front() is None
+                and _text_field(QApplication.focusWidget()) is None):
+            names = (ed.redo_history if redo else ed.undo_history)(self.HISTORY_LENGTH)
+        if not names:
+            menu.addAction(action.text(), action.trigger)
+            return
+        for count, name in enumerate(names, 1):
+            menu.addAction(_(name), lambda n=count, e=ed: self._take_steps(e, n, redo=redo))
+
+    def _take_steps(self, ed, count: int, *, redo: bool) -> None:
+        """``count`` single Undos (or Redos) of ``ed``, one after another."""
+        if not shiboken6.isValid(ed) or ed is not self.current_editor() \
+                or self._shows_preview_only(ed):
+            return
+        take = ed.redo if redo else ed.undo
+        for _step in range(count):
+            take()
+        self._update_format_buttons()
 
     def _update_clipboard_commands(self, *_args) -> None:
         """Cut, Copy, Paste and Delete for whatever has the focus, dimmed
@@ -1620,6 +1685,8 @@ class MainWindow(QMainWindow):
             else:
                 name = pgettext("paragraph style", "Mixed")
             self.format_toolbar.set_style_name(name)
+            if ed is not None:
+                ed.selection_bar.set_style_name(name)
         # A checklist is shown as one, not as a bulleted list as well.
         self.act_bullets.setChecked(paragraphs.list_kind == rich_text.BULLET
                                     and not paragraphs.tasks)
@@ -1829,7 +1896,8 @@ class MainWindow(QMainWindow):
         # Edit Link… while the caret is in a link.
         self.act_link = add(Command("insert.link", _("Add Link\u2026"), INSERT, "Ctrl+K",
                                     keywords=(_("web address"), "url", _("hyperlink")),
-                                    slash_section=slash_menu.INSERT),
+                                    slash_section=slash_menu.INSERT,
+                                    insert_title=_("Link\u2026")),
                             triggered=lambda: self._editor_call("show_link_popover"))
         self.act_divider = add(Command("insert.divider", _("Divider"), INSERT,
                                        keywords=(_("horizontal rule"), _("line"),
@@ -1863,6 +1931,11 @@ class MainWindow(QMainWindow):
                                                   _("citation")),
                                         slash_section=slash_menu.INSERT),
                                 triggered=lambda: self._editor_call("insert_footnote"))
+        # Image...: a picture file, put in as dropping it at the caret would.
+        self.act_insert_image = add(Command("insert.image", _("Image\u2026"), INSERT,
+                                            keywords=(_("picture"), _("photo")),
+                                            slash_section=slash_menu.INSERT),
+                                    triggered=self._insert_image)
         # Table...: its size is chosen on a grid at the caret (table_picker).
         self.act_table = add(Command("insert.table", _("Table\u2026"), INSERT,
                                      keywords=(_("grid"), _("rows"), _("columns")),
@@ -1932,7 +2005,8 @@ class MainWindow(QMainWindow):
         self._rich_actions = [self.act_strike, self.act_code, *self.act_styles,
                               self.act_bullets, self.act_numbers, self.act_checklist,
                               self.act_quote, self.act_divider, self.act_link,
-                              self.act_code_block, self.act_table, self.act_footnote]
+                              self.act_code_block, self.act_table, self.act_footnote,
+                              self.act_insert_image]
         # Paragraph structure, which a table cell (one line of words in
         # Markdown) cannot hold: off in a table.
         self._block_actions = [*self.act_styles, self.act_bullets, self.act_numbers,
@@ -1943,7 +2017,7 @@ class MainWindow(QMainWindow):
         self._word_actions = [self.act_bold, self.act_italic, self.act_underline,
                               self.act_strike, self.act_code, self.act_link,
                               *self.act_colors, self.act_remove_color, self.act_reset_format,
-                              self.act_footnote]
+                              self.act_footnote, self.act_insert_image]
 
         self._search_matches = []
         self._current_match_index = -1
@@ -2037,6 +2111,9 @@ class MainWindow(QMainWindow):
                     checkable=True, keywords=(_("spelling"), _("spellcheck"))),
             toggled=self._set_check_spelling, checked=self.check_spelling)
         self.markdown_shortcuts = bool(load_settings().get("markdown_shortcuts", False))
+        # The format bar over text selected with the pointer (Settings).
+        self.format_bar_on_selection = bool(
+            load_settings().get("format_bar_on_selection", True))
         self.act_markdown_shortcuts = add(
             Command("edit.markdown_shortcuts", _("Markdown Shortcuts"), EDIT, checkable=True,
                     keywords=(_("autoformat"), _("substitutions"), "markdown")),
@@ -2111,22 +2188,26 @@ class MainWindow(QMainWindow):
             Command("nostr.media_library", _("Media Library…"), NOSTR,
                     nostr=True, listed_as=_("Media library"), keywords=("images", "upload")),
             triggered=self._on_nostr_media_library)
+        # A file of the media library, already on the media servers: not
+        # Insert > Image..., which puts in a file from the computer.
         self.act_nostr_insert_image = add(
-            Command("nostr.insert_image", _("Insert Image…"), NOSTR,
-                    nostr=True, listed_as=_("Insert image"),
-                    keywords=(_("picture"), _("photo")), slash_section=slash_menu.INSERT),
+            Command("nostr.insert_image", _("Insert Image from Media Library…"), NOSTR,
+                    nostr=True, listed_as=_("Insert image from media library"),
+                    keywords=(_("picture"), _("photo"), _("image")),
+                    slash_section=slash_menu.INSERT,
+                    insert_title=_("Image from Media Library…")),
             triggered=self._on_nostr_insert_image)
         # Mention: "@" at the start of a word does the same while typing.
         self.act_insert_mention = add(
             Command("nostr.insert_mention", _("Insert Mention…"), NOSTR, nostr=True,
                     keywords=(_("person"), _("people"), _("tag"), "@"),
-                    slash_section=slash_menu.INSERT),
+                    slash_section=slash_menu.INSERT, insert_title=_("Mention…")),
             triggered=lambda: self._ask_mention(self.current_editor(), -1))
         # A note or an article quoted in the text, as a paragraph of its own.
         self.act_insert_reference = add(
             Command("nostr.insert_reference", _("Insert Note or Article…"), NOSTR, nostr=True,
                     keywords=(_("quote"), _("embed"), _("note"), _("article")),
-                    slash_section=slash_menu.INSERT),
+                    slash_section=slash_menu.INSERT, insert_title=_("Note or Article…")),
             triggered=lambda: self._ask_reference(self.current_editor()))
         # Article Details: the inspector beside the document, as in Pages
         # (View > Inspector, Option-Command-I there; no convention elsewhere).
@@ -2142,7 +2223,8 @@ class MainWindow(QMainWindow):
         self.act_insert_audio_video = add(
             Command("nostr.insert_audio_video", _("Insert Audio or Video…"), NOSTR,
                     nostr=True, keywords=(_("audio"), _("video"), _("podcast"), _("music"),
-                                          _("film")), slash_section=slash_menu.INSERT),
+                                          _("film")), slash_section=slash_menu.INSERT,
+                    insert_title=_("Audio or Video…")),
             triggered=self._ask_audio_or_video)
         # Drafts surface - the side-docked panel, toggled from the Nostr
         # menu (no key, as above).
@@ -2312,6 +2394,7 @@ class MainWindow(QMainWindow):
         self.m_insert = self.menuBar().addMenu(_("&Insert"))
         self.m_insert.addAction(self.act_link)
         self.m_insert.addSeparator()
+        self.m_insert.addAction(self.act_insert_image)
         self.m_insert.addAction(self.act_table)
         self.m_insert.addAction(self.act_divider)
         self.m_insert.addAction(self.act_code_block)
@@ -2322,6 +2405,8 @@ class MainWindow(QMainWindow):
         self._insert_nostr_actions = [self.act_insert_mention, self.act_insert_reference,
                                       self.act_nostr_insert_image, self.act_insert_audio_video]
         self.m_insert.aboutToShow.connect(self._fill_insert_menu)
+        # Named for the verb: "Mention…" in it, "Insert Mention…" elsewhere.
+        self.commands.use_insert_titles(self.m_insert)
 
         m_format = self.menuBar().addMenu(_("F&ormat"))
         self.m_style = m_format.addMenu(_("Style"))
@@ -2508,10 +2593,16 @@ class MainWindow(QMainWindow):
         v.setContentsMargins(0, 0, 0, 0)
         v.setSpacing(0)
         self.format_toolbar = FormatToolbar(
-            {"bold": self.act_bold, "italic": self.act_italic, "strike": self.act_strike,
+            {"undo": self.act_undo, "redo": self.act_redo,
+             "bold": self.act_bold, "italic": self.act_italic, "strike": self.act_strike,
              "link": self.act_link, "bullets": self.act_bullets, "numbers": self.act_numbers,
              "checklist": self.act_checklist, "quote": self.act_quote},
-            self.m_style, dark=self.is_dark_theme)
+            self.m_style, self.m_insert, dark=self.is_dark_theme)
+        self.format_toolbar.undo_menu.aboutToShow.connect(
+            lambda: self._fill_history(self.format_toolbar.undo_menu, redo=False))
+        self.format_toolbar.redo_menu.aboutToShow.connect(
+            lambda: self._fill_history(self.format_toolbar.redo_menu, redo=True))
+        self._update_undo_redo_buttons()
         self.view_switch = ViewSwitch(
             (self.act_view_write, self.act_view_preview, self.act_view_split),
             dark=self.is_dark_theme)
@@ -2784,11 +2875,8 @@ class MainWindow(QMainWindow):
             inform(self, title=failed.format(name=file_name), message=str(e))
             return
 
-        # Close tab without prompting to save - file is gone
-        if hasattr(ed, '_backup'):
-            ed._backup.delete()
-        self._watcher.removePath(file_path)
-        self.tabs.removeTab(idx)
+        # The file is gone: the tab closes for good, asking nothing more.
+        self._discard_tab(idx)
 
     def _rename_tab(self, idx: int, ed):
         old_path = ed._file_path
@@ -2847,6 +2935,9 @@ class MainWindow(QMainWindow):
             viewer.save_view_state()
             self._watcher.removePath(viewer._file_path)
             self.tabs.removeTab(index)
+            # The tab goes with its document, as a document's tab does.
+            viewer.release()
+            viewer.deleteLater()
             return
 
         editor = self._editor_from_widget(w)
@@ -2867,8 +2958,26 @@ class MainWindow(QMainWindow):
                 self.tabs.setCurrentIndex(index)
                 if not self.save():
                     return
+        self._discard_tab(index)
+
+    def _discard_tab(self, index: int) -> None:
+        """Take a document's tab away for good, asking nothing (close_tab
+        asks first; Move to Trash has, about the file): what it set going
+        stops, and the tab is deleted with its editor and document."""
+        w = self.tabs.widget(index)
+        editor = self._editor_from_widget(w)
         if editor:
             self._drop_media_reads(editor)
+            # What the tab set going stops: its spelling (no late result
+            # comes to it), and Find's matches when they are its own.
+            spelling_of_tab = editor.spelling()
+            if spelling_of_tab is not None:
+                spelling_of_tab.close()
+                editor.set_spelling(None)
+            if getattr(self, "_matches_of", None) is editor:
+                self._search_matches = []
+                self._current_match_index = -1
+                self._matches_of = None
         if editor and hasattr(editor, '_backup'):
             editor._backup.delete()
         if editor:
@@ -2891,6 +3000,11 @@ class MainWindow(QMainWindow):
                 active_job.cancel()
                 editor._active_stash_job = None
         self.tabs.removeTab(index)
+        if editor is not None:
+            # The tab goes, its editor and document with it, once what is
+            # running now has finished: a long session that opens and
+            # closes many tabs does not keep growing.
+            w.deleteLater()
 
     def _close_current_tab(self):
         # Command-W closes the window in front (Settings, Keyboard
@@ -3019,8 +3133,10 @@ class MainWindow(QMainWindow):
             if bar:
                 bar.show_unsupported(", ".join(unsupported))
 
-    def _handle_dropped_images(self, paths):
-        """Images were dropped on the window: adopt and insert them now.
+    def _handle_dropped_images(self, paths, step: str = N_("Drag")):
+        """Images were dropped on the window: adopt and insert them now, as
+        one step of Undo called ``step`` (an N_ word; a paste's own
+        name stays the paste's).
 
         The insert never waits for a signer or a server. Uploading is
         offered afterwards, and declining costs nothing: the image is
@@ -3032,17 +3148,27 @@ class MainWindow(QMainWindow):
             ed = self.current_editor()
         if ed is None:
             return
+        if not self._keeps_pictures(ed):
+            # A plain-text or code file saves its text only: the file goes
+            # in as its path, as TextEdit puts it in plain text, never as a
+            # picture that saving would leave out.
+            cursor = ed.textCursor()
+            with ed.undo_step(step):
+                cursor.insertText("\n".join(paths))
+            ed.setTextCursor(cursor)
+            return
 
         adopted = []
         refused = []
-        for path in paths:
-            alt = os.path.splitext(os.path.basename(path))[0] or "image"
-            asset = self._asset_manager.adopt_file(path, alt=alt)
-            if asset is None:
-                refused.append(os.path.basename(path))
-                continue
-            self._insert_asset(ed, asset, alt=alt)
-            adopted.append(asset)
+        with ed.undo_step(step):
+            for path in paths:
+                alt = os.path.splitext(os.path.basename(path))[0] or "image"
+                asset = self._asset_manager.adopt_file(path, alt=alt)
+                if asset is None:
+                    refused.append(os.path.basename(path))
+                    continue
+                self._insert_asset(ed, asset, alt=alt)
+                adopted.append(asset)
 
         if refused:
             self.status.showMessage(
@@ -3070,6 +3196,20 @@ class MainWindow(QMainWindow):
         for asset in pending:
             self._asset_manager.request_upload(asset.sha256)
 
+    def _insert_image(self) -> None:
+        """Insert > Image…: a picture file chosen in the system's dialog,
+        put in at the caret exactly as dropping it there would
+        (_handle_dropped_images: one step of Undo, and the offer to upload
+        it while a Nostr account is in use)."""
+        ed = self.current_editor()
+        if ed is None or self._editor_kind(ed) != "rich":
+            return
+        patterns = " ".join("*" + ext for ext in sorted(_IMAGE_EXTS))
+        path, _filter = QFileDialog.getOpenFileName(
+            self, _("Insert Image"), "", _("Images ({patterns})").format(patterns=patterns))
+        if path:
+            self._handle_dropped_images([file_paths.normalize(path)], N_("Image"))
+
     def _handle_dropped_text(self, text: str):
         ed = self.current_editor()
         if ed is None:
@@ -3081,7 +3221,8 @@ class MainWindow(QMainWindow):
         fmt.setFontItalic(False)
         fmt.setFontUnderline(False)
         fmt.clearForeground()
-        cursor.insertText(text, fmt)
+        with ed.undo_step(N_("Drag")):
+            cursor.insertText(text, fmt)
         ed.setTextCursor(cursor)
 
     def open_dialog(self):
@@ -4479,6 +4620,8 @@ class MainWindow(QMainWindow):
                 paste_choice=self._paste_choice,
                 choose_paste=self._store_paste_choice,
                 nostr_in_use=lambda: self.nostr_state.active,
+                format_bar=lambda: self.format_bar_on_selection,
+                choose_format_bar=self._set_format_bar_on_selection,
                 is_dark=self.is_dark_theme, parent=self)
             window.setAttribute(Qt.WA_DeleteOnClose, True)
             window.destroyed.connect(lambda _obj=None: setattr(self, "_settings_window", None))
@@ -4732,6 +4875,12 @@ class MainWindow(QMainWindow):
         if not ed:
             return
         self._search_matches = find_all(ed.document(), needle, self.findbar.options())
+        # Whose they are: a tab's matches are never painted on another.
+        self._matches_of = ed
+        # And of which text: found before a change, they are not painted
+        # again until Find has looked again (the highlights on screen move
+        # with the text meanwhile).
+        self._matches_revision = ed.document().revision()
         # The match that is selected stays the current one when the matches
         # are found again (after typing, after a replacement).
         cursor = ed.textCursor()
@@ -4746,8 +4895,10 @@ class MainWindow(QMainWindow):
         ed = self.current_editor()
         if not ed:
             return
-        if not self._search_matches:
+        if not self._search_matches or getattr(self, "_matches_of", None) is not ed:
             ed.set_highlights("find", [])
+            return
+        if getattr(self, "_matches_revision", None) != ed.document().revision():
             return
         match_fmt = QTextCharFormat()
         match_fmt.setBackground(QColor("#FFD700"))
@@ -5105,7 +5256,8 @@ class MainWindow(QMainWindow):
     def _slash_items(self, query: str) -> list:
         """What the slash menu offers for ``query``: the window's commands,
         ranked (CommandRegistry.rank), Nostr ones while Nostr is in use."""
-        return [SlashItem(command.slash_section, self.commands.action(command.id))
+        return [SlashItem(command.slash_section, self.commands.action(command.id),
+                          command.insert_title)
                 for command in self.commands.rank(query, nostr=self.nostr_state.active)]
 
     def _set_markdown_shortcuts(self, on: bool) -> None:
@@ -5178,9 +5330,8 @@ class MainWindow(QMainWindow):
         elif name == "delete":
             cursor = ed.textCursor()
             if cursor.hasSelection():
-                cursor.beginEditBlock()
-                cursor.removeSelectedText()
-                cursor.endEditBlock()
+                with ed.undo_step(N_("Delete")):
+                    cursor.removeSelectedText()
                 ed.setTextCursor(cursor)
         ed.setFocus()
 
@@ -5236,8 +5387,11 @@ class MainWindow(QMainWindow):
             self.format_toolbar.setVisible(self.show_toolbar and bool(kind))
             if getattr(self, "format_bar", None) is not None:
                 self.format_bar.setVisible(self.show_toolbar and bool(kind))
-            self.format_toolbar.style_button.setEnabled(kind == "rich" and not reading
-                                                        and not in_table)
+        # Format > Style, and every pop-up of it (the toolbar's, the format
+        # bar's), which follow its action.
+        if getattr(self, "m_style", None) is not None:
+            self.m_style.menuAction().setEnabled(kind == "rich" and not reading
+                                                 and not in_table)
         # Only the preview shows: nothing to edit there (Copy and Select
         # All act on the preview itself, through the focus).
         for action in self._editor_actions:
@@ -5266,6 +5420,16 @@ class MainWindow(QMainWindow):
         self._update_clipboard_commands()
         if kind:
             self._update_undo_redo_buttons()
+
+    def _keeps_pictures(self, ed) -> bool:
+        """Whether ``ed``'s document keeps a picture when it is saved:
+        Markdown (shown formatted or as its text), HTML, R Markdown and new
+        documents do; plain text and code save their text only."""
+        if self._editor_kind(ed) == "rich" or getattr(ed, "_markdown_source", False) \
+                or getattr(ed, "_loaded_as_rmd_source", False):
+            return True
+        path = (getattr(ed, "_file_path", None) or "").lower()
+        return path.endswith((".md", ".markdown", ".rmd"))
 
     @staticmethod
     def _keeps_underline(ed) -> bool:
@@ -5568,7 +5732,8 @@ class MainWindow(QMainWindow):
         """A tab got wider or narrower: Split may fit now, or not any more.
         Looked at once the layout has settled, never in the middle of it."""
         if ed is self.current_editor() and self.view_mode == SPLIT:
-            QTimer.singleShot(0, lambda e=ed: self._width_settled(e))
+            # Tied to the editor: dropped if its tab is closed meanwhile.
+            QTimer.singleShot(0, ed, lambda e=ed: self._width_settled(e))
 
     def _width_settled(self, ed) -> None:
         if (shiboken6.isValid(ed) and ed is self.current_editor() and self.view_mode == SPLIT
@@ -6843,7 +7008,8 @@ class MainWindow(QMainWindow):
         caret_there = ed.textCursor().position() == at.position()
         cursor = QTextCursor(ed.document())
         cursor.setPosition(at.position())
-        rich_text.insert_own_paragraph(cursor, image=image)
+        with ed.undo_step(N_("Audio or Video")):
+            rich_text.insert_own_paragraph(cursor, image=image)
         if caret_there:
             ed.setTextCursor(cursor)
         self._asset_manager.request_upload(asset.sha256)
@@ -7176,21 +7342,23 @@ class MainWindow(QMainWindow):
                 self.status.showMessage(picked.reason, 8000)
             return
 
-        if not (picked.mime or "").startswith("image/"):
-            self._insert_url_as_text(editor, picked.url)
-            return
+        # One step of Undo, called what was asked for.
+        with editor.undo_step(N_("Image")):
+            if not (picked.mime or "").startswith("image/"):
+                self._insert_url_as_text(editor, picked.url)
+                return
 
-        asset = self._asset_manager.adopt_library_file(
-            sha256=picked.sha256,
-            remote_url=picked.url,
-            mime=picked.mime,
-            size=picked.size,
-            alt=alt_text,
-        )
-        if asset is None:
-            self._insert_url_as_text(editor, picked.url)
-            return
-        self._insert_asset(editor, asset, alt=alt_text or "image")
+            asset = self._asset_manager.adopt_library_file(
+                sha256=picked.sha256,
+                remote_url=picked.url,
+                mime=picked.mime,
+                size=picked.size,
+                alt=alt_text,
+            )
+            if asset is None:
+                self._insert_url_as_text(editor, picked.url)
+                return
+            self._insert_asset(editor, asset, alt=alt_text or "image")
 
     def _insert_url_as_text(self, editor, url: str) -> None:
         """Fallback for media that cannot be an inline image."""

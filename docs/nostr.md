@@ -169,7 +169,7 @@ Upload images, video, and audio to your own Blossom servers, browse them in a bu
 
 - **Library dialog** (`Nostr > Media Library…`): sortable, filterable grid of every blob your pubkey hosts on the configured servers. Per-file: preview, copy URL, download, open in browser, delete (across all mirrors).
 - **Upload** four ways: the **Upload** button, drag a file onto the drop zone, **paste** an image with `Ctrl+V` while the grid has focus, or drag an image onto the editor itself.
-- **Insert into notes** (`Nostr > Insert Image…`, also in the Insert menu while an account is in use): pick from the library; alt text is offered inline. Markdown tabs get `![alt](url)`; rich-text tabs embed the cached image. Pasted screenshots auto-upload and auto-insert at the cursor.
+- **Insert into notes** (`Nostr > Insert Image from Media Library…`, also in the Insert menu while an account is in use, as `Insert > Image from Media Library…`): pick from the library (a picture from your computer is `Insert > Image…`); alt text is offered inline. Markdown tabs get `![alt](url)`; rich-text tabs embed the cached image. Pasted screenshots auto-upload and auto-insert at the cursor.
 - **Hero image for articles**: the Publish Article dialog has a *Cover image* row with a built-in picker; selected images upload to Blossom in the same flow.
 - **Mirroring by default**: every upload is mirrored to all configured servers in parallel. Deletes fan out across every server the blob lives on; success on one is treated as success.
 - **Dedupe by sha256**: the same file across N servers shows up as one entry; the tile shows a *Nx* badge so you know how widely it's mirrored.

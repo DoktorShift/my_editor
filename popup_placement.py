@@ -5,7 +5,9 @@
 The link popover and the slash menu open right below the words they are
 about, the way Pages and Mail place theirs, and above them when the
 screen has no room below; they never stick out past the screen's sides.
-A window asks here how much of the screen it may take.
+The format bar over a selection sits above the words, as the iPad's and
+Word's do, inside the text's view (place_above). A window asks here how
+much of the screen it may take.
 """
 
 from __future__ import annotations
@@ -54,4 +56,20 @@ def place_below(popup: QWidget, anchor: QRect, parent: QWidget) -> QPoint:
     point = below if below.y() + popup.height() <= area.bottom() else above
     point.setX(max(area.left(), min(point.x(), area.right() - popup.width())))
     popup.move(point)
+    return point
+
+
+def place_above(panel: QWidget, first: QRect, last: QRect, area: QRect) -> QPoint:
+    """Move ``panel`` (a child widget) centred above ``first`` (the first
+    line of the words it is about), or below ``last`` (their last line)
+    when there is no room above, inside ``area``; all in the coordinates of
+    the panel's parent. Returns where it went."""
+    panel.adjustSize()
+    x = first.center().x() - panel.width() // 2
+    y = first.top() - GAP - panel.height()
+    if y < area.top():
+        y = last.bottom() + GAP
+    point = QPoint(max(area.left(), min(x, area.right() + 1 - panel.width())),
+                   max(area.top(), min(y, area.bottom() + 1 - panel.height())))
+    panel.move(point)
     return point

@@ -235,7 +235,8 @@ def test_the_nostr_commands_that_need_an_account_are_marked(main_window_commands
 
 
 def test_menu_titles_follow_title_case_and_no_em_dashes(main_window_commands):
-    small = {"a", "an", "and", "as", "for", "in", "of", "on", "or", "the", "to"}
+    # Apple's title case: articles, conjunctions and short prepositions small.
+    small = {"a", "an", "and", "as", "for", "from", "in", "of", "on", "or", "the", "to"}
     for command in main_window_commands.commands.commands():
         assert "\u2014" not in command.title
         words = command.title.rstrip("…").replace("/", " ").split()
