@@ -87,6 +87,7 @@ def test_r_markdown_is_one_submenu_of_the_file_menu():
 def test_a_mac_has_a_window_menu_and_the_others_do_not(monkeypatch, platform):
     """Every Mac app has Window > Minimize (Command-M), Zoom and Bring All
     to Front, and Qt makes none, so Command-M did nothing in MyEditor.
+    Between them, as in Safari, Show Previous Tab and Show Next Tab.
     Windows and Linux keep these in the title bar."""
     import main_window
     monkeypatch.setattr(main_window.sys, "platform", platform)
@@ -98,7 +99,8 @@ def test_a_mac_has_a_window_menu_and_the_others_do_not(monkeypatch, platform):
         return
     assert titles.index("Window") == titles.index("&Help") - 1     # just before Help
     entries = [a.objectName() for a in win.m_window.actions() if not a.isSeparator()]
-    assert entries == ["window.minimize", "window.zoom", "window.bring_all"]
+    assert entries == ["window.minimize", "window.zoom", "nav.previous_tab", "nav.next_tab",
+                       "window.bring_all"]
     assert win.commands.action("window.minimize").shortcut() == QKeySequence("Ctrl+M")
 
 
