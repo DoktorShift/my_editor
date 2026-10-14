@@ -378,14 +378,21 @@ def _replace(source: str, target: str) -> None:
     os.replace(source, target)
 
 
+# A disk block, as the in-place save counts in them where the file system
+# doesn't say.
+_BLOCK = 4096
+
+
 def _write_in_place(target: str, data: bytes) -> None:
     """Write ``data`` over the file at ``target`` itself, where it can't be
-    replaced. Like a replacement, a failure leaves the file as it was:
-    the room for the new text is made first (the file grows, its old
-    text untouched, and shrinks back when the disk can't hold it), only
-    then is the new text written over the old and the rest cut off, and
-    when that fails all the same (a copy-on-write disk, a removed volume)
-    the old text, kept in memory, is written back."""
+    replaced. Like a replacement, a failure leaves the file as it was.
+    The disk first shows it has room for the whole new text, as a
+    replacement needs it: a copy-on-write disk (btrfs, XFS, an APFS
+    clone or snapshot) takes fresh room for every byte written over the
+    old text too. The new text is written past the end, the old text
+    untouched, and cut off again. Only then is it written over the old
+    and the rest cut off, and when that fails all the same (a removed
+    volume) the old text, kept in memory, is put back."""
     try:
         # Unbuffered, so nothing is left waiting to be written when a
         # write fails and the old text goes back.
@@ -398,43 +405,69 @@ def _write_in_place(target: str, data: bytes) -> None:
         return
     with f:
         old = f.read()
-        if len(data) > len(old):
-            try:
-                _grow(f, len(data) - len(old))
-            except OSError:
-                _put_back(f, old)
-                raise
         try:
-            _write_at_start(f, data)
+            _make_room(f, len(old), data)
+        except OSError:
+            _cut_back(f, len(old))
+            raise
+        try:
+            _write_at(f, 0, data)
+            f.truncate(len(data))
+            os.fsync(f.fileno())
         except OSError:
             _put_back(f, old)
             raise
 
 
-def _grow(f, extra: int) -> None:
-    """Make room for ``extra`` more bytes at the end of ``f``: written as
-    zeros, so the disk has them (a hole would not)."""
-    f.seek(0, os.SEEK_END)
-    chunk = memoryview(b"\0" * (1 << 20))
-    while extra > 0:
-        extra -= f.write(chunk[:min(extra, len(chunk))])
+def _make_room(f, end: int, data: bytes) -> None:
+    """Show the disk has room for ``data`` as it will hold it (a
+    compressing disk takes little for zeros): written past the ``end``
+    of ``f``, synced, then cut off, which leaves the room free. The last
+    block of the old text is filled up and synced first, on its own, so
+    ``data`` shares no run of blocks with it (btrfs keeps a whole run
+    while any of it is in use) and no gap is left before it (a nearly
+    full APFS disk refuses one)."""
+    block = getattr(os.fstat(f.fileno()), "st_blksize", 0) or _BLOCK
+    start = -(-end // block) * block
+    if start > end:
+        _write_at(f, end, bytes(start - end))
+        os.fsync(f.fileno())
+    _write_at(f, start, data)
     os.fsync(f.fileno())
+    f.truncate(end)
 
 
-def _write_at_start(f, data: bytes) -> None:
-    """``data`` from the start of the unbuffered ``f``, the rest cut off."""
-    f.seek(0)
+def _write_at(f, start: int, data) -> None:
+    """``data`` into the unbuffered ``f`` from ``start`` on."""
+    f.seek(start)
     view = memoryview(data)
     while view:
         view = view[f.write(view):]
-    f.truncate(len(data))
-    os.fsync(f.fileno())
+
+
+def _cut_back(f, end: int) -> None:
+    """Best effort: what was written past the old text's ``end`` cut off;
+    the old text itself was never touched."""
+    try:
+        f.truncate(end)
+        os.fsync(f.fileno())
+    except OSError:
+        _log.error("%s could not be cut back to its old length", f.name)
 
 
 def _put_back(f, old: bytes) -> None:
-    """Best effort: the old text, as it was."""
+    """Best effort: the old text, as it was. Cut to its length first, then
+    only the blocks that differ from it are written again, as each takes
+    fresh room on a copy-on-write disk."""
     try:
-        _write_at_start(f, old)
+        f.truncate(len(old))
+        f.seek(0)
+        now = f.read()
+        for start in range(0, len(old), _BLOCK):
+            block = old[start:start + _BLOCK]
+            if now[start:start + _BLOCK] != block:
+                _write_at(f, start, block)
+        os.fsync(f.fileno())
     except OSError:
         _log.error("%s could not be put back as it was", f.name)
 

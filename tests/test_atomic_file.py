@@ -434,29 +434,101 @@ def test_a_document_saved_in_place_survives_a_disk_that_cant_take_the_new_text(t
 @pytest.mark.skipif(hasattr(os, "geteuid") and os.geteuid() == 0,
                     reason="root may write into any folder")
 @pytest.mark.parametrize("kind", ["hard link", "read-only folder"])
+@pytest.mark.parametrize("new", [b"a much longer new version\n" * 10_000, b"short"],
+                         ids=["longer", "shorter"])
 def test_a_document_saved_in_place_is_put_back_when_writing_it_fails(tmp_path, monkeypatch,
-                                                                    kind):
+                                                                    kind, new):
     """The room was there, and writing the new text over it failed all the
-    same (a copy-on-write disk, a removed volume): the old text is
-    written back."""
+    same (a removed volume): the old text is written back."""
     folder, path = _in_place_case(tmp_path, kind)
     old = path.read_bytes()
-    calls = []
     real_fsync = os.fsync
 
     def fsync(fd):
-        calls.append(fd)
-        if len(calls) == 2:                 # the new text, after the room was made
+        if os.pread(fd, len(new), 0) == new:      # the new text, written over the old
             raise OSError(28, "No space left on device")
         real_fsync(fd)
 
     monkeypatch.setattr(atomic_file.os, "fsync", fsync)
     try:
         with pytest.raises(OSError):
-            save_document(path, b"a much longer new version\n" * 10_000)
+            save_document(path, new)
     finally:
         os.chmod(folder, 0o755)
     assert path.read_bytes() == old
+
+
+class _CopyOnWriteFile:
+    """An open file on a copy-on-write disk with ``room`` bytes left and
+    its blocks shared with a clone (btrfs, XFS, an APFS clone or
+    snapshot): every byte written takes fresh room, over the old text
+    too, and only cutting off what was written past the old end gives
+    room back. A write that doesn't fit writes what does; the next fails."""
+
+    def __init__(self, raw, room):
+        self._raw, self._room = raw, room
+        self._old_end = os.fstat(raw.fileno()).st_size
+        self._written_past = bytearray()     # per byte past the old end: written?
+
+    def __getattr__(self, name):
+        return getattr(self._raw, name)
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        self._raw.close()
+
+    def write(self, data):
+        if self._room <= 0 < len(data):
+            raise OSError(28, "No space left on device")
+        start = self._raw.tell()
+        written = self._raw.write(data[:self._room])
+        self._room -= written
+        first, end = max(start, self._old_end) - self._old_end, start + written - self._old_end
+        if end > first:
+            self._written_past.extend(bytes(max(0, end - len(self._written_past))))
+            self._written_past[first:end] = b"\1" * (end - first)
+        return written
+
+    def truncate(self, size):
+        cut = max(size, self._old_end) - self._old_end
+        self._room += self._written_past[cut:].count(1)
+        del self._written_past[cut:]
+        return self._raw.truncate(size)
+
+
+@posix_only
+@pytest.mark.parametrize("new_size", [30_000, 15_000, 5_000], ids=["longer", "same", "shorter"])
+def test_a_document_saved_in_place_on_a_copy_on_write_disk_is_old_or_new(tmp_path, monkeypatch,
+                                                                          new_size):
+    """Writing over the old text takes fresh room there, whatever the new
+    text's length. With any room left on the disk, the save either
+    fails and leaves the document as it was or succeeds with the whole
+    new text: never half of each, never the old text with zeros after it."""
+    room = {"left": 0}
+    real_open = open
+
+    def cow_open(file, mode="r", *args, **kwargs):
+        f = real_open(file, mode, *args, **kwargs)
+        return _CopyOnWriteFile(f, room["left"]) if mode == "r+b" else f
+
+    monkeypatch.setattr(atomic_file, "open", cow_open, raising=False)
+    new = (b"the new version, line by line\n" * 1000)[:new_size]
+    for left in sorted({*range(0, new_size + 8192, 2048), new_size - 1, new_size + 65536}):
+        folder = tmp_path / str(left)
+        folder.mkdir()
+        path = folder / "Essay.md"
+        path.write_bytes(b"my whole essay\n" * 1000)
+        os.link(path, folder / "Other.md")
+        room["left"] = left
+        try:
+            save_document(path, new)
+            saved = True
+        except OSError:
+            saved = False
+        assert path.read_bytes() == (new if saved else b"my whole essay\n" * 1000), left
+        assert left >= new_size if saved else left < new_size + 65536, left
 
 
 @posix_only
