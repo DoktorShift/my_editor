@@ -148,6 +148,13 @@ def _open_paragraph_above(cursor: QTextCursor) -> None:
     cursor.setBlockCharFormat(QTextCharFormat())
 
 
+# The text cursors Settings offers, as the setting stores them: Qt's own
+# insertion point at a width in pixels, or a block over the next letter.
+CARET_STYLES = ("thin", "medium", "thick", "block")
+CARET_WIDTHS = {"thin": 1, "medium": 2, "thick": 4, "block": 0}
+DEFAULT_CARET_STYLE = "medium"
+
+
 class HtmlEditor(QTextEdit):
     """QTextEdit with bullet and format logic."""
 
@@ -286,10 +293,10 @@ class HtmlEditor(QTextEdit):
         self._spoken_place = None
         self.cursorPositionChanged.connect(self._announce_place)
 
-        # Block cursor (terminal-style) for code and plain text: hide Qt's
-        # thin cursor, draw our own. Writing gets the insertion point every
-        # word processor has (set_writing_font).
-        self.setCursorWidth(0)
+        # The text cursor chosen in Settings (set_caret_style): Qt's own
+        # insertion point at a width, or a block drawn here.
+        self._caret_style = DEFAULT_CARET_STYLE
+        self.setCursorWidth(CARET_WIDTHS[DEFAULT_CARET_STYLE])
         self._cursor_visible = True
         self._blink_timer = QTimer(self)
         self._blink_timer.setInterval(530)
@@ -609,13 +616,21 @@ class HtmlEditor(QTextEdit):
         self.active_format['underline'] = fmt.fontUnderline()
         self.active_format['color'] = fmt.foreground().color() if fmt.hasProperty(QTextCharFormat.ForegroundBrush) else None
 
-    # -------- Block cursor --------
-    WRITING_CARET_WIDTH = 2
+    # -------- Text cursor --------
+    def set_caret_style(self, style: str) -> None:
+        """The text cursor, as chosen in Settings: one of CARET_STYLES, in
+        every document whatever its font (an unknown one is the default)."""
+        self._caret_style = style if style in CARET_STYLES else DEFAULT_CARET_STYLE
+        self.setCursorWidth(CARET_WIDTHS.get(self._caret_style, 0))
+        self.viewport().update()
+
+    def caret_style(self) -> str:
+        return self._caret_style
 
     def block_caret_shown(self) -> bool:
-        """Whether the terminal-style block caret is drawn now: in code and
-        plain text, while the text has the focus and nothing is selected."""
-        return (self._writing_measure_chars is None and self.hasFocus()
+        """Whether the block cursor is drawn now: chosen in Settings, while
+        the text has the focus and nothing is selected."""
+        return (self._caret_style == "block" and self.hasFocus()
                 and self._cursor_visible and not self.textCursor().hasSelection())
 
     def _block_cursor_rect(self):
@@ -648,10 +663,6 @@ class HtmlEditor(QTextEdit):
         plain text): the monospace font across the whole width."""
         self.setFont(writing_font() if writing else code_font())
         self._writing_measure_chars = WRITING_MEASURE if writing else None
-        # In a proportional font a block would cover the letter after the
-        # caret: writing gets the thin insertion point of Pages, TextEdit
-        # and Word, code and plain text keep the block.
-        self.setCursorWidth(self.WRITING_CARET_WIDTH if writing else 0)
         self._update_paper_margins()
         self.viewport().update()
 
