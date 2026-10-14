@@ -10,15 +10,23 @@ import os
 import pathlib
 import re
 import sys
+from types import SimpleNamespace
 
 import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
+import front_matter  # noqa: E402
+import recovery  # noqa: E402
+import tab_details  # noqa: E402
+import workspace_restore  # noqa: E402
+from nostr.article_details import ArticleDetails, from_front_matter  # noqa: E402
 from tests.app_process import run_window_script  # noqa: E402
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 SOURCE = "---\ntitle: FM Title\nsummary: FM summary\nslug: fm-slug\ntags: [a, b]\n---\n\nBody.\n"
+CAPS = SOURCE.replace("tags: [a, b]", "tags: [Python, Rust]")
+CASES = ("restored", "restored copy", "resumed")
 
 
 def test_no_module_but_tab_details_touches_a_tabs_details():
@@ -49,12 +57,16 @@ from recovery import read_backup
 path, copy = sys.argv[2], sys.argv[3]
 w = main_window.MainWindow()
 w.show()
+CHANGES = {"details": {"title": "Changed Title", "hashtags": ("a", "b", "c")},
+           "title": {"title": "Changed Title"}, "read": None}
 r = {}
-for case in ("restored", "restored copy", "resumed"):
+for change, case in [(change, case) for change in sys.argv[5:]
+                     for case in ("restored", "restored copy", "resumed")]:
     open(path, "w", encoding="utf-8").write(sys.argv[4])
     ed = w.open_path(path)
-    w._set_article_details(ed, w._article_details_of(ed).with_changes(
-        title="Changed Title", hashtags=("a", "b", "c")))
+    details = w._article_details_of(ed)     # Article Details shown, a preview, a draft
+    if CHANGES[change]:
+        w._set_article_details(ed, details.with_changes(**CHANGES[change]))
     c = ed.textCursor()
     c.movePosition(QTextCursor.MoveOperation.End)
     c.insertText("Z")
@@ -75,7 +87,7 @@ for case in ("restored", "restored copy", "resumed"):
     w.tabs.setCurrentIndex(w.tabs.count() - 1)
     target = copy if case == "restored copy" else path
     w._save_to(target)                      # nothing asked for the details first
-    r[case] = open(target, encoding="utf-8").read()
+    r[change + " " + case] = open(target, encoding="utf-8").read()
     restored.document().setModified(False)
     w.close_tab(w.tabs.currentIndex())
     app.processEvents()
@@ -88,11 +100,50 @@ def test_a_restored_tab_saves_the_details_changed_before_the_crash(tmp_path):
     """B1: the file kept its old title, the save said Saved, and the tab
     went on publishing the new one. The same after a restart."""
     r = run_window_script(RESTORE_SCRIPT, tmp_path, str(tmp_path / "post.md"),
-                          str(tmp_path / "copy.md"), SOURCE)
-    for case in ("restored", "restored copy", "resumed"):
-        assert "title: Changed Title\n" in r[case] and "tags: [a, b, c]\n" in r[case], case
-        assert "summary: FM summary\n" in r[case] and "slug: fm-slug\n" in r[case], case
-        assert r[case].endswith("\nBody.Z\n"), case
+                          str(tmp_path / "copy.md"), SOURCE, "details")
+    for case in CASES:
+        saved = r["details " + case]
+        assert "title: Changed Title\n" in saved and "tags: [a, b, c]\n" in saved, case
+        assert "summary: FM summary\n" in saved and "slug: fm-slug\n" in saved, case
+        assert saved.endswith("\nBody.Z\n"), case
+
+
+def test_a_restored_tab_writes_only_the_details_changed_in_it(tmp_path):
+    """Round 11, H2: back from a crash or a restart, a tab whose details
+    were only read wrote its file's hashtags in lower case and in quotes;
+    one whose title was changed, the title and those hashtags."""
+    r = run_window_script(RESTORE_SCRIPT, tmp_path, str(tmp_path / "post.md"),
+                          str(tmp_path / "copy.md"), CAPS, "read", "title")
+    typed = CAPS.replace("Body.", "Body.Z")
+    for case in CASES:
+        assert r["read " + case] == typed, case
+        assert r["title " + case] == typed.replace("FM Title", "Changed Title"), case
+
+
+def test_a_record_keeps_the_details_set_in_the_tab_and_none_only_read():
+    ed = SimpleNamespace(_front_matter=front_matter.split(CAPS)[0])
+    tab_details.hold(ed, None)                         # a file opened
+    tab_details.details_of(ed)                         # its details read
+    assert "details" not in recovery.tab_identity(ed)
+    tab_details.hold(ed, tab_details.details_of(ed).with_changes(title="Set"))
+    tab_details.details_of(ed)
+    tab_details.file_changed(ed)                       # saved, still set in the tab
+    assert ArticleDetails.from_tags(recovery.tab_identity(ed)["details"]).title == "Set"
+
+
+def test_restored_details_the_file_holds_too_stay_as_the_file_writes_them():
+    """A record keeps hashtags in lower case (ArticleDetails.tags): those
+    the file holds come back in its case, and details all the file's are
+    the file's, read when asked for, as on opening it."""
+    front = front_matter.split(CAPS)[0]
+    read = from_front_matter(front)
+    for details in (read, read.with_changes(title="Set")):
+        ed = SimpleNamespace()
+        workspace_restore.restore_identity(ed, None, None, "", details.tags(),
+                                           front_matter.join(front, ""), draft_type=dict)
+        assert tab_details.untouched(ed) == (details == read)
+        assert tab_details.details_of(ed) == details
+        assert tab_details.details_of(ed).hashtags == ("Python", "Rust")
 
 
 STASH_SCRIPT = r"""

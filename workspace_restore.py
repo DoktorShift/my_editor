@@ -24,7 +24,7 @@ the record only points at it.
 
 import dataclasses
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Optional
 
 from PySide6.QtCore import QEvent, QObject, QTimer
@@ -32,7 +32,7 @@ from PySide6.QtGui import QTextCursor
 
 import front_matter
 import tab_details
-from nostr.article_details import ArticleDetails
+from nostr.article_details import ArticleDetails, from_front_matter
 from recovery import (
     classify_backup, document_is_empty, is_restorable, load_backup_content, read_backup,
     tab_identity,
@@ -348,10 +348,28 @@ def restore_identity(ed, draft, article, article_author, details=None,
         ed._front_matter = front_matter.split(matter)[0]
     # Details restored are details set in the tab, known: a save writes
     # them. Else its file's, read when something asks, as on opening it.
-    if are_tags(details):
-        tab_details.hold(ed, ArticleDetails.from_tags(details))
+    restored = _set_in_tab(details, getattr(ed, "_front_matter", None))
+    if restored is not None:
+        tab_details.hold(ed, restored)
     elif getattr(ed, "_front_matter", None) is not None:
         tab_details.hold(ed, None)
+
+
+def _set_in_tab(details, front) -> Optional[ArticleDetails]:
+    """The details a record keeps as tags (``details``) that were set in
+    the tab, or None: none, or all as its file's front matter ``front``
+    holds them, only read (a record written by an earlier version). Its
+    hashtags are in lower case (ArticleDetails.tags): the file's own are
+    in the file's case, so a save writes them as they were."""
+    if not are_tags(details):
+        return None
+    restored = ArticleDetails.from_tags(details)
+    if front is None:
+        return restored
+    own = from_front_matter(front)
+    if tuple(tag.lower() for tag in own.hashtags) == restored.hashtags:
+        restored = replace(restored, hashtags=own.hashtags)
+    return None if restored == own else restored
 
 
 def _dataclass_from(cls, data: dict):

@@ -13,7 +13,7 @@ stale (tests/test_tab_details.py holds every other module to it).
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Optional
 
 from nostr.article_details import ArticleDetails, from_front_matter, kept_in_file
@@ -24,11 +24,13 @@ _HELD = "_held_details"
 
 @dataclass(frozen=True)
 class _Held:
-    # Those set in the tab; None: only its file's front matter's.
+    # Those set in the tab, else (once read) its file's front matter's.
     details: Optional[ArticleDetails]
     # Whether ``details`` is read: its file's details read from its front
     # matter if none were set, and what the file keeps as written with them.
     read: bool
+    # Whether ``details`` were set in the tab, not only read from its file.
+    set: bool
 
 
 def details_of(ed) -> Optional[ArticleDetails]:
@@ -43,7 +45,8 @@ def details_of(ed) -> Optional[ArticleDetails]:
         details = held.details or from_front_matter(front)
         if front is not None:
             details = details.keeping(kept_in_file(front))
-        held = _Held(details if details != ArticleDetails() or details.kept else None, True)
+        held = replace(held, details=details if details != ArticleDetails() or details.kept
+                       else None, read=True)
         setattr(ed, _HELD, held)
     return held.details
 
@@ -53,7 +56,7 @@ def hold(ed, details: Optional[ArticleDetails]) -> None:
     draft was saved, a record restored); None: only its file's, read when
     something asks (a file opened or read again). What its file keeps as
     written is worked out as they are next read."""
-    setattr(ed, _HELD, _Held(details, False))
+    setattr(ed, _HELD, _Held(details, False, details is not None))
 
 
 def file_changed(ed) -> None:
@@ -61,7 +64,7 @@ def file_changed(ed) -> None:
     worked out again as its details are next read."""
     held = getattr(ed, _HELD, None)
     if held is not None and held.read:
-        setattr(ed, _HELD, _Held(held.details, False))
+        setattr(ed, _HELD, replace(held, read=False))
 
 
 def untouched(ed) -> bool:
@@ -73,9 +76,10 @@ def untouched(ed) -> bool:
 
 
 def set_in_tab(ed) -> Optional[ArticleDetails]:
-    """The details set in ``ed`` (or read from its file), without reading
-    any: what its record keeps (recovery.tab_identity). Never stale for
-    that: the file's own are in the record as its front matter, and are
-    read from it when the tab comes back."""
+    """The details set in ``ed``, without reading any; None when none were
+    set there, whatever was read from its file: what its record keeps
+    (recovery.tab_identity). The file's own are in the record as its front
+    matter, and are read from it when the tab comes back: kept as details,
+    a save would write them as if set (hashtags in lower case)."""
     held = getattr(ed, _HELD, None)
-    return held.details if held is not None else None
+    return held.details if held is not None and held.set else None

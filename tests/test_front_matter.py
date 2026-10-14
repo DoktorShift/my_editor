@@ -441,6 +441,15 @@ def changed(text, **change):
     return front_matter.join(front_matter_with(details, front), body)
 
 
+
+def test_a_hashtag_set_in_another_case_keeps_the_files_spelling():
+    """Round 11, H2: the file's way was checked against the hashtags as set,
+    not as spelled in the file, failed, and they were written in quotes and
+    in lower case."""
+    text = "---\ntitle: T\ntags: [Python, Rust]\n---\n\nB\n"
+    assert changed(text, hashtags=("python", "rust")) == text
+    assert changed(text, hashtags=("python", "rust", "go")) == text.replace("Rust]", "Rust, go]")
+
 def test_a_toml_multi_line_list_stays_multi_line():
     text = '+++\ntitle = "T"\ntags = [\n  "go",\n  "hugo",\n]\n+++\n\nB\n'
     assert changed(text, hashtags=("go", "hugo", "extra")) == text.replace(

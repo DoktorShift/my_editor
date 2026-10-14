@@ -585,11 +585,16 @@ def _with_detail(entries: List[front_matter.Entry], syntax: str, key: str, value
         # A date YAML and TOML read as one (a timestamp), not a text;
         # in quotes only when the file had it so.
         bare = not original.startswith(("\"", "'"))
-    # What is meant, before it is written in the file's way (a string of
-    # tags, their spelling there; in quotes, a list of texts), so the check
+    in_files_way = key == "tags" and current is not None and not quoted
+    if in_files_way and isinstance(current.value, list):
+        # A hashtag the file has keeps its spelling there ("#idea", "Python").
+        spelled = {tag.lower(): item for item in current.value
+                   for tag in _hashtags([item])}
+        value = [spelled.get(tag.lower(), tag) for tag in value]
+    # What is meant, in the file's spelling but before it is written in
+    # its way (a string of tags; in quotes, a list of texts), so the check
     # holds what is read back to it, not to what that way reads.
     meant = _detail(key, value)
-    in_files_way = key == "tags" and current is not None and not quoted
     if in_files_way and isinstance(current.value, str) and len(_string_tags(current.value)) > 1:
         # Written as a string of tags ("ruby jekyll", "a, b"): a string
         # again, in its way, while it can hold each tag whole. A string
@@ -599,11 +604,6 @@ def _with_detail(entries: List[front_matter.Entry], syntax: str, key: str, value
         mark = separator.strip() or " "
         if not any(mark in tag for tag in value):
             value = separator.join(value)
-    elif in_files_way and isinstance(current.value, list):
-        # A hashtag the file has keeps its spelling there ("#idea").
-        spelled = {tag.lower(): item for item in current.value
-                   for tag in _hashtags([item])}
-        value = [spelled.get(tag.lower(), tag) for tag in value]
     if quoted:
         written = front_matter.quoted(current, key, value, syntax)
     elif current is not None:
