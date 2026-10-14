@@ -32,13 +32,13 @@ jobs:
         with:
           python-version: "3.12"
 
-      # Qt's xcb platform plugin needs libxcb-cursor at runtime (Qt >= 6.5).
-      # Install it BEFORE PyInstaller so it gets bundled into the AppImage.
+      # Qt's xcb and multimedia modules need these system libraries.
+      # Install them BEFORE PyInstaller so they get bundled into the AppImage.
       - name: Install Linux system libraries
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y libxcb-cursor0 libegl1 libxkbcommon0
+          sudo apt-get install -y libxcb-cursor0 libegl1 libxkbcommon0 libpulse0
 
       - name: Install Python dependencies
         run: |

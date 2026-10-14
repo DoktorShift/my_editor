@@ -71,7 +71,7 @@ Priority: optional
 Architecture: ${ARCH}
 Maintainer: rinbal <rinbal@users.noreply.github.com>
 Installed-Size: ${INSTALLED_SIZE}
-Depends: libc6, libxcb-cursor0, libegl1, libxkbcommon0
+Depends: libc6, libxcb-cursor0, libegl1, libxkbcommon0, libpulse0
 Recommends: libenchant-2-2
 Homepage: https://github.com/rinbal/my_editor
 Description: Minimal note-taking text editor
