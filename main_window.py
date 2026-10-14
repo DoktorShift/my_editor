@@ -112,6 +112,7 @@ from export_pdf import export_pdf, load_page_setup
 from page_setup_dialog import PageSetupDialog
 import printing
 from window_grid import BandAligner
+from nostr import web_readers
 from pdf_viewer import PdfViewerTab, reader_keys as pdf_reader_keys
 from rmarkdown import KnitRunner, MediaLink, derive_title, document_to_rmd, media_dir_for
 from rmd_setup_dialog import RmdSetupDialog
@@ -2876,11 +2877,18 @@ class MainWindow(QMainWindow):
         # The second view: what the account published, to edit, open,
         # share or delete. It reads the relays once it is shown
         # (_follow_account_in_published), not when MyEditor starts.
+        # Where published posts open on the web (Settings), Standup Discover
+        # unless another reading app was chosen; Discover is asked first
+        # whether it has an article's page (nostr/web_readers.py).
+        reader = load_settings().get("web_reader", web_readers.DISCOVER)
+        self.web_reader = reader if web_readers.reader(reader) else web_readers.DISCOVER
+        self._page_check = web_readers.PageCheck(self)
         self._published_view = PublishedView(
             PublishedList(relay_pool=self._relay_pool, relay_directory=self._relay_directory,
                           session_pool=self._session_pool,
                           entitled_relays=self._entitled_relays, parent=self),
-            is_dark=self.is_dark_theme)
+            is_dark=self.is_dark_theme, page_check=self._page_check.check,
+            reader_choice=lambda: self.web_reader)
         self._published_view.set_preview_image_loader(self._media_image_loader)
         add_published_view(self._drafts_panel, self._published_view)
         self._drafts_panel.view_changed.connect(self._follow_account_in_published)
@@ -4930,6 +4938,8 @@ class MainWindow(QMainWindow):
                 choose_format_bar=self._set_format_bar_on_selection,
                 caret_style=lambda: self.caret_style,
                 choose_caret_style=self._set_caret_style,
+                web_reader=lambda: self.web_reader,
+                choose_web_reader=self._set_web_reader,
                 is_dark=self.is_dark_theme, parent=self)
             window.setAttribute(Qt.WA_DeleteOnClose, True)
             window.destroyed.connect(lambda _obj=None: setattr(self, "_settings_window", None))
@@ -5581,6 +5591,12 @@ class MainWindow(QMainWindow):
             ed = self._editor_from_widget(self.tabs.widget(i))
             if ed is not None:
                 self._update_editor_font(ed)
+
+    def _set_web_reader(self, key: str) -> None:
+        """Settings: the reading app published posts open in."""
+        if web_readers.reader(key) is not None:
+            self.web_reader = key
+            save_setting("web_reader", key)
 
     def _set_caret_style(self, style: str) -> None:
         """Settings > Text cursor, remembered, in every open document."""
@@ -8342,10 +8358,12 @@ class MainWindow(QMainWindow):
             self.status.showMessage(_("Copied event id {id}…").format(id=event_id[:10]), 3000)
 
     def _on_panel_open_draft(self, identifier: str) -> None:
-        """Open a draft into a new editor tab.
+        """Continue Editing: the draft, ready to type in.
 
-        If a tab is already bound to this identifier, just activate it.
-        Otherwise spin up a new untitled tab and load the decrypted body.
+        A tab already bound to it comes to the front with its caret where
+        it was; otherwise a new tab gets the decrypted body, with the caret
+        at the end of the text, where writing goes on. Either way the
+        keyboard goes to the text.
         """
         record = self._draft_store.get(identifier)
         if record is None or record.state is not DraftState.READY:
@@ -8362,6 +8380,7 @@ class MainWindow(QMainWindow):
             binding = getattr(ed, "_draft_binding", None)
             if binding is not None and binding.identifier == identifier:
                 self.tabs.setCurrentIndex(i)
+                ed.setFocus(Qt.FocusReason.OtherFocusReason)
                 return
 
         # Fresh tab. Reuse ``new_tab`` so every per-tab wiring (backup,
@@ -8387,6 +8406,11 @@ class MainWindow(QMainWindow):
         # re-stashes go through Ctrl+S, which respects the binding via
         # ``_restash_with_binding``.
         self._update_tab_title()
+        cursor = ed.textCursor()
+        cursor.movePosition(QTextCursor.MoveOperation.End)
+        ed.setTextCursor(cursor)
+        ed.ensureCursorVisible()
+        ed.setFocus(Qt.FocusReason.OtherFocusReason)
 
     def _on_panel_publish_draft(self, identifier: str) -> None:
         """Promote a draft to a real (signed, public) Nostr publish.

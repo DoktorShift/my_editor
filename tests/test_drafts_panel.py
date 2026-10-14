@@ -530,7 +530,7 @@ def test_menu_commands_use_title_style_capitalisation():
         / "nostr" / "ui" / "drafts_panel.py"
     ).read_text(encoding="utf-8")
     for command in (
-        "Retry Decryption", "Open in New Tab", "Publish…",
+        "Retry Decryption", "Continue Editing", "Publish…",
         "Copy Event ID", "Delete Draft",
     ):
         assert f'QAction(_("{command}")' in source

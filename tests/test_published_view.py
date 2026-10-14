@@ -24,7 +24,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from PySide6.QtCore import QPoint, Qt  # noqa: E402
 from PySide6.QtGui import QContextMenuEvent, QGuiApplication  # noqa: E402
 from PySide6.QtTest import QTest  # noqa: E402
-from PySide6.QtWidgets import QApplication  # noqa: E402
+from PySide6.QtWidgets import QApplication, QMenu  # noqa: E402
 
 import alerts  # noqa: E402
 from nostr.published import LOADING, PAGE_SIZE, PublishedList  # noqa: E402
@@ -261,8 +261,8 @@ def test_an_article_without_a_link_still_has_its_menu():
     relays.run()
     menu = view.menu_for(view._rows.index(0))
     enabled = {a.text(): a.isEnabled() for a in menu.actions() if not a.isSeparator()}
-    assert enabled == {"Edit": True, "Open in Browser": False, "Copy Link": False,
-                       "Delete from Nostr…": True}
+    assert enabled == {"Edit Article": True, "Open in Standup Discover": False,
+                       "Open With": False, "Copy Link": False, "Delete from Nostr…": True}
 
 
 def test_a_row_and_its_confirmation_name_a_markdown_note_in_words(answered_alerts):
@@ -284,11 +284,19 @@ def test_the_menu_of_an_article_and_of_a_note():
     relays.run()
     words = lambda menu: [a.text() for a in menu.actions() if not a.isSeparator()]  # noqa: E731
     article_menu = view.menu_for(view._rows.index(1))
-    assert words(article_menu) == ["Edit", "Open in Browser", "Copy Link", "Delete from Nostr…"]
-    assert article_menu.defaultAction().text() == "Edit"
+    assert words(article_menu) == ["Edit Article", "Open in Standup Discover", "Open With",
+                                   "Copy Link", "Delete from Nostr…"]
+    assert article_menu.defaultAction().text() == "Edit Article"
+    # Open With lists every app that shows an article, Standup Discover first.
+    open_with = next(m for m in article_menu.findChildren(QMenu) if m.title() == "Open With")
+    assert words(open_with) == ["Standup Discover", "njump", "YakiHonne", "Primal",
+                                "noStrudel"]
     note_menu = view.menu_for(view._rows.index(0))
-    assert words(note_menu) == ["Open in Browser", "Copy Link", "Delete from Nostr…"]
-    assert note_menu.defaultAction().text() == "Open in Browser"
+    assert words(note_menu) == ["Open in njump", "Open With", "Copy Link", "Delete from Nostr…"]
+    assert note_menu.defaultAction().text() == "Open in njump"
+    # Discover shows no single note, so a note's menus never offer it.
+    note_apps = next(m for m in note_menu.findChildren(QMenu) if m.title() == "Open With")
+    assert "Standup Discover" not in words(note_apps)
     delete = note_menu.actions()[-1]
     assert not delete.shortcut().isEmpty()        # the key that does it, shown
     assert view.menu_for(view._rows.index(5)) is None
@@ -300,8 +308,34 @@ def test_copy_link_puts_the_web_address_on_the_clipboard():
     relays.run()
     menu = view.menu_for(view._rows.index(0))
     next(a for a in menu.actions() if a.text() == "Copy Link").trigger()
-    assert QGuiApplication.clipboard().text().startswith("https://njump.me/naddr1")
+    # The default app's link, so a shared link points to Standup Discover.
+    assert QGuiApplication.clipboard().text().startswith(
+        "https://discover.einundzwanzig.space/a/naddr1")
     assert said[-1] == "Link copied."
+
+
+def test_discover_is_asked_first_and_njump_opens_when_it_has_no_page(opened):
+    """Discover shows an article once it has indexed it; until then the
+    article opens on njump and the status line says why."""
+    asked = []
+    view, _model, relays, said, _edited = make(article("essay", "Essay"))
+    view._page_check = lambda url, done: (asked.append(url), done(False))
+    view.set_account(Profile())
+    relays.run()
+    view.preview_act(view._rows.item_at(0).id, "open:discover")
+    assert asked and asked[0].startswith("https://discover.einundzwanzig.space/a/")
+    assert opened and opened[0].startswith("https://njump.me/naddr1")
+    assert said[-1] == ("Standup Discover doesn’t show this article yet, so it opened on "
+                        "njump.")
+    opened.clear()
+    view._page_check = lambda url, done: done(True)
+    view.preview_act(view._rows.item_at(0).id, "open:discover")
+    assert opened[0].startswith("https://discover.einundzwanzig.space/a/")
+    # Another app is not checked first.
+    opened.clear()
+    view._page_check = lambda url, done: (_ for _ in ()).throw(AssertionError("asked"))
+    view.preview_act(view._rows.item_at(0).id, "open:primal")
+    assert opened == [opened[0]] and opened[0].startswith("https://primal.net/a/naddr1")
 
 
 def test_delete_asks_first_with_the_owners_words_and_cancel_as_the_default(answered_alerts):
@@ -514,6 +548,6 @@ def test_a_click_on_a_published_post_opens_its_full_preview(monkeypatch):
     bar.primary.click()
     assert [item.title for item in edited] == ["Essay"]
     click(0)                                          # the note
-    assert controller.popover().action_bar().primary.text() == "Open in Browser"
+    assert controller.popover().action_bar().primary.text() == "Open in njump"
     view.hide()
     assert controller.is_open() is False

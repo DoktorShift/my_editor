@@ -48,9 +48,6 @@ from typing import Callable, Dict, Iterable, List, Optional, Sequence, Set, Tupl
 
 from PySide6.QtCore import QObject, Signal
 
-import link_url
-import url_safety
-
 from .bech32 import encode_naddr, encode_nevent
 from .deletion import (
     DELETION_KIND, DeletionJob, DeletionRequest, address_of, read_deletion,
@@ -159,13 +156,6 @@ class PublishedItem:
             return encode_nevent(self.id, hints, self.pubkey, self.kind)
         except ValueError:
             return None
-
-    def web_link(self) -> Optional[str]:
-        """A web address any browser shows it at, None when there is none
-        it is safe to open."""
-        entity = self.nostr_address()
-        link = link_url.web_address_for("nostr:" + entity) if entity else None
-        return link if link and url_safety.is_safe_external_url(link) else None
 
 
 def _tag(event: dict, name: str) -> str:

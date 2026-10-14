@@ -61,6 +61,7 @@ import alerts
 import theme
 from i18n import _, ngettext
 
+from .. import web_readers
 from ..bunker import humanize_failure, is_signer_silent
 from ..draft_store import DraftState
 from ..drafts import derive_preview_snippet
@@ -121,6 +122,12 @@ def preview_record_of(item: PublishedItem) -> PublishedRecord:
 
 def kind_word(item: PublishedItem) -> str:
     return _("Article") if item.is_article else _("Note")
+
+
+def web_kind(item: PublishedItem) -> str:
+    """What a reading app is asked to show (web_readers): an article or a
+    short note."""
+    return web_readers.ARTICLE if item.is_article else web_readers.NOTE
 
 
 def display_title(item: PublishedItem) -> str:
@@ -422,9 +429,15 @@ class PublishedView(QWidget):
     status_message = Signal(str)
 
     def __init__(self, model: PublishedList, *, is_dark: bool = True,
+                 page_check=None, reader_choice=lambda: "",
                  parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
         self.setObjectName("published_view")
+        # Asks whether Discover has a page before it is opened
+        # (web_readers.PageCheck.check), or None: open without asking.
+        self._page_check = page_check
+        # The reading app chosen in Settings ("" for the first offered).
+        self._reader_choice = reader_choice
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self._model = model
         self._is_dark = bool(is_dark)
@@ -636,22 +649,47 @@ class PublishedView(QWidget):
 
     def _open(self, item: PublishedItem) -> None:
         """What Return and a double click do: an article opens for
-        editing, a note in the browser."""
+        editing, a note in its default reading app on the web."""
         if item.is_article and item.identifier:
             self.open_requested.emit(item)
         else:
-            self._open_in_browser(item)
+            self._open_on(item, self._default_reader(item).key)
 
-    def _open_in_browser(self, item: PublishedItem) -> None:
-        link = item.web_link()
-        if link is None:
+    def _default_reader(self, item: PublishedItem) -> web_readers.Reader:
+        return web_readers.default_reader(web_kind(item), self._reader_choice())
+
+    def _link(self, item: PublishedItem, key: str) -> str:
+        return web_readers.link_for(web_readers.reader(key), web_kind(item),
+                                    entity=item.nostr_address() or "",
+                                    owner=item.pubkey, identifier=item.identifier)
+
+    def _open_on(self, item: PublishedItem, key: str) -> None:
+        """Open the post in the reading app ``key``. Standup Discover is
+        asked first whether it has the page yet; where it does not, the
+        post opens on njump and the status line says why."""
+        link = self._link(item, key)
+        if not link:
             self.status_message.emit(_("That link cannot be opened."))
             return
-        QDesktopServices.openUrl(QUrl(link))
+        if key != web_readers.DISCOVER or self._page_check is None:
+            QDesktopServices.openUrl(QUrl(link))
+            return
+        fallback = self._link(item, web_readers.NJUMP)
+
+        def answered(found) -> None:
+            if found is False and fallback:
+                self.status_message.emit(_("Standup Discover doesn’t show this article yet, "
+                                           "so it opened on njump."))
+                QDesktopServices.openUrl(QUrl(fallback))
+            else:
+                QDesktopServices.openUrl(QUrl(link))
+        self._page_check(link, answered)
 
     def _copy_link(self, item: PublishedItem) -> None:
-        link = item.web_link()
-        if link is None:
+        """The default reading app's link, so a shared link opens where
+        the person reads (Standup Discover, for an article)."""
+        link = self._link(item, self._default_reader(item).key)
+        if not link:
             self.status_message.emit(_("That link cannot be opened."))
             return
         QGuiApplication.clipboard().setText(link)
@@ -719,18 +757,28 @@ class PublishedView(QWidget):
         return int(time.time())
 
     def preview_actions(self, key: str) -> List[PreviewAction]:
-        """The full preview's commands: Edit Article (an article's next
-        step), Open in Browser, Copy Link, and Delete from Nostr… in its
-        ⋯ menu, last."""
+        """The full preview's commands. An article: Open in (its reading
+        apps, Standup Discover first) and Edit Article, its next step. A
+        note: Open With and Open in its default app. Copy Link and Delete
+        from Nostr… in the ⋯ menu, Delete last."""
         item = self._model.item(key)
         if item is None:
             return []
         actions: List[PreviewAction] = []
+        first = self._default_reader(item)
+        apps = tuple((f"open:{app.key}", app.name)
+                     for app in web_readers.readers_for(web_kind(item)))
+        has_link = bool(self._link(item, first.key))
         editable = item.is_article and bool(item.identifier)
-        has_link = item.web_link() is not None
         if has_link:
-            actions.append(PreviewAction("browser", _("Open in Browser"), primary=not editable))
-            actions.append(PreviewAction("copy", _("Copy Link"), more=editable))
+            if editable:
+                actions.append(PreviewAction("open_in", _("Open in"), menu=apps))
+            else:
+                actions.append(PreviewAction("open_with", _("Open With"), menu=apps))
+                actions.append(PreviewAction(f"open:{first.key}",
+                                             _("Open in {app}").format(app=first.name),
+                                             primary=True))
+            actions.append(PreviewAction("copy", _("Copy Link"), more=True))
         if editable:
             actions.append(PreviewAction("edit", _("Edit Article"), primary=True))
         actions.append(PreviewAction("delete", _("Delete from Nostr…"), more=True,
@@ -743,8 +791,8 @@ class PublishedView(QWidget):
             return
         if action == "edit":
             self.open_requested.emit(item)
-        elif action == "browser":
-            self._open_in_browser(item)
+        elif action.startswith("open:"):
+            self._open_on(item, action[len("open:"):])
         elif action == "copy":
             self._copy_link(item)
         elif action == "delete":
@@ -796,19 +844,28 @@ class PublishedView(QWidget):
         return super().eventFilter(watched, event)
 
     def menu_for(self, index: QModelIndex) -> Optional[QMenu]:
-        """The row's menu, built but not shown (so tests can read it)."""
+        """The row's menu, built but not shown (so tests can read it): Edit
+        Article (an article), the default reading app, Open With (every app
+        that shows it, as Finder offers apps for a file), Copy Link, and
+        Delete from Nostr… last."""
         item = self._rows.item_at(index.row()) if index.isValid() else None
         if item is None:
             return None
         menu = QMenu(self)
         default = None
         if item.is_article and item.identifier:
-            default = menu.addAction(_("Edit"))
+            default = menu.addAction(_("Edit Article"))
             default.triggered.connect(lambda: self.open_requested.emit(item))
-        has_link = item.web_link() is not None
-        browse = menu.addAction(_("Open in Browser"))
+        first = self._default_reader(item)
+        has_link = bool(self._link(item, first.key))
+        browse = menu.addAction(_("Open in {app}").format(app=first.name))
         browse.setEnabled(has_link)
-        browse.triggered.connect(lambda: self._open_in_browser(item))
+        browse.triggered.connect(lambda: self._open_on(item, first.key))
+        apps = menu.addMenu(_("Open With"))
+        apps.setEnabled(has_link)
+        for app in web_readers.readers_for(web_kind(item)):
+            entry = apps.addAction(app.name)
+            entry.triggered.connect(lambda _checked=False, key=app.key: self._open_on(item, key))
         copy = menu.addAction(_("Copy Link"))
         copy.setEnabled(has_link)
         copy.triggered.connect(lambda: self._copy_link(item))

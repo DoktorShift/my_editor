@@ -2310,7 +2310,9 @@ class DraftsPanel(QFrame):
             menu.addAction(act_retry)
             menu.addSeparator()
 
-        act_open = QAction(_("Open in New Tab"), menu)
+        # What Return and a double click do, and the preview's next step.
+        act_open = QAction(_("Continue Editing"), menu)
+        act_open.setShortcut(QKeySequence(Qt.Key_Return))
         act_open.setData(("open", identifier))
         act_open.setEnabled(record.state is DraftState.READY)
         menu.addAction(act_open)

@@ -236,7 +236,7 @@ def test_every_row_command_reaches_the_host(panel):
     item = panel._list.item(0)
     identifier = rows_of(panel)[0]
     menu = panel._build_context_menu(item)
-    for text in ("Open in New Tab", "Publish…", "Copy Event ID"):
+    for text in ("Continue Editing", "Publish…", "Copy Event ID"):
         next(a for a in menu.actions() if a.text() == text).trigger()
     assert asked == [("open", identifier), ("publish", identifier),
                      ("copy", identifier + "e")]

@@ -210,3 +210,29 @@ def test_command_w_closes_it_as_any_window():
     QApplication.processEvents()
     QTest.keyClick(f.window, Qt.Key_W, Qt.ControlModifier)
     assert not f.window.isVisible()
+
+
+def test_where_published_posts_open_is_offered_with_nostr_and_kept():
+    """Settings > Open posts on the web in: the reading apps, Standup
+    Discover first and preselected, only while Nostr is in use."""
+    chosen = []
+    actions_group, appearance = group_of(("system", "light", "dark"), "system")
+    language_group, languages = group_of(("en",), "en")
+    nostr = {"on": False}
+    window = SettingsWindow(
+        appearance=appearance, languages=list(languages.items()),
+        choose_language=lambda code: None, monospace=QAction("Mono"),
+        paste_choice=lambda: "ask", choose_paste=lambda value: None,
+        nostr_in_use=lambda: nostr["on"], format_bar=lambda: True,
+        choose_format_bar=lambda on: None, web_reader=lambda: "discover",
+        choose_web_reader=chosen.append)
+    assert not window._reader_box.isVisibleTo(window)
+    nostr["on"] = True
+    window.refresh()
+    assert window._reader_box.isVisibleTo(window)
+    names = [window.reader.itemText(i) for i in range(window.reader.count())]
+    assert names[0] == "Standup Discover" and window.reader.currentText() == "Standup Discover"
+    window.reader.activated.emit(window.reader.findData("primal"))
+    assert chosen == ["primal"]
+    assert window.reader.accessibleName() == "Open posts on the web in"
+    assert unnamed_controls(window) == []

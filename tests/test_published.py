@@ -497,7 +497,6 @@ def test_links_lead_to_the_item_and_name_where_it_is():
     essay = PublishedItem(article("essay", "Essay"), found_on=(R1, R2, "wss://three.example"))
     entity = essay.nostr_address()
     assert bech32.decode_naddr(entity) == ("essay", PK, 30023, [R1, R2])
-    assert essay.web_link() == "https://njump.me/" + entity
     hello = PublishedItem(note("hello"), found_on=(R1,))
     event_id, hints, author, kind = bech32.decode_nevent(hello.nostr_address())
     assert (event_id, hints, author, kind) == (hello.id, [R1], PK, 1)
@@ -507,7 +506,7 @@ def test_an_identifier_too_long_for_a_link_has_no_link():
     """Review F17: NIP-19 holds 255 bytes per value; such an article has
     no address to open or copy, and asking for one must not raise."""
     long_d = PublishedItem(article("ü" * 130, "Long"), found_on=(R1,))
-    assert long_d.nostr_address() is None and long_d.web_link() is None
+    assert long_d.nostr_address() is None
 
 
 def test_the_first_publication_of_an_article_survives_edits():
