@@ -357,12 +357,13 @@ def test_return_in_code_keeps_the_indent_of_the_caret_line_after_emoji():
     block = ed.document().begin()
     cursor = QTextCursor(block)
     cursor.movePosition(QTextCursor.MoveOperation.EndOfBlock)
-    cursor.insertText("  y")
+    cursor.insertText("\u2028 y")                       # a line break, then " y"
     cursor.setPosition(block.position() + 7)                 # after "  🌸🌸x"
     ed.setTextCursor(cursor)
     QTest.keyClick(ed, Qt.Key.Key_Return)
-    assert ed.textCursor().block().text().startswith("  ")
-    assert ed.textCursor().block().text() == "  " + ed.textCursor().block().text()[2:]
+    # The caret line's indent, then what followed the caret, line break and all.
+    assert ed.textCursor().block().text() == "  \u2028 y"
+    assert ed.textCursor().block().previous().text() == "  🌸🌸x"
     assert ed.textCursor().positionInBlock() == 2
 
 
