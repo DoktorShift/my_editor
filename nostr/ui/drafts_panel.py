@@ -104,7 +104,6 @@ from PySide6.QtGui import (
 from PySide6.QtWidgets import (
     QApplication,
     QBoxLayout,
-    QButtonGroup,
     QFrame,
     QHBoxLayout,
     QLabel,
@@ -126,6 +125,7 @@ from PySide6.QtWidgets import (
 )
 
 from i18n import _, ngettext
+from segmented_control import Segment, SegmentedControl
 
 from ..draft_store import DraftRecord, DraftState, DraftStore
 from ..imports.constants import IDENTIFIER_PREFIX
@@ -252,37 +252,13 @@ QToolButton#drafts_panel_icon_btn:pressed {{ background: {t["control_pressed_bg"
 QToolButton#drafts_panel_icon_btn:disabled {{ color: {t["disabled"]}; }}
 QToolButton#drafts_panel_icon_btn::menu-indicator {{ image: none; width: 0px; }}
 
-QPushButton#drafts_panel_segment {{
-    background: transparent;
-    color: {t["muted"]};
-    border: 1px solid {t["border"]};
-    padding: 2px {_SEGMENT_INSET_PX}px;
-}}
-QPushButton#drafts_panel_segment[seg="first"] {{
-    border-top-left-radius: 4px;
-    border-bottom-left-radius: 4px;
-    border-right: none;
-}}
-QPushButton#drafts_panel_segment[seg="last"] {{
-    border-top-right-radius: 4px;
-    border-bottom-right-radius: 4px;
-}}
-QPushButton#drafts_panel_segment:hover {{ color: {t["chrome_fg"]}; }}
-QPushButton#drafts_panel_segment:checked {{
-    background: {t["panel_bg"]};
-    color: {t["row_fg"]};
-}}
-
 /* Focus indicators. Measured before this change: rendering each control
    focused and unfocused differed by zero pixels, because setting a
    background and a border in QSS makes Qt paint the whole control from
    the stylesheet box model and skip the native ring. accessibility.md:
    "Let people use the keyboard alone to navigate and interact with your
    app... evaluate your app to ensure it works well with Full Keyboard
-   Access." Focus is carried by the border because the segments already
-   spend their background on ``checked``, so the two states have to be
-   distinguishable from one another as well as from rest. */
-QPushButton#drafts_panel_segment:focus,
+   Access." The view switch draws its own ring (segmented_control.py). */
 QToolButton#drafts_panel_icon_btn:focus,
 QToolButton#drafts_panel_view_popup:focus,
 QPushButton#drafts_panel_imports_open:focus,
@@ -407,11 +383,6 @@ def _row_metrics() -> _RowMetrics:
     age_width = max(fm_secondary.horizontalAdvance(s) for s in _AGE_SAMPLES)
     return _RowMetrics(title_font, secondary_font, height, age_width)
 
-
-# The inset around a segment's label. Segments are only shown when they
-# fit with it whole; where they do not, the switch becomes a pop-up button
-# instead of squeezing them.
-_SEGMENT_INSET_PX = 14
 
 
 def _control_height() -> int:
@@ -622,71 +593,6 @@ class _ElidingLabel(ElidingLabel):
         super().__init__("", parent, mode=mode, tooltip=False)
 
 
-class _SegmentButton(QPushButton):
-    """A segment of the view switch, which elides its own label at paint
-    time should it ever be squeezed.
-
-    The band shows segments only where they fit whole (``_TopBand``), so
-    this is a safety net. It matters because QPushButton does not elide:
-    handed less than its sizeHint it clips the centred string from both
-    ends, so at 200 percent type "Drafts" once painted as "raf" with no
-    ellipsis to say anything had been cut. ``accessibility.md``: "Support
-    larger text sizes... Ideally, give people the option to enlarge text
-    by at least 200 percent."
-
-    Elision happens at paint time for the same reason it does in
-    ``_ElidingLabel``: eliding through ``setText`` would shrink the
-    button's sizeHint, which re-runs the layout, which hands the button
-    a different width, which changes the elision. ``text()`` stays the
-    full label, so the layout keeps asking for the room the whole word
-    needs and only the painted glyphs are ever cut.
-
-    The recovery is the tooltip, which always carries the untruncated
-    label. ``text-fields.md``: "Consider using an expansion tooltip to
-    show the full version of clipped or truncated text."
-    """
-
-    def __init__(
-        self, label: str, hint: str, parent: Optional[QWidget] = None,
-    ) -> None:
-        super().__init__(label, parent)
-        self.setObjectName("drafts_panel_segment")
-        self.setCheckable(True)
-        self.setAccessibleName(label)
-        # The label leads, so the word survives even when the segment is
-        # too narrow to paint it. ``buttons.md`` notes that "buttons that
-        # contain text don't need to display a tooltip because the
-        # button's descriptive label communicates what it does", which
-        # holds only for as long as the label is fully visible.
-        self.setToolTip(f"{label}: {hint}")
-
-    def painted_text(self) -> str:
-        """The string ``paintEvent`` will draw at the current width."""
-        option = QStyleOptionButton()
-        self.initStyleOption(option)
-        # Ask the style rather than subtracting a padding literal: the
-        # padding lives in the panel's QSS, so QStyleSheetStyle is the
-        # only thing that knows the real inner width. ``contentsRect()``
-        # does not, it reports the full width and is what made this
-        # clipping invisible to measurement.
-        inner = self.style().subElementRect(
-            QStyle.SE_PushButtonContents, option, self,
-        )
-        return self.fontMetrics().elidedText(
-            self.text(), Qt.ElideRight, inner.width(),
-        )
-
-    def paintEvent(self, event) -> None:
-        option = QStyleOptionButton()
-        self.initStyleOption(option)
-        option.text = self.painted_text()
-        # Drawn through the widget's own style, so the stylesheet keeps
-        # ownership of the fill, the border, the corner rounding and the
-        # focus ring. Only the string differs from what QPushButton
-        # would have painted for itself.
-        QStylePainter(self).drawControl(QStyle.CE_PushButton, option)
-
-
 # Room on the right of the view pop-up for its chevrons, in pixels.
 _POPUP_CHEVRON_ROOM = 20
 
@@ -750,8 +656,9 @@ class _ViewPopup(QToolButton):
 
 
 class _ViewSwitch(QWidget):
-    """Segments for the panel's views, or a pop-up button where they do
-    not fit (see ``_TopBand``).
+    """Segments for the panel's views (the shared segmented control, as
+    the toolbar's Write · Preview · Split), or a pop-up button where they
+    do not fit (see ``_TopBand``).
 
     Signals:
       view_chosen(str)   a view was picked (its key)
@@ -765,14 +672,8 @@ class _ViewSwitch(QWidget):
         self._control_h = control_h
         self._views: List[Tuple[str, str, str]] = []
         self._current = ""
-        self.segments: List[_SegmentButton] = []
-        self._segments = QWidget()
-        self._segments_layout = QHBoxLayout(self._segments)
-        self._segments_layout.setContentsMargins(0, 0, 0, 0)
-        self._segments_layout.setSpacing(0)
-        self._group = QButtonGroup(self)
-        self._group.setExclusive(True)
-        self._group.idClicked.connect(self._on_segment)
+        self._segments = SegmentedControl()
+        self._segments.chosen.connect(self.view_chosen)
         self.popup = _ViewPopup(control_h)
         self.popup.setAccessibleName(_("View"))
         self.popup.hide()
@@ -797,6 +698,13 @@ class _ViewSwitch(QWidget):
     def sizeHint(self) -> QSize:
         shown = self.popup if self.is_popup() else self._segments
         return QSize(shown.sizeHint().width(), self._control_h)
+
+    @property
+    def segments(self) -> List[Segment]:
+        return self._segments.segments
+
+    def set_dark(self, dark: bool) -> None:
+        self._segments.set_dark(dark)
 
     def has_choice(self) -> bool:
         return len(self._views) > 1
@@ -830,22 +738,10 @@ class _ViewSwitch(QWidget):
 
     def set_views(self, views, current: str) -> None:
         self._views = list(views)
-        for button in self.segments:
-            self._group.removeButton(button)
-            self._segments_layout.removeWidget(button)
-            button.hide()
-            button.deleteLater()
-        self.segments = []
+        self._segments.set_segments(self._views)
         menu = self.popup.menu()
         menu.clear()
-        for index, (key, title, hint) in enumerate(self._views):
-            button = _SegmentButton(title, hint)
-            button.setProperty("seg", "first" if index == 0 else (
-                "last" if index == len(self._views) - 1 else "middle"))
-            button.setMinimumHeight(self._control_h)
-            self._group.addButton(button, index)
-            self._segments_layout.addWidget(button)
-            self.segments.append(button)
+        for key, title, hint in self._views:
             action = menu.addAction(title)
             action.setCheckable(True)
             action.setToolTip(hint)
@@ -859,15 +755,9 @@ class _ViewSwitch(QWidget):
 
     def set_current(self, key: str) -> None:
         self._current = key
+        self._segments.set_current(key)
         for index, (view_key, title, _hint) in enumerate(self._views):
             chosen = view_key == key
-            if index < len(self.segments):
-                self.segments[index].setChecked(chosen)
-                # Tab reaches the switch on the view shown, as it reaches a
-                # group of radio buttons on the one chosen; the arrow keys
-                # move between the views.
-                self.segments[index].setFocusPolicy(
-                    Qt.FocusPolicy.StrongFocus if chosen else Qt.FocusPolicy.ClickFocus)
             actions = self.popup.menu().actions()
             if index < len(actions):
                 actions[index].setChecked(chosen)
@@ -878,10 +768,6 @@ class _ViewSwitch(QWidget):
                 # which view is up, as a pop-up button reads.
                 self.popup.setAccessibleName(_("View: {title}").format(title=title))
         self.updateGeometry()
-
-    def _on_segment(self, index: int) -> None:
-        if 0 <= index < len(self._views):
-            self.view_chosen.emit(self._views[index][0])
 
 
 class _TopBand(QFrame):
@@ -1782,6 +1668,7 @@ class DraftsPanel(QFrame):
     def apply_theme(self, is_dark: bool) -> None:
         self._is_dark = is_dark
         self.setStyleSheet(_panel_css(is_dark))
+        self._view_switch.set_dark(is_dark)
         self._actions_menu.setStyleSheet(_menu_css(is_dark))
         self._apply_placeholder_colour(is_dark)
         # Re-styled in place rather than closed: a theme switch is not a

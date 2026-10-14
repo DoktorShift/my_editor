@@ -28,17 +28,13 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Callable, Optional, Sequence, Tuple
 
-from PySide6.QtCore import QTimer, Qt
+from PySide6.QtCore import QTimer
 from PySide6.QtGui import QAction
-from PySide6.QtWidgets import (
-    QComboBox, QHBoxLayout, QLabel, QSizePolicy, QToolButton, QVBoxLayout, QWidget,
-)
+from PySide6.QtWidgets import QComboBox, QHBoxLayout, QLabel, QVBoxLayout, QWidget
 
-from constants import (
-    DARK_BORDER, DARK_FG, DARK_MUTED_FG, DARK_SELECTION, LIGHT_BORDER, LIGHT_FG, LIGHT_MUTED_FG,
-    LIGHT_SELECTION,
-)
+from constants import DARK_BORDER, DARK_MUTED_FG, LIGHT_BORDER, LIGHT_MUTED_FG
 from i18n import _, pgettext
+from segmented_control import ActionSegments
 from nostr.preview import Article, ImageLookup, MediaNames, NameLookup, NostrPreview
 
 # What the preview shows.
@@ -175,59 +171,20 @@ class PreviewPane(QWidget):
             f" padding: 8px 16px; border-bottom: 1px solid {border}; }}")
 
 
-class ViewSwitch(QWidget):
+class ViewSwitch(ActionSegments):
     """Write, Preview and Split as one segmented control, made of the
     window's own View commands (the same actions as the menu, which keep
-    one of them checked; the buttons only show them)."""
+    one of them checked; the segments only show them). It is the shared
+    control (segmented_control.py), so it reads as the panel's Drafts ·
+    Published beside it does: a neutral thumb, not an accent fill."""
 
     def __init__(self, actions: Sequence[QAction], *, dark: bool = False,
                  parent: Optional[QWidget] = None) -> None:
-        super().__init__(parent)
+        super().__init__(actions, dark=dark, parent=parent)
         self.setObjectName("ViewSwitch")
         self.setAccessibleName(pgettext("view modes", "View"))
-        self.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
-        row = QHBoxLayout(self)
-        row.setContentsMargins(0, 0, 0, 0)
-        row.setSpacing(0)
-        self.buttons = []
-        # The segments' places, for the rounded ends.
-        places = ["first"] + ["middle"] * (len(actions) - 2) + ["last"]
-        for action, place in zip(actions, places):
-            button = QToolButton()
-            button.setDefaultAction(action)
-            button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextOnly)
-            button.setAccessibleName(action.text().replace("&", ""))
+        self.buttons = self.segments
+        # The segments' places, for anything that styles the ends.
+        places = ["first"] + ["middle"] * (len(self.buttons) - 2) + ["last"]
+        for button, place in zip(self.buttons, places):
             button.setObjectName(place)
-            row.addWidget(button)
-            self.buttons.append(button)
-        self.set_dark(dark)
-
-    def set_dark(self, dark: bool) -> None:
-        text, border, accent = ((DARK_FG, DARK_BORDER, DARK_SELECTION) if dark
-                                else (LIGHT_FG, LIGHT_BORDER, LIGHT_SELECTION))
-        muted = DARK_MUTED_FG if dark else LIGHT_MUTED_FG
-        self.setStyleSheet(f"""
-            #ViewSwitch QToolButton {{
-                color: {text};
-                background: transparent;
-                border: 1px solid {border};
-                padding: 3px 10px;
-            }}
-            #ViewSwitch QToolButton#first {{
-                border-top-left-radius: 5px;
-                border-bottom-left-radius: 5px;
-            }}
-            #ViewSwitch QToolButton#last {{
-                border-top-right-radius: 5px;
-                border-bottom-right-radius: 5px;
-            }}
-            #ViewSwitch QToolButton#middle, #ViewSwitch QToolButton#last {{
-                border-left: none;
-            }}
-            #ViewSwitch QToolButton:checked {{
-                background: {accent};
-                color: #FFFFFF;
-                border-color: {accent};
-            }}
-            #ViewSwitch QToolButton:disabled {{ color: {muted}; }}
-        """)

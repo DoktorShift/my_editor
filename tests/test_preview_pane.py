@@ -110,6 +110,28 @@ def test_the_switch_is_the_view_commands_and_has_names():
     assert switch.accessibleName() == "View"          # the noun, not the verb
 
 
+def test_the_switch_is_the_shared_segmented_control_and_follows_its_commands():
+    """Write · Preview · Split is drawn as the panel's Drafts · Published
+    is (one control, a neutral thumb), and shows what the commands say."""
+    from segmented_control import SegmentedControl
+    actions = [QAction(title) for title in ("Write", "Preview", "Split")]
+    for action in actions:
+        action.setCheckable(True)
+    actions[0].setChecked(True)
+    switch = ViewSwitch(actions)
+    assert isinstance(switch, SegmentedControl)
+    assert [b.isChecked() for b in switch.buttons] == [True, False, False]
+    triggered = []
+    actions[1].triggered.connect(lambda: triggered.append("preview"))
+    switch.buttons[1].click()
+    assert triggered == ["preview"]
+    actions[1].setChecked(True)
+    actions[0].setChecked(False)
+    assert [b.isChecked() for b in switch.buttons] == [False, True, False]
+    actions[2].setEnabled(False)
+    assert not switch.buttons[2].isEnabled()
+
+
 # -- in the window ---------------------------------------------------------------------------
 
 SCRIPT = r"""
