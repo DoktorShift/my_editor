@@ -113,17 +113,18 @@ _DISTINCT_LATIN = frozenset("ßæøœðþłđħŋ")
 
 def _display_host(host: str) -> str:
     """``host`` as a person reads it. An IP address is shown as it is
-    written. A host in another script is kept in its ASCII form, and
-    shown as it is written only when it can't pass for another: where
-    Qt (as a browser) trusts its domain, and no label is a lookalike."""
+    written. A host in another script, in whichever form it comes, is
+    shown as it is written only where Qt (as a browser) trusts its
+    domain and no label can pass for another, else in its ASCII form."""
     if not host or ":" in host:
         return host
-    written = QUrl.fromAce(host.encode("ascii", "replace")) or host
-    if written == host:
-        return host
+    ascii_host = bytes(QUrl.toAce(host)).decode("ascii", "replace")
+    if not ascii_host:
+        return host.encode("ascii", "backslashreplace").decode("ascii")
+    written = QUrl.fromAce(ascii_host.encode("ascii")) or ascii_host
     labels = written.split(".")
     if any(_lookalike(label, labels[-1].lower()) for label in labels):
-        return host
+        return ascii_host
     return written
 
 
@@ -150,6 +151,12 @@ def _script(ch: str) -> str:
     name = unicodedata.name(ch, "")
     first = name.split(" ")[0] if name else "UNKNOWN"
     return {"KATAKANA-HIRAGANA": "KATAKANA", "IDEOGRAPHIC": "CJK"}.get(first, first)
+
+
+def _origins(servers: Sequence[str]) -> list:
+    """The servers a list names, as they are added when typed (a host in
+    another script in its ASCII form), leaving out what is no server."""
+    return [origin for origin, _problem in map(server_address, servers) if origin]
 
 
 def _address_problem(problem: str) -> str:
@@ -185,7 +192,7 @@ class MediaServersDialog(QDialog):
         self.setWindowModality(Qt.WindowModality.WindowModal)
         self._settings = settings
         self._entitled = [url_safety.origin_of(s) or s for s in entitled]
-        self._suggested = list(suggestions)
+        self._suggested = _origins(suggestions)
         self._label = server_label or (lambda _origin: None)
         self._is_dark = is_dark
         self.setStyleSheet(theme.dialog_stylesheet(is_dark) + (
@@ -313,10 +320,10 @@ class MediaServersDialog(QDialog):
             self.server_list.addItem(item)
         row = configured.index(select) if select in configured else 0
         self.server_list.setCurrentRow(row)
-        missing = [s for s in self._suggested
-                   if (url_safety.origin_of(s) or s) not in configured]
+        missing = [s for s in self._suggested if s not in configured]
         self.suggestion_text.setText(_("Your Nostr account also lists {servers}.").format(
-            servers=", ".join(url_safety.host_of(s) or s for s in missing)))
+            servers=", ".join(_display_host(url_safety.host_of(s) or "") or s
+                              for s in missing)))
         self.suggestions.setVisible(bool(missing))
         self._update_buttons()
 
@@ -332,7 +339,7 @@ class MediaServersDialog(QDialog):
 
     def offer(self, suggestions: Sequence[str]) -> None:
         """The account's published list changed while the sheet is open."""
-        self._suggested = list(suggestions)
+        self._suggested = _origins(suggestions)
         self._refresh(select=self._selected())
 
     # -- actions -------------------------------------------------------------

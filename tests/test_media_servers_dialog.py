@@ -151,6 +151,23 @@ def test_the_accounts_own_servers_are_offered_and_added_on_the_click(tmp_path):
     assert dialog.suggestions.isHidden()
 
 
+def test_the_accounts_servers_are_shown_by_the_same_rule_as_typed_ones(tmp_path):
+    """The account's list may name a host in another script: a lookalike
+    is offered and listed in its ASCII form, a real name as written, and
+    a server already in use in either form isn't offered again."""
+    lookalike = "exаmple.com"                         # a Cyrillic а
+    dialog, settings, _changes = sheet(
+        tmp_path, servers=(A, B, "https://xn--bcher-kva.de"),
+        suggestions=[f"https://{lookalike}", "https://bücher.de", "https://straße.de"])
+    assert dialog.suggestion_text.text() == (
+        f"Your Nostr account also lists {_ascii(lookalike)}, straße.de.")
+    dialog.suggestion_button.click()
+    assert settings.configured_servers == [A, B, "https://xn--bcher-kva.de",
+                                           f"https://{_ascii(lookalike)}",
+                                           f"https://{_ascii('straße.de')}"]
+    assert rows(dialog)[2:] == ["bücher.de", _ascii(lookalike), "straße.de"]
+
+
 def test_nothing_to_offer_shows_nothing(tmp_path):
     dialog, _settings, _ = sheet(tmp_path)
     assert dialog.suggestions.isHidden()

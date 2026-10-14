@@ -101,6 +101,14 @@ def test_normalize_strips_path_and_lowercases_host():
     assert settings._normalize("HTTPS://Blossom.Band/foo/bar") == "https://blossom.band"
 
 
+def test_a_host_in_another_script_is_kept_in_its_ascii_form():
+    """As the Media Servers sheet adds a typed one: the two ways of writing
+    it are one server, shown by one rule, wherever it came from."""
+    assert settings._normalize("https://Bücher.de:8443/x") == "https://xn--bcher-kva.de:8443"
+    assert settings._normalize("https://xn--bcher-kva.de") == "https://xn--bcher-kva.de"
+    assert settings._normalize("https://exаmple.com") == "https://xn--exmple-4nf.com"
+
+
 # --------------------------------------------------------------------------- #
 # Scheme policy: https anywhere, http only on loopback
 # --------------------------------------------------------------------------- #
