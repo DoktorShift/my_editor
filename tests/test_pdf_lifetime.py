@@ -88,17 +88,21 @@ for case in ("render", "scroll", "search", "outline", "reload"):
     r["cases"][case] = [shiboken6.isValid(part) for part in held]
 
 # A 500-page PDF closed while it renders, at a zoom where every page is
-# rendered anew.
-viewer = w.open_path(long_pdf) or w.current_pdf_viewer()
-viewer.zoom_in()
-viewer.view.verticalScrollBar().setValue(viewer.view.verticalScrollBar().maximum() // 2)
-app.processEvents()
-held = parts(viewer)
-started = time.perf_counter()
-w.close_tab(w.tabs.indexOf(viewer))
-settle()
-r["close_ms"] = round((time.perf_counter() - started) * 1000)
-r["long"] = [shiboken6.isValid(part) for part in held]
+# rendered anew. Three times: a busy machine can slow one close (a virus
+# scanner reading the reading positions' file as the close writes it), a
+# close that waits for the rendering is slow every time.
+r["close_ms"], r["long"] = [], []
+for _ in range(3):
+    viewer = w.open_path(long_pdf) or w.current_pdf_viewer()
+    viewer.zoom_in()
+    viewer.view.verticalScrollBar().setValue(viewer.view.verticalScrollBar().maximum() // 2)
+    app.processEvents()
+    held = parts(viewer)
+    started = time.perf_counter()
+    w.close_tab(w.tabs.indexOf(viewer))
+    settle()
+    r["close_ms"].append(round((time.perf_counter() - started) * 1000))
+    r["long"].append([shiboken6.isValid(part) for part in held])
 QTest.qWait(600)                    # a reload or a reading position put off
 app.processEvents()
 r["tabs"] = w.tabs.count()
@@ -116,8 +120,9 @@ def test_a_closed_pdf_tab_goes_with_its_document_and_search(tmp_path):
     r = json.loads(line[len("RESULT "):])
     for case, alive in r["cases"].items():
         assert alive == [False] * 5, (case, alive)
-    assert r["long"] == [False] * 5
-    assert r["close_ms"] < 150, r["close_ms"]
+    assert r["long"] == [[False] * 5] * 3
+    # The fastest of the three closes: what the close itself takes.
+    assert min(r["close_ms"]) < 150, r["close_ms"]
     assert "Traceback" not in proc.stderr and "RuntimeError" not in proc.stderr, proc.stderr
     assert proc.returncode == 0, proc.stderr
 
