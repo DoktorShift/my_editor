@@ -177,7 +177,8 @@ def test_the_inspector_in_the_window(tmp_path):
     r = run_window_script(SCRIPT, tmp_path)
     assert r["view_without"] is False and r["view_with"] is True              # D-1
     assert r["enabled_without"] is False and r["in_nostr_menu"] is True
-    assert r["keys"] == ("Ctrl+Alt+I" if r["mac"] else "")      # Pages' inspector key; Q-A
+    # Pages' inspector key; elsewhere LibreOffice's key for its sidebar.
+    assert r["keys"] == ("Ctrl+Alt+I" if r["mac"] else "Ctrl+F5")
     assert r["shown"] is True and 260 <= r["width"] <= 420
     assert r["tab_title"] == "Typed in the inspector" and r["modified"] is True
     assert r["note_page"] is True
