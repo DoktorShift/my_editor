@@ -6902,13 +6902,19 @@ msgstr "{reading_time}, {word_count}"
 msgid "Tagged {tags}"
 msgstr "Schlagwörter: {tags}"
 
+#: nostr/ui/drafts_preview.py:1152
+#: nostr/ui/reader_window.py:68
+#, python-brace-format
+msgid "Preview of {title}"
+msgstr "Vorschau von {title}"
+
 #: nostr/ui/drafts_preview.py:409
 #: nostr/ui/drafts_preview.py:422
 #, python-brace-format
 msgid "Published {date}"
 msgstr "Veröffentlicht am {date}"
 
-#: nostr/ui/drafts_preview.py:1993
+#: nostr/ui/drafts_preview.py:1995
 msgid "Open in New Window"
 msgstr "In neuem Fenster öffnen"
 
@@ -9274,11 +9280,6 @@ msgstr "Noch nichts veröffentlicht"
 #: nostr/ui/published_view.py:617
 msgid "Notes and articles you publish appear here."
 msgstr "Notizen und Artikel, die du veröffentlichst, erscheinen hier."
-
-#: nostr/ui/reader_window.py:68
-#, python-brace-format
-msgid "Preview of {title}"
-msgstr "Vorschau von {title}"
 
 #: nostr/ui/reference_popover.py:50
 msgid "Insert Note or Article"

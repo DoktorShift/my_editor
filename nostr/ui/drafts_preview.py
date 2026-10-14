@@ -1148,6 +1148,8 @@ class PreviewPopover(QWidget):
         """
         self._full = bool(full)
         self._fields = preview_fields(record, now=now, digest=digest)
+        # What a screen reader says as it opens: what this is a preview of.
+        self.setAccessibleName(_("Preview of {title}").format(title=self._fields.title))
         if self._full:
             # The text itself follows, so the header carries a summary only
             # where the writer gave one; its opening words would repeat.

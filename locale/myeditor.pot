@@ -6881,13 +6881,19 @@ msgstr ""
 msgid "Tagged {tags}"
 msgstr ""
 
+#: nostr/ui/drafts_preview.py:1152
+#: nostr/ui/reader_window.py:68
+#, python-brace-format
+msgid "Preview of {title}"
+msgstr ""
+
 #: nostr/ui/drafts_preview.py:409
 #: nostr/ui/drafts_preview.py:422
 #, python-brace-format
 msgid "Published {date}"
 msgstr ""
 
-#: nostr/ui/drafts_preview.py:1993
+#: nostr/ui/drafts_preview.py:1995
 msgid "Open in New Window"
 msgstr ""
 
@@ -9252,11 +9258,6 @@ msgstr ""
 
 #: nostr/ui/published_view.py:617
 msgid "Notes and articles you publish appear here."
-msgstr ""
-
-#: nostr/ui/reader_window.py:68
-#, python-brace-format
-msgid "Preview of {title}"
 msgstr ""
 
 #: nostr/ui/reference_popover.py:50

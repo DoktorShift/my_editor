@@ -1545,7 +1545,8 @@ def test_show_preview_describes_the_row_it_was_raised_on(panel):
 
 def test_every_line_of_the_popover_carries_its_own_accessible_name():
     popover = compose(article())
-    assert popover.accessibleName() == "Draft preview"
+    # Named for what it previews, as it opens.
+    assert popover.accessibleName() == f"Preview of {popover.fields().title}"
     assert popover.accessibleDescription()
     fields = popover.fields()
     for name, label in popover.labels():
