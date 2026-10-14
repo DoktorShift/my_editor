@@ -65,6 +65,22 @@ def text_index(text: str, offset: int) -> int:
     return len(text)
 
 
+def block_units(block) -> bytes:
+    """``block``'s text as Qt holds it: its UTF-16 units, little-endian, a
+    lone surrogate included, which PySide leaves out of ``block.text()``
+    (so places found in that text would not be Qt's). Read unit by unit
+    from the document only when the text holds fewer units (doc_length)
+    than the block. Where whole characters are enough, doc_offset and
+    text_index convert a place; this keeps every unit (mac_words)."""
+    text = block.text()
+    if doc_length(text) == block.length() - 1:
+        return text.encode("utf-16-le", "surrogatepass")
+    doc = block.document()
+    return "".join(doc.characterAt(position) for position in range(
+        block.position(), block.position() + block.length() - 1)).encode(
+            "utf-16-le", "surrogatepass")
+
+
 def iter_blocks(doc):
     """Yield the document's QTextBlocks in order."""
     block = doc.begin()

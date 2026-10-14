@@ -390,3 +390,45 @@ def test_a_note_keeps_its_no_break_spaces(tmp_path, ):
     text = f"100 km away, « quote » for nostr:{BOB_NPUB}\nnext line"
     sheet = note(tmp_path, content=text)
     assert sheet._text_edit.note() == text
+
+
+# -- a paragraph's very units: one helper beside doc_offset and text_index -------
+
+def _units_as_the_editor_read_them(block) -> bytes:
+    """editor._block_units as format-ux had it, before it moved into
+    doc_walk.block_units: the reference the helper is held to."""
+    text = block.text()
+    units = text.encode("utf-16-le", "surrogatepass")
+    if len(units) // 2 == block.length() - 1:
+        return units
+    doc = block.document()
+    return "".join(doc.characterAt(position) for position in range(
+        block.position(), block.position() + block.length() - 1)).encode(
+            "utf-16-le", "surrogatepass")
+
+
+@pytest.mark.parametrize("text", [
+    "", "plain words", "Grüße, ça va", "日本語のテキスト",
+    *AROUND, "ab \ud83d cd", "\udc00 at the start", "at the end \ud83d",
+    "🌸 \ud83d and 👨‍👩‍👧 \udfff 🇩🇪", "first paragraph 🌸\nsecond \ud83d one\n\nlast",
+])
+def test_a_paragraphs_units_are_read_as_the_editor_read_them(text):
+    """The units Option-Delete hands the Mac's text view (mac_words) are
+    the same from doc_walk.block_units as from the editor's own helper it
+    replaces, a lone surrogate included, in every paragraph."""
+    from PySide6.QtGui import QTextCursor, QTextDocument
+
+    import doc_walk
+    import editor
+    doc = QTextDocument()
+    QTextCursor(doc).insertText(text)
+    block, short = doc.begin(), False
+    while block.isValid():
+        expected = _units_as_the_editor_read_them(block)
+        assert doc_walk.block_units(block) == expected
+        assert len(expected) // 2 == block.length() - 1
+        # Read from the document, unit by unit, where the text lacks some.
+        short = short or doc_walk.doc_length(block.text()) != block.length() - 1
+        block = block.next()
+    assert short == any(0xD800 <= ord(char) <= 0xDFFF for char in text)
+    assert not hasattr(editor, "_block_units")

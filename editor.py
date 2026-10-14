@@ -30,7 +30,7 @@ from constants import (
 from fonts import code_font, writing_font
 from i18n import N_, _, ngettext
 import announce
-from doc_walk import doc_length, doc_offset, iter_blocks, text_index
+from doc_walk import block_units, doc_length, doc_offset, iter_blocks, text_index
 import image_safety
 import file_paths
 import link_url
@@ -137,23 +137,6 @@ class _EmptyCopy(QTextEdit):
 
     def qt_data(self):
         return self.createMimeDataFromSelection()
-
-
-def _block_units(block) -> bytes:
-    """``block``'s text as Qt holds it: UTF-16 little-endian, a lone
-    surrogate included, which PySide leaves out of ``block.text()`` (so
-    its positions would not be Qt's). Read unit by unit from the document
-    only when the two differ. (doc_walk's doc_offset and text_index, on
-    the publish branch, convert positions for whole characters; this
-    keeps every unit.)"""
-    text = block.text()
-    units = text.encode("utf-16-le", "surrogatepass")
-    if len(units) // 2 == block.length() - 1:
-        return units
-    doc = block.document()
-    return "".join(doc.characterAt(position) for position in range(
-        block.position(), block.position() + block.length() - 1)).encode(
-            "utf-16-le", "surrogatepass")
 
 
 def _open_paragraph_above(cursor: QTextCursor) -> None:
@@ -2066,7 +2049,7 @@ class HtmlEditor(QTextEdit):
         Fn-Option-Delete deletes from ``cursor``, where AppKit's text view
         finds it (mac_words.py). False when AppKit cannot be asked."""
         block = cursor.block()
-        found = mac_words.deleted_range(_block_units(block), cursor.positionInBlock(),
+        found = mac_words.deleted_range(block_units(block), cursor.positionInBlock(),
                                         forward=kind == FORWARD)
         if found is None:
             return False
