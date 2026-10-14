@@ -792,13 +792,12 @@ class PublishArticleDialog(QDialog):
             if found.under:
                 # Out under the file's own name: that is the article, and
                 # its link name, exactly as it is (another would be a
-                # second article). This computer remembers it.
+                # second article). This computer records it once it went
+                # out (_on_completed).
                 slug = found.under
                 self._slug_is_auto = False
                 self._kept_slug = slug
                 self._slug_edit.setText(slug)
-                if self._first_publications is not None:
-                    self._first_publications.remember(author, slug, found.published_at)
             self._first_published[slug] = found.published_at
             self._publish(slug, self._body, found.published_at)
         elif found.state == NEVER:

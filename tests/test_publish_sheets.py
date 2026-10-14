@@ -692,6 +692,9 @@ def test_a_files_own_name_is_asked_about_at_publish_and_not_before(
     tags = captured[0]["tags"] if captured else []
     if state == "found":
         assert ["d", RAW] in tags and ["published_at", str(FIRST)] in tags
+        # Recorded once it went out, not when it was found (review round 4).
+        assert sheet._first_publications.get(PK, RAW) is None
+        sheet._on_completed([("wss://nos.lol", True, "")])
         assert sheet._first_publications.get(PK, RAW) == FIRST
     elif state == "never":
         assert ["d", MADE] in tags
@@ -699,6 +702,21 @@ def test_a_files_own_name_is_asked_about_at_publish_and_not_before(
         import unicodedata
         assert COMPOSED in unicodedata.normalize("NFC", alerts[0]["message"])
         assert (["d", MADE] in tags) if state == "unknown-new" else captured == []
+
+
+def test_found_under_the_files_name_but_not_published_records_nothing(
+        tmp_path, captured, monkeypatch):
+    """Review round 4, L3: this computer's record was written when the
+    article was found under the file's name, before anything went out
+    (the secret key check could still stop it). It is the record of what
+    this computer published: written after a relay took it."""
+    from nostr.publisher import FOUND, FirstPublication
+    monkeypatch.setattr(article_module, "publishable", lambda *a, **k: None)
+    asked = []
+    sheet = file_article(tmp_path, asked)
+    sheet._on_publish()
+    asked[-1][3](FirstPublication(FOUND, FIRST, under=RAW))
+    assert captured == [] and sheet._first_publications.get(PK, RAW) is None
 
 
 def test_a_link_name_typed_or_another_account_is_what_publish_asks_about(tmp_path, captured):
