@@ -987,6 +987,8 @@ class MediaLibraryDialog(QDialog):
 
     def _choose_files(self) -> None:
         patterns = " ".join("*" + ext for ext in media_files.EXTENSIONS)
+        # R Markdown's conventional casing matters to non-native Linux dialogs.
+        patterns += " *.Rmd"
         paths, _filter = QFileDialog.getOpenFileNames(
             self, _("Add to Media Library"), "",
             _("Images, Videos, Audio and Files ({patterns})").format(patterns=patterns))

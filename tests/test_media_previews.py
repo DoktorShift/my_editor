@@ -2,12 +2,13 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 """Library file kinds, verified sources, native playback and preview lifetime."""
 
+import ast
 import hashlib
 from pathlib import Path
 
 import pytest
 from PySide6.QtCore import QBuffer, QCoreApplication, QEvent, QIODevice, Qt
-from PySide6.QtGui import QPainter, QPdfWriter
+from PySide6.QtGui import QColor, QIcon, QPainter, QPdfWriter, QPixmap
 from PySide6.QtMultimedia import QMediaPlayer
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QWidget
@@ -19,6 +20,7 @@ from nostr.media.media_visibility import MediaVisibility
 from nostr.media.visibility import PrivateBlob
 from nostr.ui import media_source
 from nostr.ui.file_preview import FilePreview, TEXT_PREVIEW_BYTES
+from nostr.ui import file_icons
 from nostr.ui.media_player import MediaPlayer, time_label
 from nostr.ui.media_picture import frame_pixmap
 from nostr.ui.media_library_dialog import MediaLibraryDialog
@@ -61,7 +63,7 @@ def inline_worker(monkeypatch):
 
 
 @pytest.mark.parametrize("name,label", [
-    ("report.pdf", "PDF Document"), ("notes.md", "Text File"),
+    ("report.pdf", "PDF Document"), ("notes.md", "Text File"), ("analysis.Rmd", "Text File"),
     ("letter.docx", "Text Document"), ("table.xlsx", "Spreadsheet"),
     ("table.csv", "Spreadsheet"), ("slides.pptx", "Presentation"),
     ("bundle.zip", "Archive"), ("book.epub", "EPUB Book"),
@@ -73,6 +75,59 @@ def test_common_files_have_stable_types_and_human_labels(name, label):
     assert mime and media_files.library_kind(mime) == "file"
     assert media_files.file_type_label(mime) == label
     assert not media_files.is_audio_or_video(name)
+
+
+def test_library_accepts_every_format_the_editor_opens_or_saves():
+    # Read the editor's advertised contracts without importing its main window.
+    tree = ast.parse((Path(__file__).parents[1] / "main_window.py").read_text(encoding="utf-8"))
+    formats = set()
+    for node in tree.body:
+        if isinstance(node, ast.Assign) and any(
+                isinstance(target, ast.Name) and target.id in ("_SUPPORTED_EXTS", "_SAVE_EXTS")
+                for target in node.targets):
+            formats.update(ast.literal_eval(node.value))
+    assert formats
+    assert all(media_files.type_of("document" + ext) for ext in formats)
+
+
+def test_file_icons_use_cached_system_associations_without_user_paths(tmp_path, monkeypatch):
+    calls = []
+    picture = QPixmap(32, 32)
+    picture.fill(QColor("blue"))
+    native_icon = QIcon(picture)
+
+    class Provider:
+        def icon(self, info):
+            calls.append(info.filePath())
+            assert not info.exists()
+            return native_icon if info.suffix() else QIcon()
+
+    monkeypatch.setattr(file_icons, "QFileIconProvider", Provider)
+    icons = file_icons.FileIcons()
+    mime = media_files.type_of("Budget.xlsx")
+    assert icons.icon(str(tmp_path / "Private Budget.xlsx"), mime).cacheKey() == native_icon.cacheKey()
+    assert icons.icon("Another.xlsx", mime).cacheKey() == native_icon.cacheKey()
+    assert calls == ["myeditor-file-type", "myeditor-file-type.xlsx"]
+    assert list(tmp_path.iterdir()) == []
+
+
+@pytest.mark.parametrize("name,glyph", [
+    ("Note.Rmd", "text"), ("Letter.odt", "document"), ("Table.ods", "spreadsheet"),
+    ("Slides.pptx", "presentation"), ("Backup.7z", "archive"), ("Novel.epub", "book"),
+])
+def test_file_preview_keeps_recognizable_fallback_when_system_icon_is_missing(name, glyph, monkeypatch):
+    monkeypatch.setattr(file_icons.FileIcons, "icon", lambda *_args: QIcon())
+    grid = QWidget()
+    preview = QuickLook(grid=grid, is_dark=False)
+    mime = media_files.type_of(name)
+    preview.show_file(name=name, detail="", url="", glyph=media_files.file_glyph(mime),
+                      picture=None, mime=mime)
+    assert preview.picture.icon.isNull()
+    assert preview.picture.glyph == glyph
+    assert not preview.picture.grab().isNull()
+    preview.close()
+    preview.deleteLater()
+    grid.deleteLater()
 
 
 def test_files_filter_includes_pdf_text_office_and_unknown_files(tmp_path, monkeypatch):
@@ -89,11 +144,26 @@ def test_files_filter_includes_pdf_text_office_and_unknown_files(tmp_path, monke
 
 def test_common_files_can_be_added_by_drop(tmp_path, monkeypatch):
     world = build(tmp_path, monkeypatch)
-    for name in ("notes.txt", "sheet.xlsx", "slides.odp", "bundle.zip"):
+    for name in ("notes.txt", "analysis.Rmd", "sheet.xlsx", "slides.odp", "bundle.zip"):
         path = tmp_path / name
         path.write_bytes(b"file")
         world.dialog._add_paths([str(path)])
         assert ("upload_file", name) in world.store.calls
+
+
+def test_file_picker_includes_both_r_markdown_casings(tmp_path, monkeypatch):
+    from nostr.ui import media_library_dialog
+    path = tmp_path / "Analysis.Rmd"
+    path.write_text("# Analysis\n", encoding="utf-8")
+    world = build(tmp_path, monkeypatch)
+
+    def choose(_parent, _title, _directory, filters):
+        assert "*.rmd" in filters and "*.Rmd" in filters
+        return [str(path)], ""
+
+    monkeypatch.setattr(media_library_dialog.QFileDialog, "getOpenFileNames", choose)
+    world.dialog._choose_files()
+    assert ("upload_file", "Analysis.Rmd") in world.store.calls
 
 
 def test_missing_server_type_uses_remembered_file_name(tmp_path, monkeypatch):
@@ -431,6 +501,10 @@ def test_space_controls_video_and_escape_closes_quick_look(tmp_path, inline_work
 
 def test_file_preview_save_action_uses_existing_library_saver(tmp_path, monkeypatch):
     from nostr.ui import media_library_dialog
+    picture = QPixmap(32, 32)
+    picture.fill(QColor("blue"))
+    icon = QIcon(picture)
+    monkeypatch.setattr(file_icons.FileIcons, "icon", lambda *_args: icon)
     media = record(b"office", media_files.type_of("report.docx"))
     world = build(tmp_path, monkeypatch, FakeStore([media], names={media.hash: "Report.docx"}))
     select(world, media.hash)
@@ -438,12 +512,15 @@ def test_file_preview_save_action_uses_existing_library_saver(tmp_path, monkeypa
     look = world.dialog._quick_look
     assert look.save_button.isVisible() and look._file_preview is None
     assert "open it in an app" in look.message.text()
+    assert look.picture.icon.cacheKey() == icon.cacheKey()
     target = tmp_path / "Report.docx"
     monkeypatch.setattr(media_library_dialog.QFileDialog, "getSaveFileName",
                         lambda *args, **kwargs: (str(target), ""))
     look.save_button.click()
     assert world.loader.downloads[-1].sha == media.hash
     assert Path(world.loader.downloads[-1].target) == target
+    look.close()
+    assert look.picture.icon is None
 
 
 @pytest.mark.parametrize("milliseconds,expected", [(0, "0:00"), (61000, "1:01"), (3661000, "1:01:01")])

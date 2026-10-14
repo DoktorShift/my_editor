@@ -159,7 +159,7 @@ If your signer (Amber, nsec.app) times out a decrypt approval or you dismiss the
 
 ## Media library (Blossom)
 
-Keep images, video, audio and common files on your own Blossom media servers, browse them in a library that works like a Finder window or Photos, and put them into notes and articles. Files include PDFs, text and Markdown, CSV and JSON, Office and OpenDocument documents, spreadsheets and presentations, archives and EPUB books. Every upload is authorised by a kind 24242 event your signer signs; no separate API key, no third-party account.
+Keep images, video, audio and common files on your own Blossom media servers, browse them in a library that works like a Finder window or Photos, and put them into notes and articles. Files include every document format MyEditor opens or saves: PDF, plain text, Markdown, R Markdown, HTML and RTF. CSV and JSON, Office, OpenDocument and Apple iWork documents, spreadsheets and presentations, archives and EPUB books are supported too. File tiles and Quick Look use the operating system's file-type icons when available, with recognizable document, spreadsheet, presentation, archive and book glyphs as a fallback. Extension labels distinguish individual formats. Servers may restrict accepted types or file sizes; upload failures appear on the file's tile with Retry. Every upload is authorised by a kind 24242 event your signer signs; no separate API key, no third-party account.
 
 ### The library
 

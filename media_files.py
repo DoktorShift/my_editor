@@ -31,7 +31,7 @@ IMAGE_TYPES = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
                ".avif": "image/avif"}
 DOCUMENT_TYPES = {
     ".pdf": "application/pdf", ".txt": "text/plain", ".md": "text/markdown",
-    ".markdown": "text/markdown", ".log": "text/plain", ".csv": "text/csv",
+    ".markdown": "text/markdown", ".rmd": "text/plain", ".log": "text/plain", ".csv": "text/csv",
     ".tsv": "text/tab-separated-values", ".json": "application/json",
     ".xml": "application/xml", ".yaml": "application/yaml", ".yml": "application/yaml",
     ".html": "text/html", ".htm": "text/html", ".css": "text/css",
@@ -115,6 +115,14 @@ def file_glyph(mime: str) -> str:
     family = file_family(mime)
     return family if family in ("video", "audio", "spreadsheet", "presentation",
                                 "archive", "book", "text") else "document"
+
+
+def file_extension(name: str, mime: str) -> str:
+    """The file's own suffix for presentation, or one from its declared type."""
+    suffix = os.path.splitext(name or "")[1].lower()
+    if suffix and len(suffix) <= 17 and suffix[1:].isascii() and suffix[1:].isalnum():
+        return suffix
+    return extension_for(mime)
 
 
 def is_text(mime: str) -> bool:

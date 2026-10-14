@@ -36,6 +36,7 @@ import theme
 import url_safety
 from i18n import _
 from .media_picture import MediaPicture
+from .file_icons import FileIcons
 
 
 class QuickLook(QDialog):
@@ -59,6 +60,7 @@ class QuickLook(QDialog):
         self._player = None
         self._file_preview = None
         self._loading = False
+        self._file_icons = FileIcons()
         if resolver is not None:
             resolver.ready.connect(self._resolved)
             resolver.failed.connect(self._failed)
@@ -124,6 +126,8 @@ class QuickLook(QDialog):
         self.retry_button.hide()
         self.picture.pixmap = picture
         self.picture.glyph = glyph
+        if media_files.library_kind(mime) == "file":
+            self.picture.icon = self._file_icons.icon(name, mime)
         self.picture.update()
         self.open_button.setVisible(bool(glyph)
                                     and url_safety.is_safe_media_url(url))
@@ -201,6 +205,7 @@ class QuickLook(QDialog):
         if self._file_preview is not None:
             self._file_preview.clear()
         self.picture.pixmap = None
+        self.picture.icon = None
         self.picture.glyph = ""
         self.picture.update()
         self._key = ""

@@ -32,6 +32,7 @@ class MediaPicture(QWidget):
     def __init__(self, parent=None, *, allow_upscale=False):
         super().__init__(parent)
         self.pixmap = None
+        self.icon = None
         self.glyph = ""
         self._allow_upscale = allow_upscale
         self.setMinimumSize(QSize(280, 200))
@@ -50,9 +51,12 @@ class MediaPicture(QWidget):
             target.setSize(size)
             target.moveCenter(area.center())
             painter.drawPixmap(target, self.pixmap)
-        elif self.glyph:
+        elif self.glyph or (self.icon is not None and not self.icon.isNull()):
             side = min(96, area.width() // 3, area.height() // 2)
             rect = QRectF(area.center().x() - side / 2, area.center().y() - side / 2, side, side)
-            format_icons.paint(self.glyph, painter, rect,
-                               self.palette().color(QPalette.ColorRole.PlaceholderText))
+            if self.icon is not None and not self.icon.isNull():
+                self.icon.paint(painter, rect.toRect())
+            else:
+                format_icons.paint(self.glyph, painter, rect,
+                                   self.palette().color(QPalette.ColorRole.PlaceholderText))
         painter.end()

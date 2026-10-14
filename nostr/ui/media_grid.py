@@ -58,6 +58,7 @@ import theme
 from i18n import _
 
 from ..blossom.store import MediaFile
+from .file_icons import FileIcons
 
 # The thumbnail's side, and the cell around it.
 THUMB = 128
@@ -217,6 +218,7 @@ class TileDelegate(QStyledItemDelegate):
         super().__init__(view)
         self._view = view
         self._is_dark = is_dark
+        self._file_icons = FileIcons()
 
     def cell_size(self) -> QSize:
         line = QFontMetrics(self._view.font()).lineSpacing()
@@ -300,10 +302,14 @@ class TileDelegate(QStyledItemDelegate):
             side = 44
             rect = QRectF(thumb.center().x() - side / 2, thumb.center().y() - side / 2,
                           side, side)
-            format_icons.paint(glyph, painter, rect,
-                               palette.color(QPalette.ColorRole.PlaceholderText))
+            icon = self._file_icons.icon(tile.name, tile.mime) if tile.kind == "file" else None
+            if icon is not None and not icon.isNull():
+                icon.paint(painter, rect.toRect())
+            else:
+                format_icons.paint(glyph, painter, rect,
+                                   palette.color(QPalette.ColorRole.PlaceholderText))
             if tile.kind == "file":
-                suffix = media_files.extension_for(tile.mime).lstrip(".").upper()
+                suffix = media_files.file_extension(tile.name, tile.mime).lstrip(".").upper()
                 if suffix:
                     painter.setPen(palette.color(QPalette.ColorRole.Text))
                     painter.drawText(thumb.adjusted(8, THUMB - 30, -8, -8),
