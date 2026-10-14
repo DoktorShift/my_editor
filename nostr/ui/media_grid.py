@@ -404,6 +404,7 @@ class MediaGrid(QListView):
     quick_look_requested = Signal()
     delete_requested = Signal()
     copy_requested = Signal()
+    save_requested = Signal()
     paste_requested = Signal()
     files_dropped = Signal(list)          # local paths
     cancel_requested = Signal(str)        # job name
@@ -482,15 +483,18 @@ class MediaGrid(QListView):
 
     def keyPressEvent(self, event) -> None:  # noqa: N802
         key = event.key()
-        command = bool(event.modifiers() & Qt.KeyboardModifier.ControlModifier)
         if key == Qt.Key.Key_Space and not event.modifiers():
             self.quick_look_requested.emit()
         elif key in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
             self.open_requested.emit()
-        elif key == Qt.Key.Key_Delete or (key == Qt.Key.Key_Backspace and command):
+        elif key in (Qt.Key.Key_Delete, Qt.Key.Key_Backspace):
+            # Delete, or Backspace (the Mac's Delete key) with Command or
+            # without, as MyEditor 3.3 had it; it asks first.
             self.delete_requested.emit()
         elif event.matches(QKeySequence.StandardKey.Copy):
             self.copy_requested.emit()
+        elif event.matches(QKeySequence.StandardKey.Save):
+            self.save_requested.emit()
         elif event.matches(QKeySequence.StandardKey.Paste):
             self.paste_requested.emit()
         else:

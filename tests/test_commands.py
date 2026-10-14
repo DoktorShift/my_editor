@@ -188,8 +188,11 @@ def test_every_menu_item_is_a_registered_command(main_window_commands):
         assert action.objectName() in win.commands, f"{action.text()} is not a command"
     registered = {c.id for c in win.commands.commands()}
     shown = {a.objectName() for a in in_menus}
-    # Print Preview is offered only where the platform has one.
-    assert registered - shown <= {"file.print_preview"}
+    # Print Preview is offered only where the platform has one; moving
+    # between tabs and panes is done by key (the Keyboard Shortcuts window
+    # lists them; a Mac's Window menu has Show Next and Previous Tab).
+    keyboard_only = {c.id for c in win.commands.commands(commands.NAVIGATION)}
+    assert registered - shown <= {"file.print_preview"} | keyboard_only
 
 
 def test_the_menus_build_their_actions_through_the_registry():
@@ -209,18 +212,6 @@ def test_the_shortcut_window_lists_every_command_shortcut(main_window_commands):
     for command in win.commands.commands():
         if command.shortcut is not None:
             assert any(keys == key_text(command.shortcut) for keys, _w in listed), command.id
-    # The UI audit: no invented keys for Nostr commands (Q-A). A key the
-    # system itself names (Refresh: Command-R, F5) is the platform's own;
-    # a key named here is the convention of the app Q-A follows for it.
-    conventions = {
-        # Pages, Numbers and Keynote: View > Show Inspector, on a Mac only.
-        "nostr.article_details": "Ctrl+Alt+I" if sys.platform == "darwin" else None,
-    }
-    nostr_keys = [c.id for c in win.commands.commands()
-                  if c.id.startswith("nostr.") and c.shortcut is not None
-                  and not isinstance(c.shortcut, QKeySequence.StandardKey)
-                  and conventions.get(c.id) != c.shortcut]
-    assert nostr_keys == []
 
 
 def test_the_nostr_commands_that_need_an_account_are_marked(main_window_commands):
@@ -379,7 +370,7 @@ def test_the_pdf_reader_keeps_its_copy_key(qt_app):
 
 
 def test_paragraph_styles_use_each_platform_keys(fresh_window):
-    expected = "Ctrl+Shift+T" if sys.platform == "darwin" else "Ctrl+1"
+    expected = "Ctrl+Alt+1" if sys.platform == "darwin" else "Ctrl+1"
     action = fresh_window.commands.action("format.style.h1")
     assert action.shortcut().toString(QKeySequence.SequenceFormat.PortableText) == expected
     assert [a.objectName() for a in fresh_window.m_style.actions()] == [
@@ -390,22 +381,24 @@ def test_paragraph_styles_use_each_platform_keys(fresh_window):
 
 
 @pytest.mark.parametrize("platform, keys", [
-    ("darwin", {"format.strike": "Ctrl+Shift+X", "format.list.bullet": "Ctrl+Shift+7",
-                "format.list.number": "Ctrl+Shift+9", "format.quote": "Ctrl+'",
-                "format.style.h2": "Ctrl+Shift+H", "format.style.body": "Ctrl+Shift+B",
-                "format.style.h1": "Ctrl+Shift+T", "format.style.h3": "Ctrl+Shift+J",
-                "edit.paste_plain": "Ctrl+Alt+Shift+V",
-                "search.use_selection": "Ctrl+E", "format.reset": "Ctrl+\\",
+    ("darwin", {"format.strike": "Ctrl+Shift+X", "format.list.bullet": "Ctrl+Shift+8",
+                "format.list.number": "Ctrl+Shift+7", "format.quote": "Ctrl+'",
+                "format.style.h2": "Ctrl+Alt+2", "format.style.body": "Ctrl+Alt+0",
+                "format.style.h1": "Ctrl+Alt+1", "format.style.h3": "Ctrl+Alt+3",
+                "edit.paste_plain": "Ctrl+Alt+Shift+V", "file.page_setup": "Ctrl+Shift+P",
+                "format.list.task": "Ctrl+Shift+9",
+                "search.use_selection": "Ctrl+E", "format.reset": "Ctrl+D",
                 "search.replace": "Ctrl+Alt+F",
                 "insert.link": "Ctrl+K"}),
     ("win32", {"format.strike": "Alt+Shift+5", "format.list.bullet": "Ctrl+Shift+8",
-               "format.list.number": "Ctrl+Shift+7", "format.quote": "",
+               "format.list.number": "Ctrl+Shift+7", "format.quote": "Ctrl+'",
                "format.style.h2": "Ctrl+2", "edit.paste_plain": "Ctrl+Shift+V",
-               "search.use_selection": "", "format.reset": "Ctrl+\\",
+               "search.use_selection": "", "format.reset": "Ctrl+D",
                "search.replace": "Ctrl+H",
                "insert.link": "Ctrl+K"}),
     ("linux", {"format.list.bullet": "Ctrl+Shift+8", "format.list.number": "Ctrl+Shift+7",
-               "format.quote": "", "format.strike": "Alt+Shift+5", "format.reset": "Ctrl+\\",
+               "format.list.task": "Ctrl+Shift+9", "file.page_setup": "",
+               "format.quote": "Ctrl+'", "format.strike": "Alt+Shift+5", "format.reset": "Ctrl+D",
                "format.style.body": "Ctrl+0"}),
 ])
 def test_each_platform_gets_its_own_conventions(qt_app, monkeypatch, platform, keys):
@@ -418,27 +411,6 @@ def test_each_platform_gets_its_own_conventions(qt_app, monkeypatch, platform, k
         shortcut = win.commands.action(command_id).shortcut()
         assert shortcut.toString(QKeySequence.SequenceFormat.PortableText) == expected, \
             command_id
-
-
-
-def test_the_app_invented_view_keys_are_retired(fresh_window):
-    # No platform convention gives these a key; Shift-Command-L is Notes'
-    # Checklist. The menu items stay.
-    for command_id in ("view.line_numbers", "view.syntax_highlighting"):
-        action = fresh_window.commands.action(command_id)
-        assert action.shortcut().isEmpty(), command_id
-        assert action in fresh_window.m_view.actions()
-    for mode in ("system", "light", "dark"):
-        action = fresh_window.commands.action(f"view.appearance.{mode}")
-        assert action.shortcut().isEmpty(), mode
-        assert action in fresh_window.m_appearance.actions()
-
-
-def test_imports_is_in_the_nostr_menu_without_a_shortcut(main_window_commands):
-    # No platform has a convention for it, so it gets no shortcut.
-    command = main_window_commands.commands.command("nostr.imports")
-    assert command.shortcut is None
-    assert command.group == "Nostr"
 
 
 

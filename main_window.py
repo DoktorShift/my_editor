@@ -31,8 +31,8 @@ from PySide6.QtGui import (
 )
 from PySide6.QtPrintSupport import QPrintDialog, QPrintPreviewDialog
 from PySide6.QtWidgets import (
-    QApplication, QMainWindow, QFileDialog, QInputDialog, QLineEdit, QMenu, QWidget,
-    QVBoxLayout, QPlainTextEdit, QTextEdit, QTabWidget, QToolButton, QHBoxLayout, QStatusBar,
+    QAbstractItemView, QApplication, QMainWindow, QFileDialog, QInputDialog, QLineEdit, QMenu,
+    QWidget, QVBoxLayout, QPlainTextEdit, QTextEdit, QTabWidget, QToolButton, QHBoxLayout, QStatusBar,
     QPushButton, QTabBar, QLabel, QDialog, QSplitter,
     QProgressDialog, QToolTip
 )
@@ -55,8 +55,9 @@ import file_paths
 import i18n
 from i18n import N_, _, ngettext, pgettext
 from commands import (
-    EDIT, FILE, FORMAT, HELP, INSERT, NOSTR, SEARCH, VIEW, WINDOW, Command, CommandRegistry,
-    all_key_texts, platform_keys, redo_words, undo_words,
+    EDIT, FILE, FORMAT, HELP, INSERT, NAVIGATION, NOSTR, SEARCH, VIEW, WINDOW, Command,
+    CommandRegistry,
+    all_key_texts, platform_keys, redo_words, standard_and, undo_words,
 )
 import front_matter
 import tab_details
@@ -108,7 +109,7 @@ from word_count import count_words, reading_minutes
 from export_pdf import export_pdf, load_page_setup
 from page_setup_dialog import PageSetupDialog
 import printing
-from pdf_viewer import PdfViewerTab
+from pdf_viewer import PdfViewerTab, reader_keys as pdf_reader_keys
 from rmarkdown import KnitRunner, MediaLink, derive_title, document_to_rmd, media_dir_for
 from rmd_setup_dialog import RmdSetupDialog
 import rmd_toolchain
@@ -1479,6 +1480,56 @@ class MainWindow(QMainWindow):
                                                                    app=APP_DISPLAY_NAME))
         self.setWindowModified(modified)
 
+    def _show_tab(self, index: int, *, wrap: bool = True) -> None:
+        """The tab at ``index`` in front, its document taking the keys: from
+        the last tab the next one is the first, as in Safari; a tab number
+        past the last one does nothing."""
+        count = self.tabs.count()
+        if not count or not wrap and index >= count:
+            return
+        self.tabs.setCurrentIndex(index % count)
+        target = self._pane_focus_target(self._central_splitter.widget(0))
+        if target is not None:
+            target.setFocus(Qt.FocusReason.TabFocusReason)
+
+    def _panes(self) -> list:
+        """The panes shown, in the order F6 visits them: the document,
+        Article Details, the Drafts panel."""
+        panes = [self._central_splitter.widget(0)]
+        return panes + [pane for pane in (self._article_details_panel, self._drafts_panel)
+                        if pane is not None and pane.isVisible()]
+
+    def _move_to_pane(self, step: int) -> None:
+        """F6 (Shift+F6): the keyboard focus to the next (previous) pane."""
+        panes = self._panes()
+        focus = QApplication.focusWidget()
+        here = next((i for i, pane in enumerate(panes)
+                     if focus is not None and pane.isAncestorOf(focus)), 0)
+        for offset in range(1, len(panes) + 1):
+            target = self._pane_focus_target(panes[(here + step * offset) % len(panes)])
+            if target is not None:
+                target.setFocus(Qt.FocusReason.OtherFocusReason)
+                return
+
+    def _pane_focus_target(self, pane):
+        """Where the keys go in ``pane``: the document of the tab in front;
+        else the pane's list, or its first control reached with Tab."""
+        if pane is self._central_splitter.widget(0):
+            viewer = self.current_pdf_viewer()
+            return viewer.view if viewer is not None else self.current_editor()
+        for view in pane.findChildren(QAbstractItemView):
+            if view.isVisible() and view.focusPolicy() & Qt.FocusPolicy.TabFocus:
+                return view
+        first = widget = pane.nextInFocusChain()
+        while widget is not None and widget is not pane:
+            if (pane.isAncestorOf(widget) and widget.isVisible() and widget.isEnabled()
+                    and widget.focusPolicy() & Qt.FocusPolicy.TabFocus):
+                return widget
+            widget = widget.nextInFocusChain()
+            if widget is first:
+                break
+        return None
+
     def _on_tab_changed(self, index=None):
         self._show_backup_status()
         self._fill_article_details_panel()
@@ -1810,15 +1861,20 @@ class MainWindow(QMainWindow):
         # ``_on_save_as_pressed`` for the full decision tree.
         self.act_save_as = add(Command("file.save_as", _("Save As…"), FILE, "Ctrl+Shift+S"),
                                triggered=self._on_save_as_pressed)
-        self.act_page_setup = add(Command("file.page_setup", _("Page Setup…"), FILE),
+        # Shift-Command-P on a Mac, the key Apple's guidelines give Page
+        # Setup (MyEditor 3.3's Publish as Note key moves off it there).
+        self.act_page_setup = add(Command("file.page_setup", _("Page Setup…"), FILE,
+                                          platform_keys("Ctrl+Shift+P", None)),
                                   triggered=self._on_page_setup)
         # Print prints the current tab as formatted pages (see printing.py);
         # both actions dim when the current tab has nothing to print.
         self.act_print = add(Command("file.print", _("Print\u2026"), FILE,
                                      QKeySequence.StandardKey.Print),
                              triggered=self._on_print)
+        # Ctrl+Shift+O, LibreOffice's Print Preview (offered where the
+        # print panel has no preview of its own: not on a Mac).
         self.act_print_preview = add(Command("file.print_preview", _("Print Preview\u2026"),
-                                             FILE),
+                                             FILE, platform_keys(None, "Ctrl+Shift+O")),
                                      triggered=self._on_print_preview)
         # Knitting renders the on-disk .Rmd through the R toolchain, so the
         # actions only light up for .Rmd tabs (see _update_knit_actions).
@@ -1896,21 +1952,22 @@ class MainWindow(QMainWindow):
                                       platform_keys("Ctrl+Shift+X", "Alt+Shift+5"),
                                       checkable=True, keywords=(_("cross out"),)),
                               triggered=lambda: self._toggle_style(rich_text.STRIKE))
+        # Ctrl+E, Notion's and GitHub's key for it; on a Mac Shift-Command-E,
+        # as Command-E is Use Selection for Find there.
         self.act_code = add(Command("format.code", _("Inline Code"), FORMAT,
+                                    platform_keys("Ctrl+Shift+E", "Ctrl+E"),
                                     checkable=True, keywords=(_("monospace"),)),
                             triggered=lambda: self._toggle_style(rich_text.CODE))
-        # Command-\ and Ctrl+\, Google Docs' keys for it (Apple's apps have
-        # none).
+        # Ctrl+D (Command-D), MyEditor 3.3's Reset Format key; Command-\ and
+        # Ctrl+\, Google Docs' keys for it, answer too.
         self.act_reset_format = add(Command("format.reset", _("Clear Formatting"), FORMAT,
-                                            "Ctrl+\\", keywords=(_("plain"),)),
+                                            ("Ctrl+D", "Ctrl+\\"), keywords=(_("plain"),)),
                                     triggered=self._reset_format)
-        # Paragraph styles. Apple Notes' keys on a Mac: Body Shift-Command-B,
-        # Title, Heading and Subheading Shift-Command-T, H and J for
-        # Heading 1 to 3. Ctrl+0 to 3 elsewhere, as in LibreOffice and
-        # Google Docs' numbers, because Ctrl+Alt is AltGr there and types
-        # characters (² and ³ on a German keyboard).
-        mac_style_keys = {0: "Ctrl+Shift+B", 1: "Ctrl+Shift+T", 2: "Ctrl+Shift+H",
-                          3: "Ctrl+Shift+J"}
+        # Paragraph styles. Google Docs' keys on a Mac, Option-Command-0 to 3
+        # (Notes' Shift-Command-T and H are MyEditor 3.3's theme and syntax
+        # keys). Ctrl+0 to 3 elsewhere, as in LibreOffice, because Ctrl+Alt
+        # is AltGr there and types characters (² and ³ on a German keyboard).
+        mac_style_keys = {level: f"Ctrl+Alt+{level}" for level in range(4)}
         self._style_group = QActionGroup(self)
         self._style_group.setExclusionPolicy(QActionGroup.ExclusionPolicy.ExclusiveOptional)
         self.act_styles = []
@@ -1926,31 +1983,32 @@ class MainWindow(QMainWindow):
                          triggered=lambda n=level: self._set_heading(n))
             self._style_group.addAction(action)
             self.act_styles.append(action)
-        # Lists: Apple Notes' keys on a Mac (Shift-Command-7 and 9), Google
-        # Docs' elsewhere (Ctrl+Shift+8 and 7).
+        # Lists: Google Docs' keys on every system (Ctrl+Shift+8 bulleted, 7
+        # numbered, 9 checklist; Shift-Command on a Mac), since Notes'
+        # Checklist key is MyEditor 3.3's Show Line Numbers.
         self.act_bullets = add(Command("format.list.bullet", _("Bulleted List"), FORMAT,
-                                       platform_keys("Ctrl+Shift+7", "Ctrl+Shift+8"),
+                                       "Ctrl+Shift+8",
                                        checkable=True, keywords=(_("bullets"), _("list")),
                                        slash_section=slash_menu.LISTS),
                                triggered=lambda: self._toggle_list(rich_text.BULLET))
         self.act_numbers = add(Command("format.list.number", _("Numbered List"), FORMAT,
-                                       platform_keys("Ctrl+Shift+9", "Ctrl+Shift+7"),
+                                       "Ctrl+Shift+7",
                                        checkable=True,
                                        keywords=(_("numbers"), _("list"), _("ordered")),
                                        slash_section=slash_menu.LISTS),
                                triggered=lambda: self._toggle_list(rich_text.NUMBER))
-        # Checklist: Apple Notes' key on a Mac (Shift-Command-L), Google
-        # Docs' elsewhere (Ctrl+Shift+9).
         self.act_checklist = add(Command("format.list.task", _("Checklist"), FORMAT,
-                                         platform_keys("Ctrl+Shift+L", "Ctrl+Shift+9"),
+                                         "Ctrl+Shift+9",
                                          checkable=True,
                                          keywords=(_("todo"), _("checkbox"), _("task")),
                                          slash_section=slash_menu.LISTS),
                                  triggered=lambda: self._editor_call("toggle_checklist"))
-        # Mark as Checked: Notes' key on a Mac; none elsewhere (Ctrl+Shift+U
-        # is the Unicode input of Linux desktops).
+        # Mark as Checked: Notes' key on a Mac; Ctrl+Return elsewhere, as in
+        # Notion (Ctrl+Shift+U is the Unicode input of Linux desktops). It
+        # is on only in a checklist, so Ctrl+Return leaves a code block or
+        # a table as before.
         self.act_tick = add(Command("format.list.tick", _("Mark as Checked"), FORMAT,
-                                    platform_keys("Ctrl+Shift+U", None),
+                                    platform_keys("Ctrl+Shift+U", "Ctrl+Return"),
                                     keywords=(_("tick"), _("done"), _("task"))),
                             triggered=self._toggle_ticks)
         # Go to Note and back (footnotes): the keyboard's way to Command-click.
@@ -1963,10 +2021,9 @@ class MainWindow(QMainWindow):
         self.act_outdent = add(Command("format.outdent", _("Decrease Indent"), FORMAT,
                                        "Ctrl+["),
                                triggered=lambda: self._change_indent(-1))
-        # Apple Notes' Block Quote key on a Mac; Word, Google Docs and
-        # LibreOffice have none.
-        self.act_quote = add(Command("format.quote", _("Quote"), FORMAT,
-                                     platform_keys("Ctrl+'", None),
+        # Apple Notes' Block Quote key, and Bear's, on every system (Word,
+        # Google Docs and LibreOffice have none).
+        self.act_quote = add(Command("format.quote", _("Quote"), FORMAT, "Ctrl+'",
                                      checkable=True, keywords=(_("citation"), _("blockquote")),
                                      slash_section=slash_menu.BLOCKS),
                              triggered=lambda: self._editor_call("toggle_quote"))
@@ -1978,14 +2035,18 @@ class MainWindow(QMainWindow):
                                     slash_section=slash_menu.INSERT,
                                     insert_title=_("Link\u2026")),
                             triggered=lambda: self._editor_call("show_link_popover"))
-        self.act_divider = add(Command("insert.divider", _("Divider"), INSERT,
+        # Ctrl+Shift+Minus: no app has a key for a divider; the minus is
+        # the line Markdown draws it with (---).
+        self.act_divider = add(Command("insert.divider", _("Divider"), INSERT, "Ctrl+Shift+-",
                                        keywords=(_("horizontal rule"), _("line"),
                                                  _("separator")),
                                        slash_section=slash_menu.BLOCKS),
                                triggered=lambda: self._editor_call("insert_divider"))
-        # Code Block: no key (Option-Command-C is Copy Style on a Mac). The
-        # language is asked right after, in a short list at the caret.
+        # Code Block: Slack's key, Option-Shift-Command-C on a Mac, and
+        # Ctrl+Shift+C elsewhere (Ctrl+Alt is AltGr there). The language is
+        # asked right after, in a short list at the caret.
         self.act_code_block = add(Command("insert.code_block", _("Code Block"), INSERT,
+                                          platform_keys("Ctrl+Alt+Shift+C", "Ctrl+Shift+C"),
                                           keywords=(_("code"), _("snippet"), _("program"),
                                                     "fence"),
                                           slash_section=slash_menu.BLOCKS),
@@ -2005,18 +2066,26 @@ class MainWindow(QMainWindow):
             self.act_code_languages.append(action)
         # Footnote: its mark at the caret, its note at the end of the
         # document, where the caret goes (literal Markdown, rich_text.py).
-        self.act_footnote = add(Command("insert.footnote", _("Footnote"), INSERT,
+        # Ctrl+Shift+F: the nearest free key to Word's and Google Docs'
+        # (Ctrl+Alt+F, AltGr elsewhere; Option-Command-F is Find and
+        # Replace on a Mac).
+        self.act_footnote = add(Command("insert.footnote", _("Footnote"), INSERT, "Ctrl+Shift+F",
                                         keywords=(_("note"), _("source"), _("reference"),
                                                   _("citation")),
                                         slash_section=slash_menu.INSERT),
                                 triggered=lambda: self._editor_call("insert_footnote"))
         # Image...: a picture file, put in as dropping it at the caret would.
+        # Pages' Insert > Choose… on a Mac (Shift-Command-V); elsewhere,
+        # where Ctrl+Shift+V pastes as plain text and Ctrl+Shift+G finds
+        # the previous match, Ctrl+Shift+E (no app has a key for it).
         self.act_insert_image = add(Command("insert.image", _("Image\u2026"), INSERT,
+                                            platform_keys("Ctrl+Shift+V", "Ctrl+Shift+E"),
                                             keywords=(_("picture"), _("photo")),
                                             slash_section=slash_menu.INSERT),
                                     triggered=self._insert_image)
         # Table...: its size is chosen on a grid at the caret (table_picker).
-        self.act_table = add(Command("insert.table", _("Table\u2026"), INSERT,
+        # Ctrl+F12, LibreOffice's Insert Table (Command-F12 on a Mac).
+        self.act_table = add(Command("insert.table", _("Table\u2026"), INSERT, "Ctrl+F12",
                                      keywords=(_("grid"), _("rows"), _("columns")),
                                      slash_section=slash_menu.BLOCKS),
                              triggered=self._insert_table)
@@ -2045,7 +2114,8 @@ class MainWindow(QMainWindow):
                                     triggered=lambda: self._apply_color(None))
 
         # Find, in the Edit menu. Find Next and Find Previous use each
-        # platform's own keys (Command-G on a Mac, F3 on Windows).
+        # platform's own keys (Command-G on a Mac, F3 on Windows), and F3
+        # and Shift+F3 on every system, as MyEditor 3.3 had them.
         self.act_find = add(Command("search.find", _("Find\u2026"), SEARCH, "Ctrl+F",
                                     listed_as=_("Find")),
                             triggered=lambda: self._show_find(replace=False))
@@ -2057,11 +2127,12 @@ class MainWindow(QMainWindow):
                                        listed_as=_("Find and replace")),
                                triggered=lambda: self._show_find(replace=True))
         self.act_find_next = add(Command("search.next", _("Find Next"), SEARCH,
-                                         QKeySequence.StandardKey.FindNext,
+                                         standard_and(QKeySequence.StandardKey.FindNext, "F3"),
                                          listed_as=_("Find next")),
                                  triggered=self._find_next)
         self.act_find_prev = add(Command("search.previous", _("Find Previous"), SEARCH,
-                                         QKeySequence.StandardKey.FindPrevious,
+                                         standard_and(QKeySequence.StandardKey.FindPrevious,
+                                                      "Shift+F3"),
                                          listed_as=_("Find previous")),
                                  triggered=self._find_prev)
         # Command-E on a Mac: the selection becomes what Find Next looks for.
@@ -2102,11 +2173,10 @@ class MainWindow(QMainWindow):
         self._current_match_index = -1
         self._last_search_text = ""
 
-        # Appearance, line numbers and syntax highlighting: menu items
-        # without keys, since no platform convention gives them one (their
-        # old keys were this app's own; Shift-Command-L is Notes' Checklist).
         # Appearance is the system's (followed as it changes) unless Light
-        # or Dark is chosen; Automatic goes back to the system's.
+        # or Dark is chosen; Automatic goes back to the system's. Switching
+        # between light and dark, line numbers and syntax highlighting keep
+        # MyEditor 3.3's keys: Ctrl+Shift+T, L and H.
         self._appearance_group = QActionGroup(self)
         self._appearance_group.setExclusive(True)
         self.act_appearance = {}
@@ -2119,13 +2189,21 @@ class MainWindow(QMainWindow):
                          checked=self.appearance == mode)
             self._appearance_group.addAction(action)
             self.act_appearance[mode] = action
+        # Named for what it does next, as Show Toolbar is.
+        self.act_switch_appearance = add(
+            Command("view.appearance.switch", _("Switch to Dark Appearance"), VIEW,
+                    "Ctrl+Shift+T", listed_as=_("Switch between light and dark"),
+                    keywords=(_("appearance"), _("theme"), "dark", "light")),
+            triggered=self._switch_appearance)
+        if isinstance(self.__dict__.get("is_dark_theme"), bool) and self.is_dark_theme:
+            self.act_switch_appearance.setText(_("Switch to Light Appearance"))
         self.act_toggle_line_numbers = add(
-            Command("view.line_numbers", _("Show Line Numbers"), VIEW,
+            Command("view.line_numbers", _("Show Line Numbers"), VIEW, "Ctrl+Shift+L",
                     checkable=True, listed_as=_("Toggle line numbers")),
             triggered=self._toggle_line_numbers)
         self.act_toggle_syntax_hl = add(
             Command("view.syntax_highlighting", _("Syntax Highlighting"), VIEW,
-                    checkable=True, listed_as=_("Toggle syntax highlighting")),
+                    "Ctrl+Shift+H", checkable=True, listed_as=_("Toggle syntax highlighting")),
             triggered=self._toggle_syntax_highlighting, checked=False)
 
         # View menu: background viewing aids. All four toggles are independent
@@ -2185,9 +2263,11 @@ class MainWindow(QMainWindow):
         # Apple's apps; dimmed where the system has no checker.
         self.check_spelling = bool(load_settings().get("check_spelling", True))
         self.spelling_language = str(load_settings().get("spelling_language", "") or "")
+        # Shift+F7, LibreOffice's Automatic Spell Checking; on a Mac
+        # Option-Command-;, beside Apple's spelling key (Command-;).
         self.act_check_spelling = add(
             Command("edit.check_spelling", _("Check Spelling While Typing"), EDIT,
-                    checkable=True, keywords=(_("spelling"), _("spellcheck"))),
+                    platform_keys("Ctrl+Alt+;", "Shift+F7"), checkable=True, keywords=(_("spelling"), _("spellcheck"))),
             toggled=self._set_check_spelling, checked=self.check_spelling)
         self.markdown_shortcuts = bool(load_settings().get("markdown_shortcuts", False))
         # The format bar over text selected with the pointer (Settings).
@@ -2199,19 +2279,27 @@ class MainWindow(QMainWindow):
             toggled=self._set_markdown_shortcuts, checked=self.markdown_shortcuts)
         # Write, Preview and Split: the text, its preview, or both side by
         # side, for every document that holds Markdown (app-wide, like
-        # standup's). No key: no platform has one for it.
+        # standup's). No app has keys for these; numbered in their order,
+        # with Control-Command on a Mac and Ctrl+Shift elsewhere (Command-1
+        # and Alt+1 go to tabs, Option-Command-1 and Ctrl+1 are headings).
         mode = load_settings().get("view_mode", WRITE)
         self.view_mode = mode if mode in preview_pane.MODES else WRITE
         self._view_group = QActionGroup(self)
-        self.act_view_write = add(Command("view.write", _("Write"), VIEW, checkable=True,
+        self.act_view_write = add(Command("view.write", _("Write"), VIEW,
+                                          platform_keys("Meta+Ctrl+1", "Ctrl+Shift+1"),
+                                          checkable=True,
                                           keywords=(_("editor"), _("text"))),
                                   triggered=lambda: self._choose_view(WRITE),
                                   checked=self.view_mode == WRITE)
-        self.act_view_preview = add(Command("view.preview", _("Preview"), VIEW, checkable=True,
+        self.act_view_preview = add(Command("view.preview", _("Preview"), VIEW,
+                                          platform_keys("Meta+Ctrl+2", "Ctrl+Shift+2"),
+                                          checkable=True,
                                             keywords=(_("reading"), _("read"))),
                                     triggered=lambda: self._choose_view(PREVIEW),
                                     checked=self.view_mode == PREVIEW)
-        self.act_view_split = add(Command("view.split", _("Split"), VIEW, checkable=True,
+        self.act_view_split = add(Command("view.split", _("Split"), VIEW,
+                                          platform_keys("Meta+Ctrl+3", "Ctrl+Shift+3"),
+                                          checkable=True,
                                           keywords=(_("side by side"),)),
                                   triggered=lambda: self._choose_view(SPLIT),
                                   checked=self.view_mode == SPLIT)
@@ -2252,28 +2340,29 @@ class MainWindow(QMainWindow):
 
         # Nostr. Only the ones that need an account are marked: Create
         # Account, Connect Signer, Restore and the membership window are
-        # how a person starts using Nostr. No keys: no platform has a
-        # convention for them (Shift-Command-P is Page Setup in Apple's
-        # apps), and keys are not invented (decision Q-A).
+        # how a person starts using Nostr. MyEditor 3.3's Ctrl+Shift family
+        # (P, A, M, I, D); on a Mac Publish as Note is Option-Command-P, as
+        # Shift-Command-P is Page Setup there.
         self.act_nostr_publish_note = add(
             Command("nostr.publish_note", _("Publish as Note…"), NOSTR,
+                    platform_keys("Ctrl+Alt+P", "Ctrl+Shift+P"),
                     nostr=True, listed_as=_("Publish as note"), keywords=("post", "kind 1")),
             triggered=self._on_nostr_publish_note)
         self.act_nostr_publish_article = add(
             Command("nostr.publish_article", _("Publish as Article…"), NOSTR,
-                    nostr=True, listed_as=_("Publish as article"), keywords=("long", "blog")),
+                    "Ctrl+Shift+A", nostr=True, listed_as=_("Publish as article"), keywords=("long", "blog")),
             triggered=self._on_nostr_publish_article)
         # Media (Blossom) - browse the user's uploaded blobs, upload new
         # ones, or insert one into the current document at the cursor.
         self.act_nostr_media = add(
             Command("nostr.media_library", _("Media Library…"), NOSTR,
-                    nostr=True, listed_as=_("Media library"), keywords=("images", "upload")),
+                    "Ctrl+Shift+M", nostr=True, listed_as=_("Media library"), keywords=("images", "upload")),
             triggered=self._on_nostr_media_library)
         # A file of the media library, already on the media servers: not
         # Insert > Image..., which puts in a file from the computer.
         self.act_nostr_insert_image = add(
             Command("nostr.insert_image", _("Insert Image from Media Library…"), NOSTR,
-                    nostr=True, listed_as=_("Insert image from media library"),
+                    "Ctrl+Shift+I", nostr=True, listed_as=_("Insert image from media library"),
                     keywords=(_("picture"), _("photo"), _("image")),
                     slash_section=slash_menu.INSERT,
                     insert_title=_("Image from Media Library…")),
@@ -2286,15 +2375,17 @@ class MainWindow(QMainWindow):
             triggered=lambda: self._ask_mention(self.current_editor(), -1))
         # A note or an article quoted in the text, as a paragraph of its own.
         self.act_insert_reference = add(
-            Command("nostr.insert_reference", _("Insert Note or Article…"), NOSTR, nostr=True,
+            Command("nostr.insert_reference", _("Insert Note or Article…"), NOSTR,
+                    "Ctrl+Shift+R", nostr=True,
                     keywords=(_("quote"), _("embed"), _("note"), _("article")),
                     slash_section=slash_menu.INSERT, insert_title=_("Note or Article…")),
             triggered=lambda: self._ask_reference(self.current_editor()))
         # Article Details: the inspector beside the document, as in Pages
-        # (View > Inspector, Option-Command-I there; no convention elsewhere).
+        # (View > Inspector, Option-Command-I there); elsewhere Ctrl+F5,
+        # LibreOffice's key for its sidebar.
         self.act_article_details = add(
             Command("nostr.article_details", _("Article Details"), NOSTR,
-                    platform_keys("Ctrl+Alt+I", None), checkable=True, nostr=True,
+                    platform_keys("Ctrl+Alt+I", "Ctrl+F5"), checkable=True, nostr=True,
                     listed_as=_("Show or hide Article Details"),
                     keywords=(_("inspector"), _("title"), _("summary"), _("cover"),
                               _("hashtags"))),
@@ -2303,16 +2394,22 @@ class MainWindow(QMainWindow):
         # as its address, where readers show a player.
         self.act_insert_audio_video = add(
             Command("nostr.insert_audio_video", _("Insert Audio or Video…"), NOSTR,
-                    nostr=True, keywords=(_("audio"), _("video"), _("podcast"), _("music"),
+                    "Ctrl+Shift+J", nostr=True, keywords=(_("audio"), _("video"), _("podcast"), _("music"),
                                           _("film")), slash_section=slash_menu.INSERT,
                     insert_title=_("Audio or Video…")),
             triggered=self._ask_audio_or_video)
         # Drafts surface - the side-docked panel, toggled from the Nostr
-        # menu (no key, as above).
+        # menu or with MyEditor 3.3's Ctrl+Shift+D.
         self.act_nostr_drafts = add(
-            Command("nostr.drafts", _("Drafts"), NOSTR, checkable=True,
+            Command("nostr.drafts", _("Drafts"), NOSTR, "Ctrl+Shift+D", checkable=True,
                     nostr=True, listed_as=_("Toggle Drafts panel")),
             triggered=self._on_toggle_drafts_panel)
+        # The panel's other view: what the account published.
+        self.act_nostr_published = add(
+            Command("nostr.published", _("Published"), NOSTR, "Ctrl+Shift+B", nostr=True,
+                    listed_as=_("Show what you published"),
+                    keywords=(_("notes"), _("articles"), _("published"))),
+            triggered=self._on_show_published)
         # The Drafts panel's view reads again (its title follows the view
         # shown). In the menu bar, where every command of the app is listed,
         # and in the panel's action menu; each platform's own key for it.
@@ -2328,10 +2425,10 @@ class MainWindow(QMainWindow):
             Command("nostr.draft_relays", _("Draft Relays…"), NOSTR, nostr=True,
                     keywords=("drafts", "private", "relays")),
             triggered=self._open_draft_relays)
-        # Imports: the window of sources, their posts and the open one. No
-        # shortcut: no platform has a convention for it.
+        # Imports: the window of sources, their posts and the open one.
+        # Ctrl+Shift+N, for the new posts it gathers.
         self.act_nostr_imports = add(
-            Command("nostr.imports", _("Imports\u2026"), NOSTR, nostr=True,
+            Command("nostr.imports", _("Imports\u2026"), NOSTR, "Ctrl+Shift+N", nostr=True,
                     keywords=("rss", "feed", "import", "sources")),
             triggered=self._open_imports_window)
         # Q-7: off until turned on here, or where Imports offers it once.
@@ -2385,11 +2482,50 @@ class MainWindow(QMainWindow):
                                              WINDOW),
                                      triggered=self._bring_all_to_front)
 
+        # Moving around by key: tabs as in Safari on a Mac (Control-Tab and
+        # Shift-Command-] for the next one, Command-1 to 8 and Command-9 for
+        # the last), as in Firefox and GNOME's apps elsewhere (Ctrl+Tab,
+        # Ctrl+PgDown, Alt+1 to 9; Ctrl+1 is Heading 1 there). F6 and
+        # Shift+F6 move to the next and the previous pane, as on Windows
+        # and in GNOME.
+        self.act_next_tab = add(Command(
+            "nav.next_tab", _("Show Next Tab"), NAVIGATION,
+            platform_keys(("Meta+Tab", "Ctrl+}"), ("Ctrl+Tab", "Ctrl+PgDown"))),
+            triggered=lambda: self._show_tab(self.tabs.currentIndex() + 1))
+        self.act_previous_tab = add(Command(
+            "nav.previous_tab", _("Show Previous Tab"), NAVIGATION,
+            platform_keys(("Meta+Shift+Tab", "Ctrl+{"), ("Ctrl+Shift+Tab", "Ctrl+PgUp"))),
+            triggered=lambda: self._show_tab(self.tabs.currentIndex() - 1))
+        for number in range(1, 9):
+            add(Command(f"nav.tab_{number}", _("Go to Tab {number}").format(number=number),
+                        NAVIGATION, platform_keys(f"Ctrl+{number}", f"Alt+{number}")),
+                triggered=lambda n=number: self._show_tab(n - 1, wrap=False))
+        add(Command("nav.last_tab", _("Go to Last Tab"), NAVIGATION,
+                    platform_keys("Ctrl+9", "Alt+9")),
+            triggered=lambda: self._show_tab(self.tabs.count() - 1))
+        add(Command("nav.next_pane", _("Next Pane"), NAVIGATION, "F6",
+                    listed_as=_("Move to the next pane"), keywords=(_("focus"), _("panel"))),
+            triggered=lambda: self._move_to_pane(+1))
+        add(Command("nav.previous_pane", _("Previous Pane"), NAVIGATION, "Shift+F6",
+                    listed_as=_("Move to the previous pane"),
+                    keywords=(_("focus"), _("panel"))),
+            triggered=lambda: self._move_to_pane(-1))
+        # The PDF reader's own keys never take a command's, but those of
+        # the editing commands, which are off in a PDF tab.
+        editor_only = {action.objectName() for action in (
+            *self._editor_actions, *self._rich_actions, *self._block_actions,
+            *self._word_actions)}
+        self.commands.refuse_clashes(
+            "the PDF reader",
+            [keys for _s, _w, act, tab_keys, view_keys in pdf_reader_keys() if act is not None
+             for keys in tab_keys + view_keys], yielding=editor_only)
+
         # Help
         self.act_welcome = add(Command("help.welcome", _("Welcome"), HELP),
                                triggered=self.show_welcome_tab)
+        # Ctrl+/ (Command-/), the key of Google Docs' and Slack's lists.
         self.act_shortcuts = add(Command("help.shortcuts", _("Keyboard Shortcuts"), HELP,
-                                         keywords=("keys", "cheat sheet")),
+                                         "Ctrl+/", keywords=("keys", "cheat sheet")),
                                  triggered=self._show_shortcuts)
         self.act_install_help = add(Command("help.install", _("Installation Help"), HELP),
                                     triggered=self._open_install_guide)
@@ -2543,6 +2679,8 @@ class MainWindow(QMainWindow):
         self.m_appearance = m_view.addMenu(_("Appearance"))
         for action in self.act_appearance.values():
             self.m_appearance.addAction(action)
+        self.m_appearance.addSeparator()
+        self.m_appearance.addAction(self.act_switch_appearance)
         m_view.addAction(self.act_toggle_line_numbers)
         m_view.addAction(self.act_toggle_syntax_hl)
         m_view.addSeparator()
@@ -2580,6 +2718,7 @@ class MainWindow(QMainWindow):
         m_nostr.addAction(self.act_article_details)
         m_nostr.addSeparator()
         m_nostr.addAction(self.act_nostr_drafts)
+        m_nostr.addAction(self.act_nostr_published)
         m_nostr.addAction(self.act_refresh_drafts)
         m_nostr.addAction(self.act_draft_relays)
         m_nostr.addAction(self.act_nostr_imports)
@@ -2602,6 +2741,10 @@ class MainWindow(QMainWindow):
             self.m_window = self.menuBar().addMenu(_("Window"))
             self.m_window.addAction(self.act_minimize)
             self.m_window.addAction(self.act_zoom)
+            self.m_window.addSeparator()
+            # Safari's: the tabs, before the windows.
+            self.m_window.addAction(self.act_previous_tab)
+            self.m_window.addAction(self.act_next_tab)
             self.m_window.addSeparator()
             self.m_window.addAction(self.act_bring_all)
 
@@ -5620,6 +5763,11 @@ class MainWindow(QMainWindow):
             self._set_theme(is_dark)
         self.act_appearance[mode].setChecked(True)
 
+    def _switch_appearance(self) -> None:
+        """View > Appearance > Switch to Dark (or Light) Appearance: the
+        other of the two, chosen and kept, from Automatic too."""
+        self.set_appearance("light" if self.is_dark_theme else "dark")
+
     def _set_theme(self, is_dark: bool):
         """Apply is_dark to every theme-aware widget in the window.
 
@@ -5629,6 +5777,9 @@ class MainWindow(QMainWindow):
         said about it.
         """
         self.is_dark_theme = is_dark
+        if hasattr(self, "act_switch_appearance"):
+            self.act_switch_appearance.setText(
+                _("Switch to Light Appearance") if is_dark else _("Switch to Dark Appearance"))
         self._apply_theme()
         if hasattr(self, 'findbar'):
             self.findbar.is_dark = self.is_dark_theme
@@ -7901,9 +8052,23 @@ class MainWindow(QMainWindow):
         """
         if self._drafts_panel is None:
             return
-        if self._drafts_panel.isVisible():
+        panel = self._drafts_panel
+        if panel.isVisible() and panel.current_view() == panel.DRAFTS_VIEW:
             self._hide_drafts_panel()
         else:
+            panel.show_view(panel.DRAFTS_VIEW)
+            self._show_drafts_panel()
+
+    def _on_show_published(self) -> None:
+        """Nostr > Published: the panel on its Published view, or the
+        panel put away when that is what it shows."""
+        panel = self._drafts_panel
+        if panel is None:
+            return
+        if panel.isVisible() and panel.current_view() == PUBLISHED_VIEW:
+            self._hide_drafts_panel()
+        else:
+            panel.show_view(PUBLISHED_VIEW)
             self._show_drafts_panel()
 
     def _show_drafts_panel(self) -> None:
@@ -7936,6 +8101,11 @@ class MainWindow(QMainWindow):
     def _hide_drafts_panel(self) -> None:
         if self._drafts_panel is None:
             return
+        if self._drafts_panel.isAncestorOf(QApplication.focusWidget()):
+            # Its keys go back to the document, as Article Details' do.
+            target = self._pane_focus_target(self._central_splitter.widget(0))
+            if target is not None:
+                target.setFocus()
         self._drafts_panel.hide()
         self.act_nostr_drafts.setChecked(False)
         self._update_refresh_command()

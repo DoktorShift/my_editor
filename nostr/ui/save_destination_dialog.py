@@ -173,8 +173,11 @@ class _DestinationCard(QFrame):
         head = QHBoxLayout()
         head.setContentsMargins(0, 0, 0, 0)
         head.setSpacing(8)
+        # The card's choice, reached with Tab as any choice is; Space or a
+        # click picks it, and the arrow keys move to the other card.
         self.radio = QRadioButton()
-        self.radio.setFocusPolicy(Qt.NoFocus)  # selection follows card click
+        self.radio.setAccessibleName(title)
+        self.radio.clicked.connect(self.clicked)
         head.addWidget(self.radio, 0, Qt.AlignVCenter)
         self.title_label = QLabel(title)
         self.title_label.setObjectName("save_dest_option")
@@ -318,8 +321,12 @@ class SaveDestinationDialog(QDialog):
     def _select(self, destination: SaveDestination) -> None:
         self._destination = destination
         is_local = destination is SaveDestination.LOCAL
+        moved = self.focusWidget() in (self._local_card.radio, self._draft_card.radio)
         self._local_card.set_selected(is_local)
         self._draft_card.set_selected(not is_local)
+        if moved:
+            # The keyboard focus goes with the choice, as in a radio group.
+            (self._local_card if is_local else self._draft_card).radio.setFocus()
 
     def _on_accept(self) -> None:
         self._remember = self._remember_checkbox.isChecked()

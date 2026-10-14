@@ -1365,3 +1365,19 @@ def test_the_panel_keeps_no_copy_of_the_row_geometry():
     assert (dp.GUTTER, dp._ROW_PAD_V, dp._ROW_LINE_GAP, dp._SELECTION_BAR_W) == (
         drafts_common.LIST_GUTTER, drafts_common.ROW_PAD_V, drafts_common.ROW_LINE_GAP,
         drafts_common.SELECTION_BAR_W)
+
+
+def test_typing_a_drafts_first_letters_selects_it():
+    # Its rows are widgets with no text of their own, so Qt's own
+    # type-to-select found nothing; the list searches the titles itself.
+    from PySide6.QtCore import QEvent
+    from PySide6.QtGui import QKeyEvent
+    panel = bound_panel(populated_store())
+    titles = {panel._list.item(i).data(Qt.UserRole): panel._list.item(i)
+              for i in range(panel._list.count())}
+    panel._list.setCurrentRow(0)
+    for letter in "pin":
+        panel._list.keyPressEvent(QKeyEvent(QEvent.Type.KeyPress, Qt.Key.Key_A, Qt.NoModifier,
+                                            letter))
+    assert panel._list.currentItem() is titles["d2"]           # "Pineapple notes"
+    panel.deleteLater()

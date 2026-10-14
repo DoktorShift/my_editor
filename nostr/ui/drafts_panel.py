@@ -1315,6 +1315,34 @@ class _DraftRowWidget(QWidget):
 # Drafts panel                                                                #
 # --------------------------------------------------------------------------- #
 
+# What typing a draft's first letters finds it by: its title (or its
+# first words), kept on the row, which has no text of its own to show.
+TITLE_ROLE = Qt.UserRole + 1
+
+
+class _DraftList(QListWidget):
+    """The drafts, with type-to-select by title as in every list on the
+    system: the rows are widgets, so Qt's own search finds no text."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._typed, self._typed_at = "", 0.0
+
+    def keyboardSearch(self, search: str) -> None:  # noqa: N802, Qt's name
+        now = time.monotonic()
+        if now - self._typed_at > QApplication.keyboardInputInterval() / 1000:
+            self._typed = ""
+        self._typed_at, self._typed = now, self._typed + search.lower()
+        count = self.count()
+        # One letter again moves on to the next match; more letters refine.
+        start = self.currentRow() + (1 if len(self._typed) == 1 else 0)
+        for offset in range(count):
+            item = self.item((start + offset) % count)
+            if str(item.data(TITLE_ROLE) or "").lower().startswith(self._typed):
+                self.setCurrentItem(item)
+                return
+
+
 class DraftsPanel(QFrame):
     """Side-docked drafts surface.
 
@@ -1637,7 +1665,7 @@ class DraftsPanel(QFrame):
         self._body_stack = QStackedLayout(container)
         self._body_stack.setContentsMargins(0, 0, 0, 0)
 
-        self._list = QListWidget()
+        self._list = _DraftList()
         self._list.setObjectName("drafts_panel_list")
         self._list.setAccessibleName(_("Drafts"))
         self._list.setSpacing(0)
@@ -2191,6 +2219,7 @@ class DraftsPanel(QFrame):
         screen reader hears cannot drift from what the row shows.
         """
         item.setData(Qt.AccessibleTextRole, _accessible_row_text(record))
+        item.setData(TITLE_ROLE, (record.title or record.snippet or "").strip())
         item.setData(Qt.ToolTipRole, _row_tooltip(record))
 
     def _remove_row(self, identifier: str) -> None:

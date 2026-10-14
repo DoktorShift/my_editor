@@ -190,17 +190,10 @@ def test_mark_as_checked_ticks_and_unticks_from_the_keyboard(monkeypatch):
     assert heard[-1] == "checked"
 
 
-@pytest.mark.parametrize("platform, keys", [("darwin", "Ctrl+Shift+U"), ("win32", None),
-                                            ("linux", None)])
-def test_mark_as_checked_has_notes_key_on_a_mac_only(platform, keys):
+@pytest.mark.parametrize("platform, keys", [("darwin", "Ctrl+Shift+U"),
+                                            ("win32", "Ctrl+Return"),
+                                            ("linux", "Ctrl+Return")])
+def test_mark_as_checked_has_notes_key_on_a_mac_and_notions_elsewhere(platform, keys):
     # Ctrl+Shift+U is the Unicode input of Linux desktops.
     from commands import platform_keys
-    assert platform_keys("Ctrl+Shift+U", None, platform=platform) == keys
-
-
-@pytest.mark.parametrize("platform, keys", [("darwin", "Ctrl+Shift+L"),
-                                            ("win32", "Ctrl+Shift+9"),
-                                            ("linux", "Ctrl+Shift+9")])
-def test_the_checklist_key_follows_the_platform(platform, keys):
-    from commands import platform_keys
-    assert platform_keys("Ctrl+Shift+L", "Ctrl+Shift+9", platform=platform) == keys
+    assert platform_keys("Ctrl+Shift+U", "Ctrl+Return", platform=platform) == keys

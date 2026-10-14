@@ -62,10 +62,86 @@ FORMAT = "Formatting"
 INSERT = "Insert"
 SEARCH = "Search"
 VIEW = "View"
+NAVIGATION = "Navigation"   # tabs and panes, by key (a Mac's Window menu has two)
 NOSTR = "Nostr"
 WINDOW = "Window"       # a Mac's Window menu
 HELP = "Help"
-GROUP_ORDER: Tuple[str, ...] = (FILE, EDIT, FORMAT, INSERT, SEARCH, VIEW, NOSTR, WINDOW, HELP)
+GROUP_ORDER: Tuple[str, ...] = (FILE, EDIT, FORMAT, INSERT, SEARCH, VIEW, NAVIGATION, NOSTR,
+                                WINDOW, HELP)
+
+
+# The menu commands left without a key, on purpose, and why: everything
+# else in a menu has one (tests/test_shortcut_map.py holds the two lists
+# together). Every one of them is reached with the keyboard through its
+# menu all the same. (command id, or a prefix ending in ".", where: "all",
+# "mac" or "other" for Windows and Linux, the reason.)
+NO_SHORTCUT: Tuple[Tuple[str, str, str], ...] = (
+    ("edit.delete", "all", "The Delete key itself does it."),
+    ("edit.footnote_jump", "all",
+     "It follows the footnote at the caret; Command-click (Ctrl-click) on the mark does "
+     "the same, and so does the context menu."),
+    ("edit.markdown_shortcuts", "all", "A preference, set once."),
+    ("search.use_selection", "other",
+     "A Mac convention (the find text shared by every app); Windows and Linux have none."),
+    ("file.page_setup", "other", "Rare, and no Windows or Linux convention has a key for it."),
+    ("file.knit_pdf", "all",
+     "R Markdown is for the few; RStudio, whose key Knit to HTML has, has none for it."),
+    ("file.rmd_toolchain", "all", "A one-off setup."),
+    ("format.color.", "all",
+     "Choices from the Color menu; Clear Formatting (Ctrl+D) takes color away too."),
+    ("format.code_language.", "all",
+     "A choice from a list, offered right after Insert Code Block."),
+    ("format.table.", "all",
+     "Tab or Return at the end of a table adds a row; no convention has keys for the "
+     "others, and deleting rows, columns or the table is destructive."),
+    ("view.appearance.system", "all", "A choice; Ctrl+Shift+T switches light and dark."),
+    ("view.appearance.light", "all", "A choice; Ctrl+Shift+T switches light and dark."),
+    ("view.appearance.dark", "all", "A choice; Ctrl+Shift+T switches light and dark."),
+    ("view.toolbar", "other",
+     "Set once and remembered; only the Mac has a convention for it (Option-Command-T)."),
+    ("view.monospace_writing", "all", "A look preference, set once and remembered."),
+    ("view.paper_mode", "all", "A look preference, set once and remembered."),
+    ("view.highlight_line", "all", "A look preference, set once and remembered."),
+    ("view.background.", "all", "A look preference, set once and remembered."),
+    ("view.language.", "all", "Set once; it applies at the next start."),
+    ("view.sidebar", "all",
+     "The key belongs to the Imports window, whose sidebar it shows (Control-Command-S on "
+     "a Mac)."),
+    ("nostr.insert_mention", "all",
+     "Typing @ at the start of a word does it, as in every app that mentions people."),
+    ("nostr.draft_relays", "all", "A one-off account setup."),
+    ("nostr.imports_badge", "all", "A preference, set once."),
+    ("nostr.membership", "all", "A one-off."),
+    ("nostr.connect", "all", "A one-off account setup."),
+    ("nostr.edit_profile", "all", "A one-off account setup."),
+    ("nostr.backup_account", "all", "A one-off account setup."),
+    ("nostr.create_account", "all",
+     "A one-off that makes a new key; Apple's guidelines give such commands no easy key."),
+    ("nostr.restore_account", "all",
+     "A one-off that replaces the key in use; no easy key, as Apple's guidelines ask."),
+    ("nostr.move_to_signer", "all",
+     "Removes the key from this computer; destructive, so no easy key."),
+    ("nostr.sign_out", "all", "Ends the account's use here; no easy key, as for Log Out."),
+    ("window.zoom", "mac", "Apple's Window menu gives it no key."),
+    ("window.bring_all", "mac", "Apple's Window menu gives it no key."),
+    ("help.welcome", "all", "A one-off."),
+    ("help.install", "all", "A one-off."),
+    ("help.check_updates", "all", "A one-off."),
+    ("help.show_logs", "all", "A one-off, for a bug report."),
+    ("help.about", "all", "A one-off."),
+)
+
+
+def no_shortcut_reason(command_id: str, *, platform: Optional[str] = None) -> str:
+    """Why ``command_id`` has no key on ``platform`` (this computer's by
+    default), or "" when it should have one."""
+    mac = (platform or sys.platform) == "darwin"
+    for name, where, reason in NO_SHORTCUT:
+        if where == "mac" and not mac or where == "other" and mac:
+            continue
+        if command_id == name or (name.endswith(".") and command_id.startswith(name)):
+            return reason
+    return ""
 
 
 @dataclass(frozen=True)
@@ -107,6 +183,14 @@ def platform_keys(mac: ShortcutSpec, other: ShortcutSpec, *,
     ``mac`` is "Ctrl+Alt+1" for Option-Command-1.
     """
     return mac if (platform or sys.platform) == "darwin" else other
+
+
+def standard_and(standard: QKeySequence.StandardKey, *keys: str) -> Tuple[str, ...]:
+    """Every key the system binds to ``standard``, then ``keys`` where the
+    system's list lacks them (F3 for Find Next on a Mac, as MyEditor 3.3
+    had it everywhere). Menus show the system's first key."""
+    texts = all_key_texts(standard)
+    return tuple(texts) + tuple(k for k in keys if k not in texts)
 
 
 def all_key_texts(shortcut: ShortcutSpec) -> List[str]:
@@ -169,6 +253,13 @@ class CommandRegistry(QObject):
         if command.group not in GROUP_ORDER:
             raise ValueError(f"command {command.id!r} has an unknown group {command.group!r}")
         all_keys = all_key_texts(command.shortcut)
+        if isinstance(command.shortcut, QKeySequence.StandardKey):
+            # A standard key's extra combinations differ by desktop (KDE's
+            # Full Screen is Ctrl+Shift+F as well as F11); one a command
+            # names is left to it, as long as the standard key keeps one.
+            free = [keys for keys in all_keys if keys not in self._by_keys]
+            if free:
+                all_keys = free
         for keys in all_keys:
             if keys in self._by_keys:
                 raise ValueError(f"{keys} is taken by {self._by_keys[keys]!r}; "
@@ -179,7 +270,7 @@ class CommandRegistry(QObject):
         if isinstance(command.shortcut, QKeySequence.StandardKey):
             # Every combination the platform uses for it (F3 and Command-G
             # for Find Next on a Mac), not only the first.
-            action.setShortcuts(command.shortcut)
+            action.setShortcuts([QKeySequence(keys) for keys in all_keys])
         elif isinstance(command.shortcut, tuple):
             action.setShortcuts([QKeySequence(keys) for keys in command.shortcut])
         elif command.shortcut is not None:
@@ -223,6 +314,24 @@ class CommandRegistry(QObject):
 
         menu.aboutToShow.connect(opening)
         menu.aboutToHide.connect(closing)
+
+    def refuse_clashes(self, where: str, keys: Iterable[str], *,
+                       yielding: Iterable[str] = ()) -> None:
+        """Raise ValueError when a key that ``where`` binds for itself (the
+        PDF reader's) is bound twice there, or is also a command's, unless
+        that command is one of ``yielding``: commands that are off wherever
+        ``where`` has its keys (the editing commands, in a PDF tab). Two
+        shortcuts on one key are ambiguous to Qt, and then neither works."""
+        yielding = set(yielding)
+        seen = set()
+        for spec in keys:
+            text = key_text(spec)
+            if text in seen:
+                raise ValueError(f"{text} is bound twice in {where}")
+            seen.add(text)
+            owner = self._by_keys.get(text)
+            if owner is not None and owner not in yielding:
+                raise ValueError(f"{text} is taken by {owner!r}; {where} cannot have it too")
 
     # -- reading -----------------------------------------------------------
 

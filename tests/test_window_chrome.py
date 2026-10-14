@@ -63,8 +63,10 @@ def test_nothing_around_the_document_repeats_a_menu(tmp_path):
     assert r["header"] is False
     assert r["toolbar_first"] and r["tabs_after"]
     assert {"view.line_numbers", "view.syntax_highlighting"} <= set(r["view"])
+    # The three choices, then, after a line, the switch named for what it
+    # does next (Ctrl+Shift+T).
     assert r["appearance"] == ["view.appearance.system", "view.appearance.light",
-                               "view.appearance.dark"]
+                               "view.appearance.dark", "", "view.appearance.switch"]
     assert {"edit.undo", "edit.redo"} <= set(r["edit"])
     assert r["chip_without_account"] is False
     assert r["chip_with_account"] is True
