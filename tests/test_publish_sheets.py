@@ -315,7 +315,7 @@ def test_every_control_is_named_and_tab_goes_top_to_bottom(tmp_path):
         chain.append(widget.accessibleName() or widget.text())
         widget = widget.nextInFocusChain()
         while not (widget.focusPolicy() & Qt.FocusPolicy.TabFocus
-                   and widget.isVisibleTo(sheet)):
+                   and widget.isVisibleTo(sheet) and widget.isEnabled()):
             widget = widget.nextInFocusChain()
     left_to_right = sorted((sheet._cancel_btn, sheet._publish_btn), key=lambda b: b.x())
     assert chain[:13] == [

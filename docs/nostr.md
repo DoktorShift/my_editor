@@ -40,6 +40,14 @@ Without a signer app, the same window offers **Create an Account** and **Restore
 
 Connected profiles are saved to `~/.config/my_editor/nostr_profiles.json` with `chmod 600`. The local channel keypair lives there too; your real `nsec` does not.
 
+### Article cover framing
+
+The cover field in **Publish as Article** and **Article Details** shows the same wide framing as the article card, along with the selected image's dimensions. **16:9 at 1600 × 900 pixels** is recommended for article cards; NIP-23 requires no particular image size, and different clients may crop the image differently.
+
+Choose an image from the Media Library, then use **Adjust…** to frame it. Wide (16:9) is the default; landscape (3:2) and square (1:1) are also available. Drag the crop frame or use the arrow keys to position the subject; hold Shift for larger steps. Zoom updates the frame and output dimensions immediately, and **Reset** restores the recommended format and centered framing. Smaller sources retain their resolution; exports never upscale and are capped at 1600 pixels per edge.
+
+**Use Cover** uploads a new still image, with camera and location metadata removed, through your existing Blossom media servers. Your original stays in the library. The article keeps its previous cover until the upload succeeds; cancellation or a failed upload leaves that cover intact. Cropping is saved in the image pixels because NIP-23 carries a cover URL without a standardized focal point. A typed external URL isn't downloaded automatically; use a library image to adjust a cover.
+
 ### Accounts: create, restore, back up
 
 For people new to Nostr, `Nostr → Create Account…` makes a new account in a few steps:

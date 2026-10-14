@@ -1282,9 +1282,9 @@ msgid "Summary"
 msgstr "Zusammenfassung"
 
 #: main_window.py:4169
-#: nostr/ui/cover_field.py:187
-#: nostr/ui/cover_field.py:194
-#: nostr/ui/cover_field.py:221
+#: nostr/ui/cover_field.py:196
+#: nostr/ui/cover_field.py:203
+#: nostr/ui/cover_field.py:237
 msgid "Cover image"
 msgstr "Titelbild"
 
@@ -2566,8 +2566,8 @@ msgid "MyEditor can read audio and video files of these kinds: {kinds}."
 msgstr "MyEditor kann Audio- und Videodateien dieser Arten lesen: {kinds}."
 
 #: main_window.py:7609
-#: nostr/ui/cover_field.py:377
-#: nostr/ui/cover_field.py:283
+#: nostr/ui/cover_field.py:436
+#: nostr/ui/cover_field.py:312
 #: nostr/ui/media_library_dialog.py:1057
 #: nostr/ui/media_library_dialog.py:1084
 #: nostr/ui/media_library_dialog.py:1087
@@ -6180,7 +6180,7 @@ msgid "Zaps are shared the way another app set them."
 msgstr "Zaps werden so geteilt, wie es eine andere App festgelegt hat."
 
 #: nostr/ui/article_details_panel.py:503
-#: nostr/ui/cover_field.py:207
+#: nostr/ui/cover_field.py:216
 #: nostr/ui/draft_relays_sheet.py:173
 #: nostr/ui/media_library_dialog.py:682
 #: nostr/ui/media_servers_dialog.py:229
@@ -6363,12 +6363,104 @@ msgid_plural "This code works for {seconds} more seconds."
 msgstr[0] "Dieser Code gilt noch {seconds} Sekunde."
 msgstr[1] "Dieser Code gilt noch {seconds} Sekunden."
 
-#: nostr/ui/cover_field.py:208
+#: nostr/ui/cover_crop_dialog.py:37
+msgid "Cover framing"
+msgstr "Titelbild-Ausschnitt"
+
+#: nostr/ui/cover_crop_dialog.py:38
+msgid "Drag the frame to position the cover, or use the arrow keys."
+msgstr "Verschiebe den Rahmen mit der Maus oder den Pfeiltasten."
+
+#: nostr/ui/cover_crop_dialog.py:151
+#: nostr/ui/cover_field.py:221
+msgid "Adjust Cover Image"
+msgstr "Titelbild anpassen"
+
+#: nostr/ui/cover_crop_dialog.py:161
+msgid "Choose the part readers will see"
+msgstr "Wähle den Ausschnitt, den Leser sehen sollen"
+
+#: nostr/ui/cover_crop_dialog.py:166
+msgid "Drag the frame to keep your subject in view. Arrow keys move it; Shift moves faster."
+msgstr "Verschiebe den Rahmen, damit dein Motiv sichtbar bleibt. Nutze die Pfeiltasten; mit Umschalt geht es schneller."
+
+#: nostr/ui/cover_crop_dialog.py:172
+msgid "Wide · 16:9 (recommended)"
+msgstr "Breitbild · 16:9 (empfohlen)"
+
+#: nostr/ui/cover_crop_dialog.py:173
+msgid "Landscape · 3:2"
+msgstr "Querformat · 3:2"
+
+#: nostr/ui/cover_crop_dialog.py:174
+msgid "Square · 1:1"
+msgstr "Quadratisch · 1:1"
+
+#: nostr/ui/cover_crop_dialog.py:175
+#: nostr/ui/cover_crop_dialog.py:176
+msgid "Cover format"
+msgstr "Titelbild-Format"
+
+#: nostr/ui/cover_crop_dialog.py:180
+msgid "Format:"
+msgstr "Format:"
+
+#: nostr/ui/cover_crop_dialog.py:184
+msgid "Cover zoom"
+msgstr "Titelbild-Zoom"
+
+#: nostr/ui/cover_crop_dialog.py:193
+msgid "Zoom:"
+msgstr "Zoom:"
+
+#: nostr/ui/cover_crop_dialog.py:203
+msgid "This uploads a new still cover image. The original stays in your library. Other Nostr apps may frame covers differently."
+msgstr "Ein neues, unbewegtes Titelbild wird hochgeladen. Das Original bleibt in deiner Mediathek. Andere Nostr-Apps zeigen eventuell einen anderen Ausschnitt."
+
+#: nostr/ui/cover_crop_dialog.py:211
+msgid "Reset"
+msgstr "Zurücksetzen"
+
+#: nostr/ui/cover_crop_dialog.py:216
+msgid "Use Cover"
+msgstr "Titelbild verwenden"
+
+#: nostr/ui/cover_crop_dialog.py:244
+msgid "A larger source will look sharper. For a wide cover, aim for 1600 × 900 px."
+msgstr "Ein größeres Original ergibt ein schärferes Bild. Für Breitbild werden 1600 × 900 px empfohlen."
+
+#: nostr/ui/cover_crop_dialog.py:141
+#, python-brace-format
+msgid "Cover center: {x}% across, {y}% down."
+msgstr "Bildmitte: {x} % von links, {y} % von oben."
+
+#: nostr/ui/cover_crop_dialog.py:242
+#, python-brace-format
+msgid "New cover: {width} × {height} px"
+msgstr "Neues Titelbild: {width} × {height} px"
+
+#: nostr/ui/cover_crop_dialog.py:252
+msgid "This cover could not be prepared. Try another picture."
+msgstr "Dieses Titelbild konnte nicht erstellt werden. Versuche es mit einem anderen Bild."
+
+#: nostr/ui/cover_field.py:217
 msgid "Remove Cover Image"
 msgstr "Titelbild entfernen"
 
-#: nostr/ui/cover_field.py:254
-#: nostr/ui/cover_field.py:426
+#: nostr/ui/cover_field.py:220
+msgid "Adjust…"
+msgstr "Anpassen …"
+
+#: nostr/ui/cover_field.py:222
+msgid "Choose a cover format and move the frame to keep your subject in view."
+msgstr "Wähle ein Format und verschiebe den Rahmen, damit dein Motiv sichtbar bleibt."
+
+#: nostr/ui/cover_field.py:271
+msgid "Wide 16:9 is recommended. Aim for 1600 × 900 px."
+msgstr "Empfohlen: Breitbild 16:9 mit 1600 × 900 px."
+
+#: nostr/ui/cover_field.py:283
+#: nostr/ui/cover_field.py:484
 msgid ""
 "No cover\n"
 "selected"
@@ -6376,47 +6468,52 @@ msgstr ""
 "Kein Titelbild\n"
 "ausgewählt"
 
-#: nostr/ui/cover_field.py:197
+#: nostr/ui/cover_field.py:206
 msgid "Drop a picture here to upload it as the cover."
 msgstr "Ziehe ein Bild hierher, um es als Titelbild hochzuladen."
 
-#: nostr/ui/cover_field.py:201
+#: nostr/ui/cover_field.py:210
 #: nostr/ui/profile_window.py:314
 msgid "Choose…"
 msgstr "Auswählen …"
 
-#: nostr/ui/cover_field.py:202
-#: nostr/ui/cover_field.py:330
+#: nostr/ui/cover_field.py:211
+#: nostr/ui/cover_field.py:386
 msgid "Choose Cover Image"
 msgstr "Titelbild auswählen"
 
-#: nostr/ui/cover_field.py:203
+#: nostr/ui/cover_field.py:212
 #: nostr/ui/profile_window.py:316
 msgid "Choose a picture from your Media Library, or upload one."
 msgstr "Wähle ein Bild aus deiner Mediathek oder lade eines hoch."
 
-#: nostr/ui/cover_field.py:355
+#: nostr/ui/cover_field.py:411
 msgid "A picture can be uploaded once you use a Nostr account with media servers. Paste its web address instead."
 msgstr "Ein Bild lässt sich hochladen, sobald du ein Nostr-Konto mit Medienservern verwendest. Füge stattdessen seine Webadresse ein."
 
-#: nostr/ui/cover_field.py:359
+#: nostr/ui/cover_field.py:415
 msgid "Only a picture can be a cover."
 msgstr "Nur ein Bild kann ein Titelbild sein."
 
-#: nostr/ui/cover_field.py:233
+#: nostr/ui/cover_field.py:246
 msgid "Pictures you pick are uploaded to your media servers."
 msgstr "Bilder, die du auswählst, werden auf deine Medienserver hochgeladen."
 
-#: nostr/ui/cover_field.py:235
+#: nostr/ui/cover_field.py:248
 msgid "Paste an image URL hosted anywhere on the public web."
 msgstr "Füge die Adresse eines Bildes ein, das öffentlich im Web liegt."
 
-#: nostr/ui/cover_field.py:412
+#: nostr/ui/cover_field.py:470
 #, python-brace-format
 msgid "The picture was not uploaded: {reason}"
 msgstr "Das Bild wurde nicht hochgeladen: {reason}"
 
-#: nostr/ui/cover_field.py:385
+#: nostr/ui/cover_field.py:521
+#, python-brace-format
+msgid "Selected image: {width} × {height} px"
+msgstr "Gewähltes Bild: {width} × {height} px"
+
+#: nostr/ui/cover_field.py:443
 #, python-brace-format
 msgid ""
 "Uploading…\n"
@@ -6425,7 +6522,7 @@ msgstr ""
 "Wird hochgeladen …\n"
 "{percent} %"
 
-#: nostr/ui/cover_field.py:437
+#: nostr/ui/cover_field.py:495
 msgid ""
 "Preview shown\n"
 "for library picks"
@@ -6433,12 +6530,12 @@ msgstr ""
 "Vorschau nur für\n"
 "Bilder der Mediathek"
 
-#: nostr/ui/cover_field.py:366
+#: nostr/ui/cover_field.py:422
 #, python-brace-format
 msgid "Could not read file: {error}"
 msgstr "Die Datei konnte nicht gelesen werden: {error}"
 
-#: nostr/ui/cover_field.py:370
+#: nostr/ui/cover_field.py:426
 #, python-brace-format
 msgid "This picture can’t be a cover: {reason}."
 msgstr "Dieses Bild kann kein Titelbild sein: {reason}."
