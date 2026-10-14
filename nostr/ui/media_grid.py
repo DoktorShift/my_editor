@@ -53,6 +53,7 @@ from PySide6.QtGui import (
 from PySide6.QtWidgets import QAbstractItemView, QListView, QStyle, QStyledItemDelegate
 
 import format_icons
+import media_files
 import theme
 from i18n import _
 
@@ -103,6 +104,7 @@ class Tile:
     pixmap: Optional[QPixmap] = None
     # A picture that cannot be drawn here (HEIC on most systems).
     no_picture: bool = False
+    mime: str = ""
 
     @property
     def is_file(self) -> bool:
@@ -286,12 +288,18 @@ class TileDelegate(QStyledItemDelegate):
                             side, side)
             painter.drawPixmap(QRectF(thumb), tile.pixmap, source)
         elif tile.state == FILE and (tile.kind != "image" or tile.no_picture):
-            glyph = {"video": "video", "audio": "audio"}.get(tile.kind, "document")
+            glyph = media_files.file_glyph(tile.mime)
             side = 44
             rect = QRectF(thumb.center().x() - side / 2, thumb.center().y() - side / 2,
                           side, side)
             format_icons.paint(glyph, painter, rect,
                                palette.color(QPalette.ColorRole.PlaceholderText))
+            if tile.kind == "file":
+                suffix = media_files.extension_for(tile.mime).lstrip(".").upper()
+                if suffix:
+                    painter.setPen(palette.color(QPalette.ColorRole.Text))
+                    painter.drawText(thumb.adjusted(8, THUMB - 30, -8, -8),
+                                     Qt.AlignmentFlag.AlignCenter, suffix)
         if tile.state != FILE:
             painter.fillRect(thumb, _SCRIM)
         painter.restore()

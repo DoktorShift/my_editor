@@ -63,6 +63,13 @@ Common first step on every OS:
 pyinstaller --noconfirm packaging/my_editor.spec
 ```
 
+The spec includes QtMultimedia and QtMultimediaWidgets for local playback
+and video thumbnails. PyInstaller's Qt hooks collect the multimedia
+plugins and the FFmpeg libraries shipped with PySide6. QtWebEngine remains
+excluded. Check native playback in each platform's built app when changing
+Qt or PyInstaller versions; a decoder unavailable on a computer is reported
+in Quick Look with Save As as the fallback.
+
 Then:
 
 - **macOS:** `packaging/macos/build_dmg.sh` -> `dist/my-editor-<ver>-macos-<arch>.dmg`

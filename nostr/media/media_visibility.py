@@ -234,6 +234,24 @@ class MediaVisibility:
         except FileCryptoError:
             return None
 
+    def private_opener(self, sha256: str):
+        """Snapshot a private opener for a worker, keeping its key here.
+
+        Library state belongs to the GUI thread. Resolving the immutable
+        record before starting a worker also makes account changes safe.
+        """
+        blob = self._private(sha256)
+
+        def open_bytes(envelope: bytes) -> Optional[bytes]:
+            if blob is None:
+                return None
+            try:
+                return decrypt_file(bytes(envelope), blob.key_hex)
+            except FileCryptoError:
+                return None
+
+        return open_bytes
+
     # -- internals ---------------------------------------------------------
 
     def _private(self, sha256: str) -> Optional[PrivateBlob]:

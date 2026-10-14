@@ -315,12 +315,52 @@ def _draw_alert(painter: QPainter, ink: QColor) -> None:
     painter.drawEllipse(QRectF(8, 11.8, 2, 2))
 
 
+def _draw_text(painter: QPainter, ink: QColor) -> None:
+    _draw_document(painter, ink)
+    for y in (8, 10.5, 13):
+        painter.drawLine(QPointF(6.5, y), QPointF(12, y))
+
+
+def _draw_spreadsheet(painter: QPainter, ink: QColor) -> None:
+    _draw_document(painter, ink)
+    painter.drawRect(QRectF(6, 8, 6.5, 5.5))
+    painter.drawLine(QPointF(9, 8), QPointF(9, 13.5))
+    painter.drawLine(QPointF(6, 10.75), QPointF(12.5, 10.75))
+
+
+def _draw_presentation(painter: QPainter, ink: QColor) -> None:
+    painter.setPen(_pen(ink, 1.4))
+    painter.setBrush(Qt.BrushStyle.NoBrush)
+    painter.drawRoundedRect(QRectF(2, 3, 14, 10), 1, 1)
+    painter.drawLine(QPointF(9, 13), QPointF(9, 16))
+    painter.drawLine(QPointF(6, 16), QPointF(12, 16))
+    painter.drawLine(QPointF(5, 6), QPointF(12, 6))
+    painter.drawLine(QPointF(5, 9), QPointF(10, 9))
+
+
+def _draw_archive(painter: QPainter, ink: QColor) -> None:
+    _draw_document(painter, ink)
+    painter.drawLine(QPointF(9, 7), QPointF(9, 14))
+    for y in (8, 10, 12):
+        painter.drawLine(QPointF(7.5, y), QPointF(10.5, y))
+
+
+def _draw_book(painter: QPainter, ink: QColor) -> None:
+    painter.setPen(_pen(ink, 1.4))
+    painter.setBrush(Qt.BrushStyle.NoBrush)
+    painter.drawRoundedRect(QRectF(3, 2, 12, 14), 1.5, 1.5)
+    painter.drawLine(QPointF(6, 2), QPointF(6, 16))
+    painter.drawLine(QPointF(8.5, 6), QPointF(12.5, 6))
+
+
 _GLYPHS = {"lock": _draw_lock, "video": _draw_video, "audio": _draw_audio,
-           "document": _draw_document, "alert": _draw_alert}
+           "document": _draw_document, "alert": _draw_alert, "text": _draw_text,
+           "spreadsheet": _draw_spreadsheet, "presentation": _draw_presentation,
+           "archive": _draw_archive, "book": _draw_book}
 
 
 def paint(name: str, painter: QPainter, rect: QRectF, color: QColor) -> None:
-    """Draw glyph ``name`` (lock, video, audio, document, alert) to fill
+    """Draw a glyph from ``_GLYPHS`` to fill
     the square ``rect``, sharp at any size."""
     painter.save()
     painter.setRenderHint(QPainter.RenderHint.Antialiasing)

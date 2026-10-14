@@ -64,7 +64,8 @@ def test_types_come_from_one_table_whatever_the_computer_says():
     assert media_files.type_of("clip.ogg") == "audio/ogg"
     assert media_files.type_of("film.mov") == "video/quicktime"
     assert media_files.type_of("https://cdn.example/a.flac?x=1") == "audio/flac"
-    assert media_files.type_of("notes.txt") is None
+    assert media_files.type_of("notes.txt") == "text/plain"
+    assert not media_files.is_audio_or_video("notes.txt")
     assert media_files.extension_for("audio/mpeg") == ".mp3"
 
 

@@ -2,91 +2,86 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 """Quick Look for the Media Library: the selected file, larger.
 
-Space opens it, as in the Finder, and Space or Escape closes it. It
+Space opens it, as in the Finder, and Escape closes it. It
 follows the grid's selection, so the arrow keys page through the
 library while it is open (they are passed on to the grid). It shows the
 picture fitted to the window, the file's name and one quiet line: what
 kind of file, how large, its dimensions and the day it was added. A
-video or an audio file shows its kind and Open in Browser, where it
-plays.
+video or audio file plays locally with Space to play or pause. PDFs and
+text files are read-only previews; other types offer Save As.
 
-A view only: the library says what to show (``show_file``) and hands it
-the full picture when it arrives (``set_picture``).
+The library owns selection and save actions. This view delegates byte
+loading to PreviewResolver and presentation to small preview widgets.
 """
 
 from __future__ import annotations
 
 from typing import Optional
 
-from PySide6.QtCore import QRectF, QSize, Qt, QUrl, Signal
-from PySide6.QtGui import QDesktopServices, QPainter, QPalette, QPixmap
+from PySide6.QtCore import QEvent, Qt, QUrl, Signal
+from PySide6.QtGui import QDesktopServices, QPalette, QPixmap
 from PySide6.QtWidgets import (
     QApplication,
     QDialog,
     QHBoxLayout,
     QLabel,
     QPushButton,
-    QSizePolicy,
+    QStackedWidget,
     QVBoxLayout,
     QWidget,
 )
 
-import format_icons
+import media_files
 import theme
 import url_safety
 from i18n import _
-
-
-class _Picture(QWidget):
-    """The picture, fitted and centred, or the kind of file."""
-
-    def __init__(self, parent=None) -> None:
-        super().__init__(parent)
-        self.pixmap: Optional[QPixmap] = None
-        self.glyph = ""
-        self.setMinimumSize(QSize(280, 200))
-        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
-
-    def paintEvent(self, _event) -> None:  # noqa: N802
-        painter = QPainter(self)
-        painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
-        area = self.rect()
-        if self.pixmap is not None and not self.pixmap.isNull():
-            size = self.pixmap.deviceIndependentSize().toSize()
-            size.scale(area.size(), Qt.AspectRatioMode.KeepAspectRatio)
-            if size.width() > self.pixmap.width() and size.height() > self.pixmap.height():
-                size = self.pixmap.size()          # never larger than it is
-            target = area.adjusted(0, 0, 0, 0)
-            target.setSize(size)
-            target.moveCenter(area.center())
-            painter.drawPixmap(target, self.pixmap)
-        elif self.glyph:
-            side = min(96, area.width() // 3, area.height() // 2)
-            rect = QRectF(area.center().x() - side / 2, area.center().y() - side / 2, side, side)
-            format_icons.paint(self.glyph, painter, rect,
-                               self.palette().color(QPalette.ColorRole.PlaceholderText))
-        painter.end()
+from .media_picture import MediaPicture
 
 
 class QuickLook(QDialog):
     """The Quick Look window, beside the library and above it."""
 
     closed = Signal()
+    save_requested = Signal()
+    thumbnail_ready = Signal(str, object)
 
-    def __init__(self, *, grid: QWidget, is_dark: bool, parent=None) -> None:
+    def __init__(self, *, grid: QWidget, is_dark: bool, resolver=None, parent=None) -> None:
         super().__init__(parent, Qt.WindowType.Tool)
         self.setWindowTitle(_("Quick Look"))
         self.setStyleSheet(theme.dialog_stylesheet(is_dark)
                            + "QLabel#quick_look_name { font-weight: 600; }")
         self._grid = grid
         self._url = ""
+        self._key = ""
+        self._mime = ""
+        self._media = None
+        self._resolver = resolver
+        self._player = None
+        self._file_preview = None
+        self._loading = False
+        if resolver is not None:
+            resolver.ready.connect(self._resolved)
+            resolver.failed.connect(self._failed)
+            resolver.progress.connect(self._progress)
         self.resize(560, 480)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(16, 16, 16, 14)
         layout.setSpacing(8)
-        self.picture = _Picture(self)
-        layout.addWidget(self.picture, 1)
+        self.picture = MediaPicture(self)
+        self.pages = QStackedWidget()
+        self.pages.addWidget(self.picture)
+        layout.addWidget(self.pages, 1)
+        self.message = QLabel()
+        self.message.setTextFormat(Qt.TextFormat.PlainText)
+        self.message.setWordWrap(True)
+        self.message.setAlignment(Qt.AlignmentFlag.AlignHCenter)
+        self.message.setForegroundRole(QPalette.ColorRole.PlaceholderText)
+        layout.addWidget(self.message)
+        self.retry_button = QPushButton(_("Try Again"))
+        self.retry_button.setAutoDefault(False)
+        self.retry_button.clicked.connect(self._retry_or_stop)
+        layout.addWidget(self.retry_button, alignment=Qt.AlignmentFlag.AlignHCenter)
         self.name = QLabel()
         self.name.setObjectName("quick_look_name")
         self.name.setTextFormat(Qt.TextFormat.PlainText)
@@ -104,23 +99,128 @@ class QuickLook(QDialog):
         self.open_button.setAutoDefault(False)
         self.open_button.clicked.connect(self._open)
         row.addWidget(self.open_button)
+        self.save_button = QPushButton(_("Save As…"))
+        self.save_button.setAutoDefault(False)
+        self.save_button.clicked.connect(self.save_requested)
+        row.addWidget(self.save_button)
         row.addStretch(1)
         layout.addLayout(row)
 
     def show_file(self, *, name: str, detail: str, url: str, glyph: str,
-                  picture: Optional[QPixmap]) -> None:
+                  picture: Optional[QPixmap], media=None, mime: str = "") -> None:
         """Show this file: its picture when there is one yet, else the
         glyph of its kind ("" while a picture is on its way)."""
         self.setWindowTitle(name)
         self.name.setText(name)
         self.detail.setText(detail)
         self._url = url
+        key = media.hash if media is not None else ""
+        if key and key == self._key and mime == self._mime:
+            return                      # metadata updates must not restart playback
+        self._clear()
+        self._key, self._mime, self._media = key, mime, media
+        self.pages.setCurrentWidget(self.picture)
+        self.message.hide()
+        self.retry_button.hide()
         self.picture.pixmap = picture
         self.picture.glyph = glyph
         self.picture.update()
-        # A picture is seen here; a video or a sound is played there.
-        self.open_button.setVisible(glyph in ("video", "audio")
+        self.open_button.setVisible(bool(glyph)
                                     and url_safety.is_safe_media_url(url))
+        self.save_button.setVisible(media is not None)
+        if media is not None and self._resolver is not None and (
+                media_files.kind_of(mime) is not None or mime == "application/pdf"
+                or media_files.is_text(mime)):
+            self._load()
+        elif media_files.library_kind(mime) == "file" and picture is None:
+            self.message.setText(_("Save this file to open it in an app on your computer."))
+            self.message.show()
+
+    def _load(self):
+        if self._resolver is None or self._media is None:
+            return
+        if self._player is not None:
+            self._player.clear()
+        self._loading = True
+        self.retry_button.setText(_("Stop"))
+        self.retry_button.show()
+        self.message.setText(_("Loading preview…"))
+        self.message.show()
+        self._resolver.resolve(self._media)
+
+    def _retry_or_stop(self):
+        if self._loading:
+            self._resolver.cancel()
+            self._failed(_("Preview loading stopped."))
+        else:
+            self._load()
+
+    def _progress(self, received, total):
+        if total > 0:
+            self.message.setText(_("Loading preview… {percent}%").format(
+                percent=min(100, received * 100 // total)))
+
+    def _resolved(self, source):
+        self._loading = False
+        self.retry_button.hide()
+        self.message.hide()
+        if media_files.kind_of(self._mime) is not None:
+            if self._player is None:
+                from .media_player import MediaPlayer
+                self._player = MediaPlayer(self)
+                self._player.failed.connect(self._failed)
+                self._player.poster_ready.connect(self._poster)
+                self.pages.addWidget(self._player)
+                self._install_keys(self._player)
+            self.pages.setCurrentWidget(self._player)
+            self._player.set_source(source, self._mime)
+        else:
+            if self._file_preview is None:
+                from .file_preview import FilePreview
+                self._file_preview = FilePreview(self)
+                self._file_preview.failed.connect(self._failed)
+                self.pages.addWidget(self._file_preview)
+            self.pages.setCurrentWidget(self._file_preview)
+            self._file_preview.show_source(source, self._mime)
+
+    def _poster(self, pixmap):
+        self.thumbnail_ready.emit(self._key, pixmap)
+
+    def _failed(self, reason):
+        self._loading = False
+        self.message.setText(reason)
+        self.message.show()
+        self.retry_button.show()
+        self.retry_button.setText(_("Try Again"))
+
+    def _clear(self):
+        if self._resolver is not None:
+            self._resolver.cancel()
+        if self._player is not None:
+            self._player.clear()
+        if self._file_preview is not None:
+            self._file_preview.clear()
+        self.picture.pixmap = None
+        self.picture.glyph = ""
+        self.picture.update()
+        self._key = ""
+        self._media = None
+        self._loading = False
+
+    def invalidate(self):
+        """Privacy metadata changed; the library will show the selection again."""
+        self._clear()
+
+    def _install_keys(self, widget):
+        widget.installEventFilter(self)
+        for child in widget.findChildren(QWidget):
+            child.installEventFilter(self)
+
+    def eventFilter(self, watched, event):
+        if event.type() == QEvent.Type.KeyPress and event.key() in (Qt.Key.Key_Space, Qt.Key.Key_Escape):
+            self.keyPressEvent(event)
+            return True
+        return super().eventFilter(watched, event)
 
     def set_picture(self, picture: QPixmap) -> None:
         self.picture.pixmap = picture
@@ -133,7 +233,12 @@ class QuickLook(QDialog):
 
     def keyPressEvent(self, event) -> None:  # noqa: N802
         key = event.key()
-        if key in (Qt.Key.Key_Space, Qt.Key.Key_Escape):
+        if key == Qt.Key.Key_Space and media_files.kind_of(self._mime) is not None:
+            if self._player is not None:
+                self._player.toggle_playback()
+        elif key == Qt.Key.Key_Escape and self._player is not None and self._player.video.isFullScreen():
+            self._player.video.setFullScreen(False)
+        elif key in (Qt.Key.Key_Space, Qt.Key.Key_Escape):
             self.close()
         elif key in (Qt.Key.Key_Left, Qt.Key.Key_Right, Qt.Key.Key_Up, Qt.Key.Key_Down):
             QApplication.sendEvent(self._grid, event)
@@ -141,9 +246,11 @@ class QuickLook(QDialog):
             super().keyPressEvent(event)
 
     def closeEvent(self, event) -> None:  # noqa: N802
+        self._clear()
         super().closeEvent(event)
         self.closed.emit()
 
     def reject(self) -> None:
+        self._clear()
         super().reject()
         self.closed.emit()
