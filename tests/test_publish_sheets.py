@@ -704,6 +704,55 @@ def test_a_files_own_name_is_asked_about_at_publish_and_not_before(
         assert (["d", MADE] in tags) if state == "unknown-new" else captured == []
 
 
+@pytest.mark.parametrize("name, made", [(RAW, MADE), ("My Post", "my-post")])
+@pytest.mark.parametrize("state", ["found", "never"])
+def test_a_files_own_name_is_asked_about_also_with_a_date_in_its_front_matter(
+        tmp_path, captured, name, made, state):
+    """Review round 4, B1: a Markdown file with a date in its front matter
+    and no slug (as Jekyll, Hugo and Obsidian write them) went out under
+    the made link name without a question: the known date kept the link
+    name from following the title, and only then were the file's names
+    asked about. 3.3 read no front matter and published the file under
+    its own name, so that was a second article. The file's own names are
+    asked about whenever the link name is the one made of the file's name;
+    none found, the made name goes out with the front matter's date."""
+    import front_matter
+    from nostr.article_details import from_front_matter
+    from nostr.first_publications import FirstPublications
+    from nostr.publisher import FOUND, NEVER, FirstPublication, file_link_names
+    front, _body = front_matter.split("---\ntitle: Hello\ndate: 2024-05-01\n---\nBody\n")
+    details = from_front_matter(front)
+    assert details.identifier == "" and details.published_at
+    asked = []
+    sheet = article(tmp_path, default_title="Hello", default_slug=made, file_name=name,
+                    first_published=details.published_at, details=details,
+                    first_publications=FirstPublications(tmp_path / "first.json"),
+                    published_at_lookup=lambda a, s, done, also=(): asked.append(
+                        (s, tuple(also), done)))
+    sheet._on_publish()
+    [(slug, also, done)] = asked
+    assert (slug, also) == (made, tuple(file_link_names(name)))
+    done(FirstPublication(FOUND, FIRST, under=name) if state == "found"
+         else FirstPublication(NEVER))
+    tags = captured[0]["tags"]
+    if state == "found":
+        assert ["d", name] in tags and ["published_at", str(FIRST)] in tags
+    else:
+        assert ["d", made] in tags and ["published_at", str(details.published_at)] in tags
+
+
+def test_a_name_this_computer_published_under_is_not_asked_about_again(tmp_path, captured):
+    """The made link name this computer published the file under is the
+    article: its own names are not asked about."""
+    from nostr.first_publications import FirstPublications
+    record = FirstPublications(tmp_path / "first.json")
+    record.remember(PK, MADE, FIRST)
+    asked = []
+    sheet = file_article(tmp_path, asked, first_publications=record)
+    sheet._on_publish()
+    assert asked == [] and ["d", MADE] in captured[0]["tags"]
+
+
 def test_found_under_the_files_name_but_not_published_records_nothing(
         tmp_path, captured, monkeypatch):
     """Review round 4, L3: this computer's record was written when the

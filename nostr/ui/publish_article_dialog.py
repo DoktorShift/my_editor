@@ -337,12 +337,17 @@ class PublishArticleDialog(QDialog):
         # The link name it has already, kept letter for letter (link_name).
         self._kept_slug = default_slug
         self._coauthor_picker: Optional[MentionPicker] = None
-        # A file's article with no link name of its own: its file's names
-        # as they are (as the file system gives it, and composed), which
-        # version 3.3 published files under and recorded nothing of. Asked
-        # about at Publish with the made link name (_on_publish), never
-        # before: nothing goes out before the person publishes.
-        self._file_names = file_link_names(file_name) if self._slug_is_auto else []
+        # A file's article with no link name of its own, starting with the
+        # one made of the file's name: its file's names as they are (as the
+        # file system gives it, and composed), which version 3.3 published
+        # files under and recorded nothing of, nor read any front matter
+        # (a date there says nothing of the name). Asked about at Publish
+        # with the made link name (_on_publish), never before: nothing goes
+        # out before the person publishes.
+        own_names = file_link_names(file_name)
+        self._file_names = (own_names if own_names and not self._details.identifier
+                            and default_slug not in own_names else [])
+        self._slug_typed = False
 
         self._build(active_profile, default_title, default_slug)
         self._coauthors = Coauthors(profile=self._account.profile,
@@ -629,8 +634,9 @@ class PublishArticleDialog(QDialog):
         self._refresh_publish_enabled()
 
     def _on_slug_edited(self, _text: str) -> None:
-        # Typed: it no longer follows the title.
+        # Typed: it no longer follows the title, and it is the person's.
         self._slug_is_auto = False
+        self._slug_typed = True
         self._refresh_publish_enabled()
 
     def _slug(self) -> str:
@@ -758,26 +764,38 @@ class PublishArticleDialog(QDialog):
         known = self._first_published.get(slug) or (
             self._first_publications.get(author, slug)
             if self._first_publications is not None else None)
-        if known:
+        # A file's article with the link name made for it may be out under
+        # the file's own name: asked about in the same question, now that
+        # the person publishes, for the account and the link name of now,
+        # also when a date is known (its front matter's says nothing of
+        # the name).
+        also = self._file_names_to_ask(author, slug)
+        if known and not also:
             self._publish(slug, self._body, known)
             return
-        # An article published before keeps its date: find it first. A
-        # file's article with the link name made for it may be out under
-        # the file's own name: asked about in the same question, now that
-        # the person publishes, for the account and the link name of now.
-        also = [name for name in self._file_names if name != slug] if self._slug_is_auto else []
+        # An article published before keeps its date: find it first.
         self._looking_up = True
         self._set_busy(True)
         self._set_status(_("Checking whether this article was published before…"))
-        answer = (lambda when, s=slug, a=author, names=tuple(also):
-                  self._on_published_at(s, a, when, names))
+        answer = (lambda when, s=slug, a=author, names=tuple(also), k=known:
+                  self._on_published_at(s, a, when, names, k))
         if also:
             self._published_at_lookup(author, slug, answer, also=also)
         else:
             self._published_at_lookup(author, slug, answer)
 
+    def _file_names_to_ask(self, author: str, slug: str) -> List[str]:
+        """The file's own names to ask about with ``slug`` at Publish: none
+        for a link name typed, or one this computer published the article
+        under (that is the article)."""
+        if not self._file_names or self._slug_typed or (
+                self._first_publications is not None
+                and self._first_publications.get(author, slug)):
+            return []
+        return [name for name in self._file_names if name != slug]
+
     def _on_published_at(self, slug: str, author: str, found: FirstPublication,
-                         file_names: Sequence[str] = ()) -> None:
+                         file_names: Sequence[str] = (), known: Optional[int] = None) -> None:
         if not self._looking_up:
             return                                     # the sheet was closed meanwhile
         self._looking_up = False
@@ -797,17 +815,21 @@ class PublishArticleDialog(QDialog):
                 slug = found.under
                 self._slug_is_auto = False
                 self._kept_slug = slug
+                self._file_names = []                  # decided
                 self._slug_edit.setText(slug)
             self._first_published[slug] = found.published_at
             self._publish(slug, self._body, found.published_at)
         elif found.state == NEVER:
-            self._publish(slug, self._body, int(time.time()))
+            # A new article; one whose date is known (its front matter's)
+            # keeps that date.
+            self._publish(slug, self._body, known or int(time.time()))
         else:
             self._set_status("")
-            self._ask_when_nobody_can_tell(slug, self._body, file_names)
+            self._ask_when_nobody_can_tell(slug, self._body, file_names, known)
 
     def _ask_when_nobody_can_tell(self, slug: str, body: str,
-                                  file_names: Sequence[str] = ()) -> None:
+                                  file_names: Sequence[str] = (),
+                                  known: Optional[int] = None) -> None:
         """None of the relays the author publishes to answered: whether the
         article went out before cannot be told, and a guess would either
         re-date an edit or back-date a new article, or for a file's
@@ -833,7 +855,7 @@ class PublishArticleDialog(QDialog):
         if choice == "again":
             self._on_publish()
         elif choice == "new":
-            self._publish(slug, body, int(time.time()))
+            self._publish(slug, body, known or int(time.time()))
 
     def _publish(self, slug: str, body: str, published_at: int) -> None:
         profile = self._account.profile()
