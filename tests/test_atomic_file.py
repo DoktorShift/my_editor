@@ -587,6 +587,25 @@ def test_on_macos_a_document_nobody_may_delete_is_saved_in_place(tmp_path):
         subprocess.run(["chmod", "-RN", str(tmp_path)], check=False)
 
 
+@pytest.mark.skipif(sys.platform != "darwin", reason="access lists as macOS keeps them")
+def test_on_macos_a_document_that_inherits_a_deny_delete_entry_is_saved_in_place(tmp_path):
+    """The usual way to protect files: the folder passes the entry on, and
+    macOS lists it as "deny,inherited". Saved in place all the same, with
+    no file left beside it that nobody could delete."""
+    import subprocess
+    folder = tmp_path / "kept"
+    folder.mkdir()
+    subprocess.run(["chmod", "+a", "everyone deny delete,file_inherit", str(folder)], check=True)
+    try:
+        path = folder / "Essay.md"
+        path.write_bytes(b"old")
+        save_document(path, b"new")
+        assert path.read_bytes() == b"new"
+        assert sorted(os.listdir(folder)) == ["Essay.md"]
+    finally:
+        subprocess.run(["chmod", "-RN", str(tmp_path)], check=False)
+
+
 @pytest.mark.skipif(sys.platform != "darwin", reason="Finder tags exist on macOS only")
 def test_on_macos_finder_tags_and_attributes_are_kept(tmp_path):
     import subprocess

@@ -273,8 +273,10 @@ def _denies_delete(target: str) -> bool:
             libc.acl_free(text)
     finally:
         libc.acl_free(acl)
-    # Lines such as "user:FFFFEEEE-…:everyone:12:deny:delete,write".
-    return any(fields[-2:-1] == ["deny"] and "delete" in fields[-1].split(",")
+    # Lines such as "user:FFFFEEEE-…:everyone:12:deny:delete,write", or
+    # "…:deny,inherited:delete" for an entry the folder passed on.
+    return any(len(fields) > 1 and "deny" in fields[-2].split(",")
+               and "delete" in fields[-1].split(",")
                for fields in (line.split(":") for line in listed.splitlines()))
 
 
