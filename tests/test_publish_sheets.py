@@ -794,6 +794,53 @@ def test_a_sheet_on_the_smallest_window_scrolls_and_keeps_its_buttons(
         i18n.install(i18n.ENGLISH)
 
 
+def _caret_in_view(sheet, widget):
+    """Whether ``widget``'s caret (its whole self, without one) can be seen
+    in the sheet's scrolling part."""
+    from PySide6.QtCore import QPoint, QRect
+    from PySide6.QtWidgets import QScrollArea
+    viewport = sheet.findChild(QScrollArea).viewport()
+    caret = widget.inputMethodQuery(Qt.InputMethodQuery.ImCursorRectangle)
+    caret = caret.toRect() if hasattr(caret, "toRect") else caret
+    if caret.isNull() or not caret.isValid():
+        caret = widget.rect()
+    return viewport.rect().contains(QRect(widget.mapTo(viewport, caret.topLeft()),
+                                          caret.size()))
+
+
+@pytest.mark.parametrize("make", [article, note])
+def test_the_field_being_typed_in_is_always_in_view(tmp_path, make):
+    """Review round 3, low 4: in the smallest window the note box had the
+    focus with none of it in view, the Title showed a quarter of itself,
+    and Tab from Publish went round to the Title without scrolling to it.
+    The field with the focus is scrolled into view, at the opening and
+    whenever the focus moves."""
+    from PySide6.QtWidgets import QMainWindow, QScrollArea
+    window = QMainWindow()
+    window.setMinimumSize(1, 1)
+    window.resize(325, 189)
+    window.show()
+    sheet = make(tmp_path, parent=window)
+    sheet.show()
+    sheet.activateWindow()
+    QApplication.processEvents()
+    first = sheet._title_edit if make is article else sheet._text_edit
+    first.setFocus()
+    QApplication.processEvents()
+    assert _caret_in_view(sheet, first)
+    bar = sheet.findChild(QScrollArea).verticalScrollBar()
+    assert bar.maximum() > 0                       # it does scroll there
+    bar.setValue(bar.maximum())                    # read to the end ...
+    sheet._cancel_btn.setFocus()
+    assert QApplication.focusWidget() is sheet._cancel_btn
+    QApplication.processEvents()
+    first.setFocus(Qt.FocusReason.TabFocusReason)  # ... and Tab goes round
+    QApplication.processEvents()
+    assert _caret_in_view(sheet, first)
+    sheet.close()
+    window.close()
+
+
 def test_the_app_calls_its_publish_windows_sheets():
     """Review round 2: a few places still spoke of a publish dialog."""
     import pathlib

@@ -34,11 +34,11 @@ from __future__ import annotations
 import sys
 from typing import Iterable, List, Optional, Tuple
 
-from PySide6.QtCore import QSize, Qt, Signal
+from PySide6.QtCore import QEvent, QObject, QSize, Qt, Signal, Slot
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
-    QBoxLayout, QDialog, QDialogButtonBox, QFrame, QHBoxLayout, QLabel, QMenu, QPushButton,
-    QScrollArea, QStyle, QToolButton, QToolTip, QWidget,
+    QApplication, QBoxLayout, QDialog, QDialogButtonBox, QFrame, QHBoxLayout, QLabel, QMenu,
+    QPushButton, QScrollArea, QStyle, QToolButton, QToolTip, QWidget,
 )
 
 import announce
@@ -110,9 +110,41 @@ def fit_margins(dialog: QDialog) -> None:
         layout.setContentsMargins(*margins)
 
 
+class _FocusInView(QObject):
+    """Keeps the field with the focus in view in a sheet's scrolling part:
+    when the focus comes to one (Tab, a click, the sheet opening), and
+    when the part is resized under it. QScrollArea scrolls by itself only
+    for Tab pressed inside it, so Tab going round from the buttons, and
+    the first focus, left the field out of sight in a small window. Of a
+    field taller than the part (the note), its caret is shown."""
+
+    def __init__(self, scroll: QScrollArea) -> None:
+        super().__init__(scroll)
+        self._scroll = scroll
+        QApplication.instance().focusChanged.connect(self._focus_moved)
+        scroll.viewport().installEventFilter(self)
+
+    @Slot(QWidget, QWidget)
+    def _focus_moved(self, _old: Optional[QWidget], now: Optional[QWidget]) -> None:
+        self._show(now)
+
+    def eventFilter(self, watched, event) -> bool:  # noqa: N802, Qt's name
+        if event.type() == QEvent.Type.Resize:
+            self._show(QApplication.focusWidget())
+        return False
+
+    def _show(self, widget: Optional[QWidget]) -> None:
+        page = self._scroll.widget()
+        if widget is not None and page is not None and page.isAncestorOf(widget):
+            # Margins no larger than the part has room for.
+            room = self._scroll.viewport().height()
+            self._scroll.ensureWidgetVisible(widget, 8, max(0, min(8, room // 4)))
+
+
 def scroll_area(page: QWidget) -> QScrollArea:
     """What a sheet holds but its account and buttons: it scrolls, down to
-    one line in the smallest window, so they always show whole."""
+    one line in the smallest window, so they always show whole; the field
+    with the focus is always in view (_FocusInView)."""
     scroll = QScrollArea()
     scroll.setWidgetResizable(True)
     scroll.setFrameShape(QFrame.Shape.NoFrame)
@@ -120,6 +152,7 @@ def scroll_area(page: QWidget) -> QScrollArea:
     scroll.setFocusPolicy(Qt.FocusPolicy.NoFocus)
     scroll.setMinimumHeight(scroll.fontMetrics().lineSpacing() + 4)
     scroll.setWidget(page)
+    _FocusInView(scroll)
     return scroll
 
 
