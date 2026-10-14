@@ -289,7 +289,8 @@ def test_a_profile_no_relay_answered_is_asked_again_with_backoff():
     asked, answers = [], []
 
     def query(pool, relays, *, kind, author, on_done, **_rest):
-        asked.append(time.monotonic())
+        # perf_counter: Windows' monotonic clock ticks only every 15.6 ms.
+        asked.append(time.perf_counter())
         if len(asked) < 3:
             return on_done(Lookup(LookupState.UNKNOWN))
         on_done(Lookup(LookupState.FOUND, {"content": '{"lud16": "b@w.example"}',
