@@ -1377,7 +1377,7 @@ def test_the_loader_refuses_bytes_that_are_not_an_image(loader):
 def test_the_hero_box_keeps_its_ratio_whatever_the_image_is(source):
     from PySide6.QtGui import QPixmap
 
-    hero = dp._HeroImage(is_dark=True)
+    hero = dp.HeroImage(is_dark=True)
     hero.reset(width=360)
     box = hero.size()
     assert box.width() == 360
@@ -1551,7 +1551,7 @@ def test_every_line_of_the_popover_carries_its_own_accessible_name():
     for name, label in popover.labels():
         if label.height():
             assert label.accessibleName() == getattr(fields, name)
-    hero = popover.findChild(dp._HeroImage)
+    hero = popover.findChild(dp.HeroImage)
     assert hero.accessibleName() == "Article image"
     # No description, because NIP-23 carries no alt text to put in one.
     assert hero.accessibleDescription() == ""
@@ -1749,3 +1749,59 @@ def test_the_full_preview_moves_with_its_row_as_the_list_scrolls(panel):
     controller._on_scrolled(0)
     assert controller.is_full() is True
     assert controller.shown_anchor() == before
+
+
+# --------------------------------------------------------------------------- #
+# Detaching the full preview into a window                                    #
+# --------------------------------------------------------------------------- #
+
+def test_the_full_preview_detaches_into_a_window_that_stays(panel):
+    """popovers.md (macOS): "Consider letting people detach a popover",
+    with "minimal appearance changes": the same header, text and commands,
+    in a window that stays while the person writes beside it."""
+    controller = panel._preview
+    press(panel, 0)
+    more = [a.text() for a in controller.popover().action_bar().more.menu().actions()
+            if not a.isSeparator()]
+    assert "Open in New Window" in more
+    title = controller.popover().fields().title
+    window = controller.detach()
+    try:
+        assert controller.is_open() is False
+        assert window.isVisible() and window.windowTitle() == title
+        assert window.reader.toPlainText().strip()
+        assert window.bar.primary.text() == "Continue Editing"
+        assert "Open in New Window" not in [
+            a.text() for a in window.bar.more.menu().actions()]
+        assert controller.windows() == [window]
+        # A command that keeps the post in view leaves the window open; one
+        # that moves on from it (Continue Editing) closes it.
+        copied = []
+        panel.copy_event_id.connect(copied.append)
+        window.bar.chosen.emit("copy_id")
+        assert copied and window.isVisible()
+        opened = []
+        panel.open_draft.connect(opened.append)
+        window.bar.primary.click()
+        assert opened == [identifier_at(panel, 0)] and not window.isVisible()
+    finally:
+        window.close()
+
+
+def test_dragging_the_full_preview_by_its_header_detaches_it(panel):
+    controller = panel._preview
+    press(panel, 0)
+    popover = controller.popover()
+    detached = []
+    popover.detach_requested.connect(lambda: detached.append(True))
+    start = QPointF(40, 30)
+    end = QPointF(40 + 4 * QApplication.startDragDistance(), 30)
+    QApplication.sendEvent(popover, QMouseEvent(
+        QEvent.MouseButtonPress, start, popover.mapToGlobal(start), Qt.LeftButton,
+        Qt.LeftButton, Qt.NoModifier))
+    QApplication.sendEvent(popover, QMouseEvent(
+        QEvent.MouseMove, end, popover.mapToGlobal(end), Qt.NoButton, Qt.LeftButton,
+        Qt.NoModifier))
+    assert detached == [True]
+    for window in controller.windows():
+        window.close()
