@@ -37,7 +37,7 @@ import hashlib
 import re
 import unicodedata
 from dataclasses import dataclass
-from typing import Callable, Iterable, List, Optional, Sequence, Tuple
+from typing import Callable, Dict, Iterable, List, Optional, Sequence, Tuple
 
 from PySide6.QtCore import QObject, Signal
 
@@ -63,7 +63,7 @@ from .events import build_event, verify_event
 from .outbox import RelayDirectory, ask_draft_relays, normalize_relay_url
 from . import refs
 from .outbox import defaults as outbox_defaults
-from .outbox.lookup import fetch_replaceable
+from .outbox.lookup import Lookup, fetch_addressable
 from .outbox.policy import dedupe_relays
 from .profiles import Profile
 from .publish_pipeline import Mention, PublishPipeline, PublishResult
@@ -518,10 +518,14 @@ UNKNOWN = "unknown"      # too few relays answered to tell
 
 @dataclass(frozen=True)
 class FirstPublication:
-    """When an article was first published, and how sure that is."""
+    """When an article was first published, and how sure that is.
+    ``under``: the other link name it was found under, when it was asked
+    about with others (a file's own name); empty when it was found under
+    the one asked about, or not found."""
 
     state: str
     published_at: Optional[int] = None
+    under: str = ""
 
 
 def first_publication_of(lookup, outbox: Sequence[str],
@@ -547,10 +551,30 @@ def first_publication_of(lookup, outbox: Sequence[str],
     return FirstPublication(UNKNOWN)
 
 
+def first_publication_among(found: Dict[str, Lookup], names: Sequence[str],
+                            outbox: Sequence[str]) -> FirstPublication:
+    """What the relays said about an article that may be out under any of
+    ``names`` (in the order they count: a file's own names first, the
+    link name asked about last). The first found is the article; with
+    none found, NEVER only when the answers would say so for each."""
+    slug = names[-1]
+    for name in names:
+        lookup = found.get(name)
+        if lookup is not None and lookup.event is not None:
+            answer = first_publication_of(lookup, outbox)
+            return FirstPublication(answer.state, answer.published_at,
+                                    under="" if name == slug else name)
+    answers = [first_publication_of(found[name], outbox) for name in names if name in found]
+    if answers and all(answer.state == NEVER for answer in answers):
+        return FirstPublication(NEVER)
+    return FirstPublication(UNKNOWN)
+
+
 def find_first_publication(relay_pool: RelayPool, relay_directory: RelayDirectory,
                            author: str, slug: str,
                            on_done: Callable[[FirstPublication], None], *,
-                           parent: QObject, timeout_ms: int = 4_000) -> None:
+                           parent: QObject, timeout_ms: int = 4_000,
+                           also: Sequence[str] = ()) -> None:
     """Whether and when the author's article ``slug`` was first published
     (FirstPublication). The question lives as long as ``parent`` (the
     dialog asking it).
@@ -560,13 +584,20 @@ def find_first_publication(relay_pool: RelayPool, relay_directory: RelayDirector
     that, and an edit must not move it. Asked of the relays the author
     publishes to, where the current version is, and also of the relays
     they read from and the indexers, so a relay list that moved since
-    does not hide the first version."""
+    does not hide the first version.
+
+    ``also``: other link names the article may be out under (a file's own
+    name, which 3.3 published files under), asked about in the same
+    request and counted before ``slug`` (first_publication_among)."""
+    names = list(dict.fromkeys([*also, slug]))
+
     def got_relays(relays: List[str]) -> None:
         outbox = dedupe_relays(relays)
         asked = dedupe_relays([*outbox, *relay_directory.cached(author).read,
                                *outbox_defaults.INDEXER_RELAYS])
-        fetch_replaceable(relay_pool, asked, kind=30023, author=author, d_tag=slug,
-                          on_done=lambda found: on_done(first_publication_of(found, outbox)),
+        fetch_addressable(relay_pool, asked, kind=30023, author=author, d_tags=names,
+                          on_done=lambda found: on_done(
+                              first_publication_among(found, names, outbox)),
                           timeout_ms=timeout_ms, parent=parent)
     relay_directory.outbox_of(author, got_relays)
 

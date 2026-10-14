@@ -67,7 +67,7 @@ def test_no_usable_time_is_none(event):
     assert published_at_of(event) is None
 
 
-def _asking(write=("wss://nos.lol",), read=("wss://read.example",)):
+def _asking(write=("wss://nos.lol",), read=("wss://read.example",), also=()):
     """The question, asked: the test answers for each relay by hand.
 
     Its time never runs out on its own while a test answers (a pause in a
@@ -82,8 +82,9 @@ def _asking(write=("wss://nos.lol",), read=("wss://read.example",)):
     found = []
     owner = QObject()
     find_first_publication(pool, directory, PK, "my-post", found.append, parent=owner,
-                           timeout_ms=3_600_000)
+                           timeout_ms=3_600_000, **({"also": also} if also else {}))
     settle()
+    assert len(pool.subs) == 1                     # one question, whatever it asks about
     return pool.subs[0], found, owner
 
 
@@ -152,6 +153,62 @@ def test_a_version_found_anywhere_gives_the_date():
             sub.refuse(url)
     settle()
     assert found == [FirstPublication(FOUND, FIRST)]
+
+
+# -- a file's own names, asked about with the made one ----------------------------------
+
+# "Grüße an alle" as a Mac writes a file's name ("u" and an accent), and composed.
+RAW = "Gru\u0308\u00dfe an alle"
+COMPOSED = "Gr\u00fc\u00dfe an alle"
+
+
+def test_a_files_own_names_are_asked_about_with_the_made_one_in_one_question():
+    """Review round 3: 3.3 published a file's article under the file's
+    name as it was (on a Mac, decomposed); one written elsewhere may be
+    composed. Both are asked about with the made link name, in one
+    request, and one found is the article's, exactly as it is."""
+    from tests.outbox_fakes import settle, signed
+    sub, found, _owner = _asking(also=(RAW, COMPOSED))
+    assert sub.filters[0]["#d"] == [RAW, COMPOSED, "my-post"]
+    for url in sub.urls:
+        if url == "wss://nos.lol":
+            sub.answer(url, signed(30023, [["client", "MyEditor"], ["d", RAW],
+                                           ["published_at", str(FIRST)]]))
+        else:
+            sub.answer(url)
+    settle()
+    assert found == [FirstPublication(FOUND, FIRST, under=RAW)]
+
+
+@pytest.mark.parametrize("names, under", [
+    ((RAW, COMPOSED), RAW),             # the name as the file system gives it first
+    ((COMPOSED, "my-post"), COMPOSED),  # a file's own name before the made one
+    (("my-post",), ""),                 # under the made name: no other name
+])
+def test_found_under_more_than_one_name_the_files_own_comes_first(names, under):
+    from tests.outbox_fakes import settle, signed
+    sub, found, _owner = _asking(also=(RAW, COMPOSED))
+    for url in sub.urls:
+        sub.answer(url, *[signed(30023, [["d", name], ["published_at", str(FIRST + i)]])
+                          for i, name in enumerate(names)])
+    settle()
+    assert found[0].state == FOUND and found[0].under == under
+    assert found[0].published_at == FIRST + names.index(under or "my-post")
+
+
+@pytest.mark.parametrize("answering, state", [({"wss://nos.lol", "indexer"}, NEVER),
+                                              ({"wss://nos.lol"}, UNKNOWN)])
+def test_with_none_of_the_names_found_it_is_as_for_one(answering, state):
+    from nostr.outbox.defaults import INDEXER_RELAYS
+    from tests.outbox_fakes import settle
+    sub, found, _owner = _asking(also=(RAW, COMPOSED))
+    for url in sub.urls:
+        if url in answering or (url in INDEXER_RELAYS and "indexer" in answering):
+            sub.answer(url)
+        else:
+            sub.refuse(url, "blocked")
+    settle()
+    assert found == [FirstPublication(state)]
 
 
 # -- the publish dialog ---------------------------------------------------------------
