@@ -217,6 +217,44 @@ def test_a_widget_given_a_style_sheet_under_a_styled_parent_is_polished_too():
     assert child.testAttribute(Qt.WidgetAttribute.WA_WState_Polished)
 
 
+def test_every_style_sheet_goes_through_the_one_that_polishes():
+    """Review round 3, low 5: the guard's application-wide event filter was
+    redundant beside the setStyleSheet wrapper, and cost something on every
+    event; it is gone. What holds instead: the wrapper is installed (a
+    keyword call and a reload of theme keep working), a widget whose style
+    sheet was set before it is polished by the helper, and no module sets
+    an application style sheet or loads .ui files, which would set style
+    sheets past the wrapper."""
+    import importlib
+    import pathlib
+    import re
+    from PySide6.QtCore import Qt
+    from PySide6.QtWidgets import QApplication, QFrame, QWidget
+    assert theme.style_sheet_guard_installed()
+    assert not hasattr(QApplication.instance(), "_style_sheet_guard")    # no filter
+    frame = QFrame()
+    frame.setStyleSheet(styleSheet="QFrame { border: none; }")
+    assert frame.testAttribute(Qt.WidgetAttribute.WA_WState_Polished)
+    early = QFrame()
+    theme._set_style_sheet(early, "QFrame { border: none; }")         # past the wrapper
+    assert not early.testAttribute(Qt.WidgetAttribute.WA_WState_Polished)
+    theme.polish_style_sheets(early)
+    assert early.testAttribute(Qt.WidgetAttribute.WA_WState_Polished)
+    importlib.reload(theme)
+    theme.install_style_sheet_guard(QApplication.instance())
+    again = QFrame()
+    again.setStyleSheet("QFrame { border: none; }")                  # no recursion
+    assert again.testAttribute(Qt.WidgetAttribute.WA_WState_Polished)
+    assert QWidget.setStyleSheet is not theme._set_style_sheet
+    root = pathlib.Path(__file__).resolve().parent.parent
+    banned = re.compile(r"(QApplication|QCoreApplication|\bapp|instance\(\))\.setStyleSheet\("
+                        r"|QtUiTools|loadUiType\(")
+    found = [str(path.relative_to(root)) for path in sorted(root.glob("*.py"))
+             + sorted((root / "nostr").rglob("*.py")) + sorted((root / "spelling").rglob("*.py"))
+             if banned.search(path.read_text(encoding="utf-8"))]
+    assert found == []
+
+
 def test_the_live_flows_draw_as_the_app_does():
     import inspect
     from tests import smoke_ndak_common

@@ -18,7 +18,9 @@ constants.py so there is no second list to keep in sync. Call
 apply_app_theme() once at startup and again on every theme change.
 """
 
-from PySide6.QtCore import QEvent, QObject, QRectF, Qt
+from typing import Optional
+
+from PySide6.QtCore import QRectF, Qt
 from PySide6.QtGui import QColor, QPainter, QPalette, QPen
 from PySide6.QtWidgets import QApplication, QDialogButtonBox, QProxyStyle, QStyle, QWidget
 
@@ -261,43 +263,59 @@ def apply_app_theme(is_dark: bool) -> None:
     app.setPalette(_palette(is_dark))
 
 
-class _StyleSheetGuard(QObject):
-    """Polishes a widget as soon as it is given a style sheet.
+# Qt keeps a widget's parsed style sheet under the widget's address as soon
+# as anything in it is measured, and forgets it when the widget goes only if
+# the widget was polished. A window given a style sheet and dropped without
+# ever being shown (a dialog built and then not needed) left its style sheet
+# behind under its address, and the next window allocated at that address
+# drew with it (review M1: Publish in the Media Library's grey, not the
+# accent). So every widget is polished as soon as it is given a style sheet.
+#
+# The wrapper below covers every call made from Python, which is every call
+# in this app. It cannot see a call Qt makes in C++ (a .ui file loaded with
+# QUiLoader, a style sheet set from C++ code), nor a bound method taken
+# before it was installed; polish_style_sheets covers those, and
+# QApplication.setStyleSheet is not wrapped at all. The app loads no .ui
+# files and sets no application style sheet, and a test keeps it so
+# (tests/test_theme.py).
 
-    Qt keeps a widget's parsed style sheet under the widget's address as
-    soon as anything in it is measured, and forgets it when the widget goes
-    only if the widget was polished. A window given a style sheet and
-    dropped without ever being shown (a dialog built and then not needed)
-    left its style sheet behind under its address, and the next window
-    allocated at that address drew with it (review M1: Publish in the
-    Media Library's grey, not the accent). Polished at once, every widget
-    with a style sheet is forgotten with it."""
-
-    def eventFilter(self, watched, event) -> bool:  # noqa: N802, Qt's name
-        if (event.type() == QEvent.Type.StyleChange and isinstance(watched, QWidget)
-                and not watched.testAttribute(Qt.WidgetAttribute.WA_WState_Polished)
-                and watched.styleSheet()):
-            watched.ensurePolished()
-        return False
+# Qt's own method, also after this module is reloaded (then the method on
+# QWidget is the wrapper already, which keeps the original).
+_set_style_sheet = getattr(QWidget.setStyleSheet, "_qt_set_style_sheet",
+                           QWidget.setStyleSheet)
 
 
-_set_style_sheet = QWidget.setStyleSheet
+def _set_style_sheet_and_polish(self: QWidget, styleSheet: str) -> None:  # noqa: N803
+    """QWidget.setStyleSheet, then the widget polished (see above)."""
+    _set_style_sheet(self, styleSheet)
+    if styleSheet and not self.testAttribute(Qt.WidgetAttribute.WA_WState_Polished):
+        self.ensurePolished()
 
 
-def _set_style_sheet_and_polish(widget: QWidget, sheet: str) -> None:
-    """QWidget.setStyleSheet, then the widget polished (_StyleSheetGuard).
-    Qt sends nothing to a widget given a style sheet while it sits under a
-    styled parent, so the guard's filter cannot see that one: every style
-    sheet the app sets (all from Python) comes through here."""
-    _set_style_sheet(widget, sheet)
-    if sheet and not widget.testAttribute(Qt.WidgetAttribute.WA_WState_Polished):
-        widget.ensurePolished()
+_set_style_sheet_and_polish._qt_set_style_sheet = _set_style_sheet
+
+
+def polish_style_sheets(root: Optional[QWidget] = None) -> None:
+    """Polish every widget with a style sheet that is not polished yet: in
+    ``root`` and under it, or everywhere. For style sheets set past the
+    wrapper (before it was installed, or by Qt itself)."""
+    widgets = ([root, *root.findChildren(QWidget)] if root is not None
+               else QApplication.allWidgets())
+    for widget in widgets:
+        if (widget.styleSheet()
+                and not widget.testAttribute(Qt.WidgetAttribute.WA_WState_Polished)):
+            widget.ensurePolished()
+
+
+def style_sheet_guard_installed() -> bool:
+    """Whether every style sheet set from Python is polished at once."""
+    return getattr(QWidget.setStyleSheet, "_qt_set_style_sheet", None) is not None
 
 
 def install_style_sheet_guard(app: QApplication) -> None:
-    """Install :class:`_StyleSheetGuard` on ``app`` (once), and polish every
-    widget a style sheet is set on from Python."""
-    if getattr(app, "_style_sheet_guard", None) is None:
-        app._style_sheet_guard = _StyleSheetGuard(app)
-        app.installEventFilter(app._style_sheet_guard)
+    """Polish every widget a style sheet is set on from Python, and those
+    given one before (polish_style_sheets). ``app``: the application, which
+    must exist."""
+    if QWidget.setStyleSheet is not _set_style_sheet_and_polish:
         QWidget.setStyleSheet = _set_style_sheet_and_polish
+    polish_style_sheets()

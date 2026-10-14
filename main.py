@@ -116,7 +116,7 @@ def main():
     # startup and on every toggle; see theme.apply_app_theme.
     app.setStyle(theme.AppStyle("Fusion"))
     # Every widget given a style sheet is polished at once, so Qt forgets
-    # its style sheet with it (theme._StyleSheetGuard).
+    # its style sheet with it (theme.install_style_sheet_guard).
     theme.install_style_sheet_guard(app)
 
     # A build proving it is whole (the release workflow runs this on every
