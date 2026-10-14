@@ -450,6 +450,10 @@ def test_two_save_as_to_one_name_keep_both(tmp_path, monkeypatch, server):
     ("com0.png", "com0-.png"),
     ("LPT0.txt.png", "LPT0-.txt.png"),
     ("...", "Video.mp4"),
+    ("invoice\u202egnp.exe", "invoicegnp.exe"),
+    ("a\u202ab\u202cc\u2066d\u2069e\u200ef\u200fg\u061ch\u200bi\ufeff.png", "abcdefghi.png"),
+    ("\u0645\u06cc\u200c\u062e\u0648\u0627\u0647\u0645.png",) * 2,
+    ("\U0001f469\u200d\U0001f4bb.png",) * 2,
 ])
 def test_a_name_is_one_every_system_can_save(tmp_path, monkeypatch, server, name, saved):
     """As a system save dialog would have it: no character Windows refuses,

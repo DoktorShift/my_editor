@@ -42,6 +42,7 @@ from __future__ import annotations
 
 import os
 import re
+import unicodedata
 from typing import Dict, List, Optional
 
 from PySide6.QtCore import (
@@ -1274,12 +1275,21 @@ _DEVICE_NAMES = {"CON", "PRN", "AUX", "NUL", "CONIN$", "CONOUT$",
 _NAME_BYTES = 240
 
 
+# Invisible characters a name keeps: the joiners some scripts and emoji
+# need. Every other format character goes, as it hides text or turns it
+# around ("invoice\u202egnp.exe" shows as "invoiceexe.png").
+_KEPT_FORMAT = {"\u200c", "\u200d"}
+
+
 def _save_name(tile: Tile) -> str:
     """The name a file is saved under: its own, with the extension of
     its kind when it has none, made one every system can save, as a
-    system save dialog would: no character Windows refuses, nothing
-    hidden (a leading dot), no device name, not too long."""
-    name = _UNSAVEABLE.sub("-", tile.name).strip().lstrip(".")
+    system save dialog would: no character Windows refuses, none that
+    hides or reorders what the name shows, nothing hidden (a leading
+    dot), no device name, not too long."""
+    name = "".join(c for c in tile.name
+                   if c in _KEPT_FORMAT or unicodedata.category(c) != "Cf")
+    name = _UNSAVEABLE.sub("-", name).strip().lstrip(".")
     stem, ext = os.path.splitext(name)
     ext = ext.rstrip(". ")
     if len(ext) > 16:                        # not an extension, a long name with a dot
