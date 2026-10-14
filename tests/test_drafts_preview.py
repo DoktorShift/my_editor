@@ -1806,3 +1806,21 @@ def test_dragging_the_full_preview_by_its_header_detaches_it(panel):
     assert detached == [True]
     for window in controller.windows():
         window.close()
+
+
+def test_the_full_preview_is_never_narrower_than_its_commands():
+    """German labels (Veröffentlichen…, Weiter bearbeiten) are longer: the
+    preview grows to show its buttons whole rather than clip them."""
+    from nostr.ui.preview_parts import PreviewAction
+    popover = dp.PreviewPopover(is_dark=True)
+    actions = (PreviewAction("publish", "Veröffentlichen…"),
+               PreviewAction("open", "Weiter bearbeiten eines sehr langen Entwurfs",
+                             primary=True),
+               PreviewAction("delete", "Entwurf löschen", more=True, destructive=True))
+    size = popover.compose(article(), width=200, max_height=900, now=NOW, full=True,
+                           actions=actions)
+    bar = popover.action_bar()
+    assert size.width() >= bar.sizeHint().width()
+    for button in bar.buttons.values():
+        assert button.sizeHint().width() <= size.width()
+    popover.setParent(None)

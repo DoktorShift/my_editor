@@ -1170,6 +1170,9 @@ class PreviewPopover(QWidget):
             else:
                 self._reader.show_note(record.content or "")
             self._bar.set_actions(tuple(actions))
+            # Never narrower than its commands: a longer language's words
+            # (Weiter bearbeiten) are shown whole, not clipped.
+            width = max(width, self._bar.sizeHint().width())
             bar_height = self._bar.sizeHint().height()
             reader_height = self._reader.text_height(width)
         for plan in LADDER:
