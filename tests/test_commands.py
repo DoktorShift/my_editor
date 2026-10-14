@@ -388,14 +388,14 @@ def test_paragraph_styles_use_each_platform_keys(fresh_window):
                 "search.replace": "Ctrl+Alt+F",
                 "insert.link": "Ctrl+K"}),
     ("win32", {"format.strike": "Alt+Shift+5", "format.list.bullet": "Ctrl+Shift+8",
-               "format.list.number": "Ctrl+Shift+7", "format.quote": "",
+               "format.list.number": "Ctrl+Shift+7", "format.quote": "Ctrl+'",
                "format.style.h2": "Ctrl+2", "edit.paste_plain": "Ctrl+Shift+V",
                "search.use_selection": "", "format.reset": "Ctrl+D",
                "search.replace": "Ctrl+H",
                "insert.link": "Ctrl+K"}),
     ("linux", {"format.list.bullet": "Ctrl+Shift+8", "format.list.number": "Ctrl+Shift+7",
                "format.list.task": "Ctrl+Shift+9", "file.page_setup": "",
-               "format.quote": "", "format.strike": "Alt+Shift+5", "format.reset": "Ctrl+D",
+               "format.quote": "Ctrl+'", "format.strike": "Alt+Shift+5", "format.reset": "Ctrl+D",
                "format.style.body": "Ctrl+0"}),
 ])
 def test_each_platform_gets_its_own_conventions(qt_app, monkeypatch, platform, keys):
@@ -408,14 +408,6 @@ def test_each_platform_gets_its_own_conventions(qt_app, monkeypatch, platform, k
         shortcut = win.commands.action(command_id).shortcut()
         assert shortcut.toString(QKeySequence.SequenceFormat.PortableText) == expected, \
             command_id
-
-
-
-def test_imports_is_in_the_nostr_menu_without_a_shortcut(main_window_commands):
-    # No platform has a convention for it, so it gets no shortcut.
-    command = main_window_commands.commands.command("nostr.imports")
-    assert command.shortcut is None
-    assert command.group == "Nostr"
 
 
 

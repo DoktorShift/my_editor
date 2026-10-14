@@ -1818,8 +1818,10 @@ class MainWindow(QMainWindow):
         self.act_print = add(Command("file.print", _("Print\u2026"), FILE,
                                      QKeySequence.StandardKey.Print),
                              triggered=self._on_print)
+        # Ctrl+Shift+O, LibreOffice's Print Preview (offered where the
+        # print panel has no preview of its own: not on a Mac).
         self.act_print_preview = add(Command("file.print_preview", _("Print Preview\u2026"),
-                                             FILE),
+                                             FILE, platform_keys(None, "Ctrl+Shift+O")),
                                      triggered=self._on_print_preview)
         # Knitting renders the on-disk .Rmd through the R toolchain, so the
         # actions only light up for .Rmd tabs (see _update_knit_actions).
@@ -1897,7 +1899,10 @@ class MainWindow(QMainWindow):
                                       platform_keys("Ctrl+Shift+X", "Alt+Shift+5"),
                                       checkable=True, keywords=(_("cross out"),)),
                               triggered=lambda: self._toggle_style(rich_text.STRIKE))
+        # Ctrl+E, Notion's and GitHub's key for it; on a Mac Shift-Command-E,
+        # as Command-E is Use Selection for Find there.
         self.act_code = add(Command("format.code", _("Inline Code"), FORMAT,
+                                    platform_keys("Ctrl+Shift+E", "Ctrl+E"),
                                     checkable=True, keywords=(_("monospace"),)),
                             triggered=lambda: self._toggle_style(rich_text.CODE))
         # Ctrl+D (Command-D), MyEditor 3.3's Reset Format key; Command-\ and
@@ -1945,10 +1950,12 @@ class MainWindow(QMainWindow):
                                          keywords=(_("todo"), _("checkbox"), _("task")),
                                          slash_section=slash_menu.LISTS),
                                  triggered=lambda: self._editor_call("toggle_checklist"))
-        # Mark as Checked: Notes' key on a Mac; none elsewhere (Ctrl+Shift+U
-        # is the Unicode input of Linux desktops).
+        # Mark as Checked: Notes' key on a Mac; Ctrl+Return elsewhere, as in
+        # Notion (Ctrl+Shift+U is the Unicode input of Linux desktops). It
+        # is on only in a checklist, so Ctrl+Return leaves a code block or
+        # a table as before.
         self.act_tick = add(Command("format.list.tick", _("Mark as Checked"), FORMAT,
-                                    platform_keys("Ctrl+Shift+U", None),
+                                    platform_keys("Ctrl+Shift+U", "Ctrl+Return"),
                                     keywords=(_("tick"), _("done"), _("task"))),
                             triggered=self._toggle_ticks)
         # Go to Note and back (footnotes): the keyboard's way to Command-click.
@@ -1961,10 +1968,9 @@ class MainWindow(QMainWindow):
         self.act_outdent = add(Command("format.outdent", _("Decrease Indent"), FORMAT,
                                        "Ctrl+["),
                                triggered=lambda: self._change_indent(-1))
-        # Apple Notes' Block Quote key on a Mac; Word, Google Docs and
-        # LibreOffice have none.
-        self.act_quote = add(Command("format.quote", _("Quote"), FORMAT,
-                                     platform_keys("Ctrl+'", None),
+        # Apple Notes' Block Quote key, and Bear's, on every system (Word,
+        # Google Docs and LibreOffice have none).
+        self.act_quote = add(Command("format.quote", _("Quote"), FORMAT, "Ctrl+'",
                                      checkable=True, keywords=(_("citation"), _("blockquote")),
                                      slash_section=slash_menu.BLOCKS),
                              triggered=lambda: self._editor_call("toggle_quote"))
@@ -1976,14 +1982,18 @@ class MainWindow(QMainWindow):
                                     slash_section=slash_menu.INSERT,
                                     insert_title=_("Link\u2026")),
                             triggered=lambda: self._editor_call("show_link_popover"))
-        self.act_divider = add(Command("insert.divider", _("Divider"), INSERT,
+        # Ctrl+Shift+Minus: no app has a key for a divider; the minus is
+        # the line Markdown draws it with (---).
+        self.act_divider = add(Command("insert.divider", _("Divider"), INSERT, "Ctrl+Shift+-",
                                        keywords=(_("horizontal rule"), _("line"),
                                                  _("separator")),
                                        slash_section=slash_menu.BLOCKS),
                                triggered=lambda: self._editor_call("insert_divider"))
-        # Code Block: no key (Option-Command-C is Copy Style on a Mac). The
-        # language is asked right after, in a short list at the caret.
+        # Code Block: Slack's key, Option-Shift-Command-C on a Mac, and
+        # Ctrl+Shift+C elsewhere (Ctrl+Alt is AltGr there). The language is
+        # asked right after, in a short list at the caret.
         self.act_code_block = add(Command("insert.code_block", _("Code Block"), INSERT,
+                                          platform_keys("Ctrl+Alt+Shift+C", "Ctrl+Shift+C"),
                                           keywords=(_("code"), _("snippet"), _("program"),
                                                     "fence"),
                                           slash_section=slash_menu.BLOCKS),
@@ -2003,18 +2013,26 @@ class MainWindow(QMainWindow):
             self.act_code_languages.append(action)
         # Footnote: its mark at the caret, its note at the end of the
         # document, where the caret goes (literal Markdown, rich_text.py).
-        self.act_footnote = add(Command("insert.footnote", _("Footnote"), INSERT,
+        # Ctrl+Shift+F: the nearest free key to Word's and Google Docs'
+        # (Ctrl+Alt+F, AltGr elsewhere; Option-Command-F is Find and
+        # Replace on a Mac).
+        self.act_footnote = add(Command("insert.footnote", _("Footnote"), INSERT, "Ctrl+Shift+F",
                                         keywords=(_("note"), _("source"), _("reference"),
                                                   _("citation")),
                                         slash_section=slash_menu.INSERT),
                                 triggered=lambda: self._editor_call("insert_footnote"))
         # Image...: a picture file, put in as dropping it at the caret would.
+        # Pages' Insert > Choose… on a Mac (Shift-Command-V); elsewhere,
+        # where Ctrl+Shift+V pastes as plain text and Ctrl+Shift+G finds
+        # the previous match, Ctrl+Shift+E (no app has a key for it).
         self.act_insert_image = add(Command("insert.image", _("Image\u2026"), INSERT,
+                                            platform_keys("Ctrl+Shift+V", "Ctrl+Shift+E"),
                                             keywords=(_("picture"), _("photo")),
                                             slash_section=slash_menu.INSERT),
                                     triggered=self._insert_image)
         # Table...: its size is chosen on a grid at the caret (table_picker).
-        self.act_table = add(Command("insert.table", _("Table\u2026"), INSERT,
+        # Ctrl+F12, LibreOffice's Insert Table (Command-F12 on a Mac).
+        self.act_table = add(Command("insert.table", _("Table\u2026"), INSERT, "Ctrl+F12",
                                      keywords=(_("grid"), _("rows"), _("columns")),
                                      slash_section=slash_menu.BLOCKS),
                              triggered=self._insert_table)
@@ -2192,9 +2210,11 @@ class MainWindow(QMainWindow):
         # Apple's apps; dimmed where the system has no checker.
         self.check_spelling = bool(load_settings().get("check_spelling", True))
         self.spelling_language = str(load_settings().get("spelling_language", "") or "")
+        # Shift+F7, LibreOffice's Automatic Spell Checking; on a Mac
+        # Option-Command-;, beside Apple's spelling key (Command-;).
         self.act_check_spelling = add(
             Command("edit.check_spelling", _("Check Spelling While Typing"), EDIT,
-                    checkable=True, keywords=(_("spelling"), _("spellcheck"))),
+                    platform_keys("Ctrl+Alt+;", "Shift+F7"), checkable=True, keywords=(_("spelling"), _("spellcheck"))),
             toggled=self._set_check_spelling, checked=self.check_spelling)
         self.markdown_shortcuts = bool(load_settings().get("markdown_shortcuts", False))
         # The format bar over text selected with the pointer (Settings).
@@ -2206,19 +2226,27 @@ class MainWindow(QMainWindow):
             toggled=self._set_markdown_shortcuts, checked=self.markdown_shortcuts)
         # Write, Preview and Split: the text, its preview, or both side by
         # side, for every document that holds Markdown (app-wide, like
-        # standup's). No key: no platform has one for it.
+        # standup's). No app has keys for these; numbered in their order,
+        # with Control-Command on a Mac and Ctrl+Shift elsewhere (Command-1
+        # and Alt+1 go to tabs, Option-Command-1 and Ctrl+1 are headings).
         mode = load_settings().get("view_mode", WRITE)
         self.view_mode = mode if mode in preview_pane.MODES else WRITE
         self._view_group = QActionGroup(self)
-        self.act_view_write = add(Command("view.write", _("Write"), VIEW, checkable=True,
+        self.act_view_write = add(Command("view.write", _("Write"), VIEW,
+                                          platform_keys("Meta+Ctrl+1", "Ctrl+Shift+1"),
+                                          checkable=True,
                                           keywords=(_("editor"), _("text"))),
                                   triggered=lambda: self._choose_view(WRITE),
                                   checked=self.view_mode == WRITE)
-        self.act_view_preview = add(Command("view.preview", _("Preview"), VIEW, checkable=True,
+        self.act_view_preview = add(Command("view.preview", _("Preview"), VIEW,
+                                          platform_keys("Meta+Ctrl+2", "Ctrl+Shift+2"),
+                                          checkable=True,
                                             keywords=(_("reading"), _("read"))),
                                     triggered=lambda: self._choose_view(PREVIEW),
                                     checked=self.view_mode == PREVIEW)
-        self.act_view_split = add(Command("view.split", _("Split"), VIEW, checkable=True,
+        self.act_view_split = add(Command("view.split", _("Split"), VIEW,
+                                          platform_keys("Meta+Ctrl+3", "Ctrl+Shift+3"),
+                                          checkable=True,
                                           keywords=(_("side by side"),)),
                                   triggered=lambda: self._choose_view(SPLIT),
                                   checked=self.view_mode == SPLIT)
@@ -2292,15 +2320,17 @@ class MainWindow(QMainWindow):
             triggered=lambda: self._ask_mention(self.current_editor(), -1))
         # A note or an article quoted in the text, as a paragraph of its own.
         self.act_insert_reference = add(
-            Command("nostr.insert_reference", _("Insert Note or Article…"), NOSTR, nostr=True,
+            Command("nostr.insert_reference", _("Insert Note or Article…"), NOSTR,
+                    "Ctrl+Shift+R", nostr=True,
                     keywords=(_("quote"), _("embed"), _("note"), _("article")),
                     slash_section=slash_menu.INSERT, insert_title=_("Note or Article…")),
             triggered=lambda: self._ask_reference(self.current_editor()))
         # Article Details: the inspector beside the document, as in Pages
-        # (View > Inspector, Option-Command-I there; no convention elsewhere).
+        # (View > Inspector, Option-Command-I there); elsewhere Ctrl+F5,
+        # LibreOffice's key for its sidebar.
         self.act_article_details = add(
             Command("nostr.article_details", _("Article Details"), NOSTR,
-                    platform_keys("Ctrl+Alt+I", None), checkable=True, nostr=True,
+                    platform_keys("Ctrl+Alt+I", "Ctrl+F5"), checkable=True, nostr=True,
                     listed_as=_("Show or hide Article Details"),
                     keywords=(_("inspector"), _("title"), _("summary"), _("cover"),
                               _("hashtags"))),
@@ -2309,7 +2339,7 @@ class MainWindow(QMainWindow):
         # as its address, where readers show a player.
         self.act_insert_audio_video = add(
             Command("nostr.insert_audio_video", _("Insert Audio or Video…"), NOSTR,
-                    nostr=True, keywords=(_("audio"), _("video"), _("podcast"), _("music"),
+                    "Ctrl+Shift+J", nostr=True, keywords=(_("audio"), _("video"), _("podcast"), _("music"),
                                           _("film")), slash_section=slash_menu.INSERT,
                     insert_title=_("Audio or Video…")),
             triggered=self._ask_audio_or_video)
@@ -2319,6 +2349,12 @@ class MainWindow(QMainWindow):
             Command("nostr.drafts", _("Drafts"), NOSTR, "Ctrl+Shift+D", checkable=True,
                     nostr=True, listed_as=_("Toggle Drafts panel")),
             triggered=self._on_toggle_drafts_panel)
+        # The panel's other view: what the account published.
+        self.act_nostr_published = add(
+            Command("nostr.published", _("Published"), NOSTR, "Ctrl+Shift+B", nostr=True,
+                    listed_as=_("Show what you published"),
+                    keywords=(_("notes"), _("articles"), _("published"))),
+            triggered=self._on_show_published)
         # The Drafts panel's view reads again (its title follows the view
         # shown). In the menu bar, where every command of the app is listed,
         # and in the panel's action menu; each platform's own key for it.
@@ -2334,10 +2370,10 @@ class MainWindow(QMainWindow):
             Command("nostr.draft_relays", _("Draft Relays…"), NOSTR, nostr=True,
                     keywords=("drafts", "private", "relays")),
             triggered=self._open_draft_relays)
-        # Imports: the window of sources, their posts and the open one. No
-        # shortcut: no platform has a convention for it.
+        # Imports: the window of sources, their posts and the open one.
+        # Ctrl+Shift+N, for the new posts it gathers.
         self.act_nostr_imports = add(
-            Command("nostr.imports", _("Imports\u2026"), NOSTR, nostr=True,
+            Command("nostr.imports", _("Imports\u2026"), NOSTR, "Ctrl+Shift+N", nostr=True,
                     keywords=("rss", "feed", "import", "sources")),
             triggered=self._open_imports_window)
         # Q-7: off until turned on here, or where Imports offers it once.
@@ -2394,8 +2430,9 @@ class MainWindow(QMainWindow):
         # Help
         self.act_welcome = add(Command("help.welcome", _("Welcome"), HELP),
                                triggered=self.show_welcome_tab)
+        # Ctrl+/ (Command-/), the key of Google Docs' and Slack's lists.
         self.act_shortcuts = add(Command("help.shortcuts", _("Keyboard Shortcuts"), HELP,
-                                         keywords=("keys", "cheat sheet")),
+                                         "Ctrl+/", keywords=("keys", "cheat sheet")),
                                  triggered=self._show_shortcuts)
         self.act_install_help = add(Command("help.install", _("Installation Help"), HELP),
                                     triggered=self._open_install_guide)
@@ -2588,6 +2625,7 @@ class MainWindow(QMainWindow):
         m_nostr.addAction(self.act_article_details)
         m_nostr.addSeparator()
         m_nostr.addAction(self.act_nostr_drafts)
+        m_nostr.addAction(self.act_nostr_published)
         m_nostr.addAction(self.act_refresh_drafts)
         m_nostr.addAction(self.act_draft_relays)
         m_nostr.addAction(self.act_nostr_imports)
@@ -7894,9 +7932,23 @@ class MainWindow(QMainWindow):
         """
         if self._drafts_panel is None:
             return
-        if self._drafts_panel.isVisible():
+        panel = self._drafts_panel
+        if panel.isVisible() and panel.current_view() == panel.DRAFTS_VIEW:
             self._hide_drafts_panel()
         else:
+            panel.show_view(panel.DRAFTS_VIEW)
+            self._show_drafts_panel()
+
+    def _on_show_published(self) -> None:
+        """Nostr > Published: the panel on its Published view, or the
+        panel put away when that is what it shows."""
+        panel = self._drafts_panel
+        if panel is None:
+            return
+        if panel.isVisible() and panel.current_view() == PUBLISHED_VIEW:
+            self._hide_drafts_panel()
+        else:
+            panel.show_view(PUBLISHED_VIEW)
             self._show_drafts_panel()
 
     def _show_drafts_panel(self) -> None:
