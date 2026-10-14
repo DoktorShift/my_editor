@@ -116,8 +116,10 @@ class ArticleDetailsPanel(QFrame):
         self.setMaximumWidth(MAX_WIDTH)
         self._is_dark = is_dark
         self._shown = ArticleDetails()
-        # The link name of the article shown, kept letter for letter.
+        # The link name of the article shown, kept letter for letter, and
+        # the one publishing would make when none is typed (a file's).
         self._kept_identifier = ""
+        self._made_identifier = ""
         self._filling = False
         # The details the file writes in a way that is kept as written
         # (article_details.kept_in_file), and the line under each.
@@ -330,14 +332,19 @@ class ArticleDetailsPanel(QFrame):
     # -- showing a tab's article ------------------------------------------------
 
     def show_article(self, details: ArticleDetails, *, fixed_identifier: bool,
-                     kept_in_file: frozenset = frozenset(), document: object = None) -> None:
+                     kept_in_file: frozenset = frozenset(), document: object = None,
+                     made_identifier: str = "") -> None:
         """Show ``details``, the article in the tab in front, without
         handing them back. ``fixed_identifier``: the article has its
         address already (a saved draft, a published article).
         ``kept_in_file``: the details its file writes in a way that stays as
         written (article_details.kept_in_file), shown read-only.
         ``document``: whose article it is, which a cover dropped for it
-        lands on (cover_uploaded) once another is in front."""
+        lands on (cover_uploaded) once another is in front.
+        ``made_identifier``: the link name Publish as Article starts with
+        when none is typed (a file's article: made of the file's name), as
+        the field's placeholder; without it, the one made of the title."""
+        self._made_identifier = made_identifier
         # What the fields hold already (the person's own typing, handed
         # back and shown again) is left as typed: a space at the end of a
         # word being written stays.
@@ -541,10 +548,12 @@ class ArticleDetailsPanel(QFrame):
             self.advanced_toggle.setChecked(True)
 
     def _suggest_identifier(self) -> None:
-        """An empty address shows the one publishing would make of the
-        title, as a placeholder: it follows the title until it is typed."""
+        """An empty address shows the one Publish as Article would start
+        with, as a placeholder: a file's article the one made of the file's
+        name; any other the one made of the title, following it."""
         title = self.title_edit.text().strip()
-        self.identifier_edit.setPlaceholderText(slugify(title) if title else _("my-article"))
+        self.identifier_edit.setPlaceholderText(
+            self._made_identifier or (slugify(title) if title else _("my-article")))
 
     def _say_cover_problem(self, reason: str) -> None:
         announce.field_problem(self.cover.url_edit, self.cover_problem, reason)

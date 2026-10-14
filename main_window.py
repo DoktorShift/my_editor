@@ -6584,9 +6584,14 @@ class MainWindow(QMainWindow):
         else:
             fixed = (binding is not None and binding.inner_kind == INNER_KIND_LONG_FORM) or \
                 self._published_article_of(ed) is not None
-            panel.show_article(self._article_details_of(ed), fixed_identifier=fixed,
+            details = self._article_details_of(ed)
+            # The link name the sheet starts with for a file's article.
+            profile = self._profile_store.default()
+            made = (self._link_name_for_file(self.current_path(), profile.user_pubkey)
+                    if not details.identifier and profile is not None else "")
+            panel.show_article(details, fixed_identifier=fixed,
                                kept_in_file=kept_in_file(getattr(ed, "_front_matter", None)),
-                               document=ed)
+                               document=ed, made_identifier=made)
 
     def _cover_uploaded_for(self, ed, url: str) -> None:
         """A picture dropped in Article Details as the cover of ``ed``'s

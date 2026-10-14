@@ -329,3 +329,21 @@ def test_a_files_link_name_is_made_from_its_name_as_a_title_is(tmp_path):
     assert name_of("") == ""
     record.remember(PK, "Old Post", 1_700_000_000)
     assert name_of("/notes/Old Post.md") == "Old Post"
+
+
+def test_the_link_name_shown_before_one_is_typed_is_the_sheets():
+    """Review round 3: for a file's article Article Details offered the
+    link name made of the title, and Publish as Article the one made of
+    the file's name. Both show the sheet's now."""
+    import inspect
+    from main_window import MainWindow
+    from nostr.ui.article_details_panel import ArticleDetailsPanel
+    panel = ArticleDetailsPanel()
+    panel.show_article(ArticleDetails(title="Hello"), fixed_identifier=False,
+                       made_identifier="grusse-an-alle")
+    assert panel.identifier_edit.placeholderText() == "grusse-an-alle"
+    panel.title_edit.setText("Another title")
+    assert panel.identifier_edit.placeholderText() == "grusse-an-alle"
+    panel.show_article(ArticleDetails(title="Hello"), fixed_identifier=False)
+    assert panel.identifier_edit.placeholderText() == "hello"
+    assert "made_identifier=" in inspect.getsource(MainWindow._fill_article_details_panel)
