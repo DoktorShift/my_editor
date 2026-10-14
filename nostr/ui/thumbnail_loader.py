@@ -380,9 +380,26 @@ _UNKNOWN_SIZE_LIMIT = 1024 * 1024 * 1024
 _FULL_ERRNOS = {errno.ENOSPC, getattr(errno, "EDQUOT", errno.ENOSPC)}
 
 
+# The longest name a folder holds: 255 UTF-16 units on Windows, 255 bytes
+# on macOS and Linux.
+_NAME_LIMIT = 255
+
+
+def _name_too_long(path) -> bool:
+    if not path:
+        return False
+    name = os.path.basename(os.fsdecode(path))
+    if os.name == "nt":
+        return len(name.encode("utf-16-le")) // 2 > _NAME_LIMIT
+    return len(os.fsencode(name)) > _NAME_LIMIT
+
+
 def write_problem(exc: OSError) -> str:
-    """Why a file could not be written, as FileDownload says it."""
-    if exc.errno == errno.ENAMETOOLONG:
+    """Why a file could not be written, as FileDownload says it. Windows
+    has no ENAMETOOLONG for a name too long for the folder (it says the
+    path wasn't found, or the name is invalid), so the name itself says it."""
+    if exc.errno == errno.ENAMETOOLONG or any(
+            _name_too_long(p) for p in (exc.filename, exc.filename2)):
         return "name"
     return "full" if exc.errno in _FULL_ERRNOS else "write"
 

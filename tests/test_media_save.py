@@ -656,6 +656,18 @@ def test_a_name_too_long_for_the_folder_says_so(tmp_path, monkeypatch, server, c
     assert folder(out) == []
 
 
+def test_a_name_too_long_is_told_whatever_error_the_system_gives():
+    """Windows has no ENAMETOOLONG for a name past what a folder holds: it
+    says the path wasn't found or the name is invalid. The name says why."""
+    part = os.path.join("out", ".nnnn.part")
+    target = os.path.join("out", "n" * 300 + ".mp4")
+    for code in (errno.ENOENT, errno.EINVAL):
+        assert thumbnail_loader.write_problem(
+            OSError(code, "error", part, None, target)) == "name"
+    assert thumbnail_loader.write_problem(
+        OSError(errno.EACCES, "denied", os.path.join("out", "a.mp4"))) == "write"
+
+
 # --------------------------------------------------------------------------- #
 # What the saved file is
 # --------------------------------------------------------------------------- #
