@@ -2589,6 +2589,7 @@ class MainWindow(QMainWindow):
             lambda details: self._set_article_details(self.current_editor(), details))
         self._article_details_panel.close_requested.connect(
             lambda: self.act_article_details.setChecked(False))
+        self._article_details_panel.cover_uploaded.connect(self._cover_uploaded_for)
         self._central_splitter.addWidget(self._article_details_panel)
         self._central_splitter.addWidget(self._drafts_panel)
         # Editor takes all stretch; the panels start hidden.
@@ -6584,7 +6585,14 @@ class MainWindow(QMainWindow):
             fixed = (binding is not None and binding.inner_kind == INNER_KIND_LONG_FORM) or \
                 self._published_article_of(ed) is not None
             panel.show_article(self._article_details_of(ed), fixed_identifier=fixed,
-                               kept_in_file=kept_in_file(getattr(ed, "_front_matter", None)))
+                               kept_in_file=kept_in_file(getattr(ed, "_front_matter", None)),
+                               document=ed)
+
+    def _cover_uploaded_for(self, ed, url: str) -> None:
+        """A picture dropped in Article Details as the cover of ``ed``'s
+        article is uploaded, with another tab in front now: ``ed``'s cover."""
+        if ed is not None and shiboken6.isValid(ed):
+            self._set_article_details(ed, self._article_details_of(ed).with_changes(image=url))
 
     def _pick_coauthor(self, anchor, chosen) -> None:
         """Who writes the article with its author, asked under ``anchor`` the

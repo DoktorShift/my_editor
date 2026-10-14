@@ -242,3 +242,47 @@ def test_the_upload_progress_fits_the_well_in_every_language(field, tmp_path, la
                    for line in lines)
     finally:
         i18n.install(i18n.ENGLISH)
+
+
+def test_a_cover_dropped_in_article_details_lands_on_its_own_document(monkeypatch, tmp_path):
+    """Review round 3, low 6: Article Details is one panel for every tab. A
+    picture dropped for tab A, with tab B in front before its upload was
+    done, became B's cover (or, B having a cover of its own, was dropped).
+    The upload belongs to the document it was dropped for, and lands there."""
+    from nostr.article_details import ArticleDetails
+    from nostr.ui.article_details_panel import ArticleDetailsPanel
+    monkeypatch.setattr(cover_field, "ThumbnailLoader", FakeLoader)
+    store = FakeStore()
+    panel = ArticleDetailsPanel(media_store=store)
+    changed, landed = [], []
+    panel.changed.connect(changed.append)
+    panel.cover_uploaded.connect(lambda document, url: landed.append((document, url)))
+    tab_a, tab_b, tab_c = object(), object(), object()
+    url = f"https://blossom.example/{'ef' * 32}.png"
+
+    def show(document, cover=""):
+        panel.show_article(ArticleDetails(title="T", image=cover), fixed_identifier=False,
+                           document=document)
+
+    show(tab_a)
+    panel.cover.drop(str(picture_file(tmp_path)))
+    job = store.uploads[0][1]
+    show(tab_b)                                         # no cover either
+    assert not panel.cover.uploading() and "Uploading" not in panel.cover.preview.text()
+    store.upload_finished.emit(job, MediaFile(hash="ef" * 32, url=url, mime_type="image/png"))
+    assert panel.cover.text() == "" and changed == [] and landed == [(tab_a, url)]
+    show(tab_a)
+    panel.cover.drop(str(picture_file(tmp_path, "b.png")))
+    show(tab_c, "https://cdn.example/c.jpg")            # a cover of its own: kept
+    show(tab_a)                                         # back while it uploads
+    assert panel.cover.uploading() and "Uploading" in panel.cover.preview.text()
+    store.upload_finished.emit(store.uploads[1][1],
+                               MediaFile(hash="ef" * 32, url=url, mime_type="image/png"))
+    assert panel.cover.text() == url and changed[-1].image == url and len(landed) == 1
+
+
+def test_the_window_gives_article_details_the_document_a_cover_lands_on():
+    import inspect
+    from main_window import MainWindow
+    assert "document=ed" in inspect.getsource(MainWindow._fill_article_details_panel)
+    assert "cover_uploaded.connect" in inspect.getsource(MainWindow)

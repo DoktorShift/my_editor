@@ -90,12 +90,19 @@ class _Well(QLabel):
 class CoverImageField(QWidget):
     """The cover (see the module docstring). ``changed(address)`` as it
     changes, ``picture_changed`` when the well's picture comes or goes,
-    and ``problem(reason)`` says why a picture could not become the cover."""
+    and ``problem(reason)`` says why a picture could not become the cover.
+
+    One field can show the covers of several documents in turn (Article
+    Details, for the tab in front): ``set_owner`` says whose it shows. A
+    picture dropped is uploaded for the document it was dropped for; done
+    while another is shown, it comes as ``landed_for(owner, address)``,
+    for that document, instead of becoming the cover shown."""
 
     changed = Signal(str)
     problem = Signal(str)
     picture_changed = Signal()
     uploading_changed = Signal(bool)
+    landed_for = Signal(object, str)
 
     def __init__(self, *, media_store: Optional[MediaStore] = None,
                  media_visibility: Optional[MediaVisibility] = None,
@@ -114,8 +121,11 @@ class CoverImageField(QWidget):
         self._read_only = False
         self._thumb_hash = ""
         self._picture = QPixmap()
-        # The dropped picture being uploaded (its upload's name), if any.
+        # The dropped picture being uploaded (its upload's name), if any,
+        # and the document it was dropped for; the document shown now.
         self._uploading = ""
+        self._upload_owner: object = None
+        self._owner: object = None
         self._loader: Optional[ThumbnailLoader] = (
             ThumbnailLoader(parent=self) if media_store is not None else None)
         if self._loader is not None:
@@ -202,9 +212,30 @@ class CoverImageField(QWidget):
         self.url_edit.setText(text)
 
     def uploading(self) -> bool:
-        """Whether a picture dropped on the well is on its way up: the
-        cover it will be is not there yet."""
-        return bool(self._uploading)
+        """Whether a picture dropped on the well for the document shown is
+        on its way up: the cover it will be is not there yet."""
+        return bool(self._uploading) and self._upload_owner is self._owner
+
+    def set_owner(self, owner: object, cover: Optional[str] = None) -> None:
+        """The field shows ``owner``'s cover now, ``cover`` (None: the
+        address as it is), without a word of change. A picture uploading
+        for another document goes on for that one; one uploading for
+        ``owner`` shows again."""
+        if owner is self._owner:
+            return
+        was = self.uploading()
+        self._owner = owner
+        if cover is not None:
+            self.url_edit.blockSignals(True)
+            self.url_edit.setText(cover)
+            self.url_edit.blockSignals(False)
+        if self.uploading():
+            self.remove_button.setVisible(bool(self.url_edit.text().strip()))
+            self._show_placeholder(_("Uploading…"))
+        else:
+            self._on_url_changed(self.url_edit.text(), quiet=True)
+        if self.uploading() != was:
+            self.uploading_changed.emit(self.uploading())
 
     def picture(self) -> QPixmap:
         """The cover's picture, as large as it was loaded; null when none
@@ -288,18 +319,24 @@ class CoverImageField(QWidget):
         # file of the same name (from the Media Library) is not this one.
         stem, extension = os.path.splitext(os.path.basename(path) or "cover")
         self._uploading = f"{stem}-{uuid.uuid4().hex[:8]}{extension}"
+        self._upload_owner = self._owner
         self._show_placeholder(_("Uploading…"))
         self.uploading_changed.emit(True)
         self._media_store.upload_bytes(public.data, name=self._uploading,
                                        mime_type=public.mime)
 
     def _on_upload_progress(self, name: str, sent: int, total: int) -> None:
-        if self._uploading and name == self._uploading and total > 0:
+        if self.uploading() and name == self._uploading and total > 0:
             percent = min(100, sent * 100 // total)
             self.preview.setText(_("Uploading…\n{percent} %").format(percent=percent))
 
     def _on_uploaded(self, name: str, media: MediaFile) -> None:
         if not self._uploading or name != self._uploading:
+            return
+        if not self.uploading():
+            # Dropped for another document than the one shown: its cover.
+            self._uploading = ""
+            self.landed_for.emit(self._upload_owner, media.url)
             return
         self._uploading = ""
         # Uploaded here, from the picture's own pixels: public by making.
@@ -312,6 +349,9 @@ class CoverImageField(QWidget):
     def _on_upload_failed(self, name: str, reason: str) -> None:
         if not self._uploading or name != self._uploading:
             return
+        if not self.uploading():
+            self._uploading = ""             # another document's: its cover stays
+            return
         self._uploading = ""
         self._on_url_changed(self.url_edit.text(), quiet=True)
         self.uploading_changed.emit(False)
@@ -320,7 +360,7 @@ class CoverImageField(QWidget):
     # -- the well -------------------------------------------------------------
 
     def _on_url_changed(self, text: str, *, quiet: bool = False) -> None:
-        if self._uploading and not quiet:
+        if self.uploading() and not quiet:
             # A cover typed, pasted, picked or removed while a dropped
             # picture uploads: that one is the cover, not the upload.
             self._uploading = ""

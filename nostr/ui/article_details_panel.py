@@ -85,6 +85,9 @@ class ArticleDetailsPanel(QFrame):
 
     changed = Signal(object)
     close_requested = Signal()
+    # (document, address): a picture dropped as the cover of a document no
+    # longer in front is uploaded: that document's cover.
+    cover_uploaded = Signal(object, str)
 
     def __init__(self, *, media_store: Optional[MediaStore] = None,
                  media_visibility: Optional[MediaVisibility] = None,
@@ -192,6 +195,7 @@ class ArticleDetailsPanel(QFrame):
             copy_maker=copy_maker, private_library=private_library, profile=profile,
             is_dark=self._is_dark, stacked=True)
         self.cover.problem.connect(self._say_cover_problem)
+        self.cover.landed_for.connect(self.cover_uploaded)
         form.addSpacing(6)
         form.addWidget(self.cover)
         self.cover_problem = self._problem_label()
@@ -326,18 +330,23 @@ class ArticleDetailsPanel(QFrame):
     # -- showing a tab's article ------------------------------------------------
 
     def show_article(self, details: ArticleDetails, *, fixed_identifier: bool,
-                     kept_in_file: frozenset = frozenset()) -> None:
+                     kept_in_file: frozenset = frozenset(), document: object = None) -> None:
         """Show ``details``, the article in the tab in front, without
         handing them back. ``fixed_identifier``: the article has its
         address already (a saved draft, a published article).
         ``kept_in_file``: the details its file writes in a way that stays as
-        written (article_details.kept_in_file), shown read-only."""
+        written (article_details.kept_in_file), shown read-only.
+        ``document``: whose article it is, which a cover dropped for it
+        lands on (cover_uploaded) once another is in front."""
         # What the fields hold already (the person's own typing, handed
         # back and shown again) is left as typed: a space at the end of a
         # word being written stays.
         typed = self._pages.currentWidget() is self._form and details == self.details()
         self._filling = True
         try:
+            # Another document's cover is shown as it is, and a picture
+            # uploading for the one shown before goes on for that one.
+            self.cover.set_owner(document, details.image)
             self._shown = details
             self._show_kept(kept_in_file)
             if not typed:
@@ -385,6 +394,7 @@ class ArticleDetailsPanel(QFrame):
 
     def show_no_article(self, reason: str) -> None:
         """The tab in front holds no article: ``reason`` instead of fields."""
+        self.cover.set_owner(None)
         self._no_article.setText(reason)
         self._pages.setCurrentWidget(self._no_article)
 
