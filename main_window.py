@@ -56,7 +56,7 @@ import i18n
 from i18n import N_, _, ngettext, pgettext
 from commands import (
     EDIT, FILE, FORMAT, HELP, INSERT, NOSTR, SEARCH, VIEW, WINDOW, Command, CommandRegistry,
-    all_key_texts, platform_keys, redo_words, undo_words,
+    all_key_texts, platform_keys, redo_words, standard_and, undo_words,
 )
 import front_matter
 import tab_details
@@ -1808,7 +1808,10 @@ class MainWindow(QMainWindow):
         # ``_on_save_as_pressed`` for the full decision tree.
         self.act_save_as = add(Command("file.save_as", _("Save As…"), FILE, "Ctrl+Shift+S"),
                                triggered=self._on_save_as_pressed)
-        self.act_page_setup = add(Command("file.page_setup", _("Page Setup…"), FILE),
+        # Shift-Command-P on a Mac, the key Apple's guidelines give Page
+        # Setup (MyEditor 3.3's Publish as Note key moves off it there).
+        self.act_page_setup = add(Command("file.page_setup", _("Page Setup…"), FILE,
+                                          platform_keys("Ctrl+Shift+P", None)),
                                   triggered=self._on_page_setup)
         # Print prints the current tab as formatted pages (see printing.py);
         # both actions dim when the current tab has nothing to print.
@@ -1897,18 +1900,16 @@ class MainWindow(QMainWindow):
         self.act_code = add(Command("format.code", _("Inline Code"), FORMAT,
                                     checkable=True, keywords=(_("monospace"),)),
                             triggered=lambda: self._toggle_style(rich_text.CODE))
-        # Command-\ and Ctrl+\, Google Docs' keys for it (Apple's apps have
-        # none).
+        # Ctrl+D (Command-D), MyEditor 3.3's Reset Format key; Command-\ and
+        # Ctrl+\, Google Docs' keys for it, answer too.
         self.act_reset_format = add(Command("format.reset", _("Clear Formatting"), FORMAT,
-                                            "Ctrl+\\", keywords=(_("plain"),)),
+                                            ("Ctrl+D", "Ctrl+\\"), keywords=(_("plain"),)),
                                     triggered=self._reset_format)
-        # Paragraph styles. Apple Notes' keys on a Mac: Body Shift-Command-B,
-        # Title, Heading and Subheading Shift-Command-T, H and J for
-        # Heading 1 to 3. Ctrl+0 to 3 elsewhere, as in LibreOffice and
-        # Google Docs' numbers, because Ctrl+Alt is AltGr there and types
-        # characters (² and ³ on a German keyboard).
-        mac_style_keys = {0: "Ctrl+Shift+B", 1: "Ctrl+Shift+T", 2: "Ctrl+Shift+H",
-                          3: "Ctrl+Shift+J"}
+        # Paragraph styles. Google Docs' keys on a Mac, Option-Command-0 to 3
+        # (Notes' Shift-Command-T and H are MyEditor 3.3's theme and syntax
+        # keys). Ctrl+0 to 3 elsewhere, as in LibreOffice, because Ctrl+Alt
+        # is AltGr there and types characters (² and ³ on a German keyboard).
+        mac_style_keys = {level: f"Ctrl+Alt+{level}" for level in range(4)}
         self._style_group = QActionGroup(self)
         self._style_group.setExclusionPolicy(QActionGroup.ExclusionPolicy.ExclusiveOptional)
         self.act_styles = []
@@ -1924,23 +1925,22 @@ class MainWindow(QMainWindow):
                          triggered=lambda n=level: self._set_heading(n))
             self._style_group.addAction(action)
             self.act_styles.append(action)
-        # Lists: Apple Notes' keys on a Mac (Shift-Command-7 and 9), Google
-        # Docs' elsewhere (Ctrl+Shift+8 and 7).
+        # Lists: Google Docs' keys on every system (Ctrl+Shift+8 bulleted, 7
+        # numbered, 9 checklist; Shift-Command on a Mac), since Notes'
+        # Checklist key is MyEditor 3.3's Show Line Numbers.
         self.act_bullets = add(Command("format.list.bullet", _("Bulleted List"), FORMAT,
-                                       platform_keys("Ctrl+Shift+7", "Ctrl+Shift+8"),
+                                       "Ctrl+Shift+8",
                                        checkable=True, keywords=(_("bullets"), _("list")),
                                        slash_section=slash_menu.LISTS),
                                triggered=lambda: self._toggle_list(rich_text.BULLET))
         self.act_numbers = add(Command("format.list.number", _("Numbered List"), FORMAT,
-                                       platform_keys("Ctrl+Shift+9", "Ctrl+Shift+7"),
+                                       "Ctrl+Shift+7",
                                        checkable=True,
                                        keywords=(_("numbers"), _("list"), _("ordered")),
                                        slash_section=slash_menu.LISTS),
                                triggered=lambda: self._toggle_list(rich_text.NUMBER))
-        # Checklist: Apple Notes' key on a Mac (Shift-Command-L), Google
-        # Docs' elsewhere (Ctrl+Shift+9).
         self.act_checklist = add(Command("format.list.task", _("Checklist"), FORMAT,
-                                         platform_keys("Ctrl+Shift+L", "Ctrl+Shift+9"),
+                                         "Ctrl+Shift+9",
                                          checkable=True,
                                          keywords=(_("todo"), _("checkbox"), _("task")),
                                          slash_section=slash_menu.LISTS),
@@ -2043,7 +2043,8 @@ class MainWindow(QMainWindow):
                                     triggered=lambda: self._apply_color(None))
 
         # Find, in the Edit menu. Find Next and Find Previous use each
-        # platform's own keys (Command-G on a Mac, F3 on Windows).
+        # platform's own keys (Command-G on a Mac, F3 on Windows), and F3
+        # and Shift+F3 on every system, as MyEditor 3.3 had them.
         self.act_find = add(Command("search.find", _("Find\u2026"), SEARCH, "Ctrl+F",
                                     listed_as=_("Find")),
                             triggered=lambda: self._show_find(replace=False))
@@ -2055,11 +2056,12 @@ class MainWindow(QMainWindow):
                                        listed_as=_("Find and replace")),
                                triggered=lambda: self._show_find(replace=True))
         self.act_find_next = add(Command("search.next", _("Find Next"), SEARCH,
-                                         QKeySequence.StandardKey.FindNext,
+                                         standard_and(QKeySequence.StandardKey.FindNext, "F3"),
                                          listed_as=_("Find next")),
                                  triggered=self._find_next)
         self.act_find_prev = add(Command("search.previous", _("Find Previous"), SEARCH,
-                                         QKeySequence.StandardKey.FindPrevious,
+                                         standard_and(QKeySequence.StandardKey.FindPrevious,
+                                                      "Shift+F3"),
                                          listed_as=_("Find previous")),
                                  triggered=self._find_prev)
         # Command-E on a Mac: the selection becomes what Find Next looks for.
@@ -2100,11 +2102,10 @@ class MainWindow(QMainWindow):
         self._current_match_index = -1
         self._last_search_text = ""
 
-        # Appearance, line numbers and syntax highlighting: menu items
-        # without keys, since no platform convention gives them one (their
-        # old keys were this app's own; Shift-Command-L is Notes' Checklist).
         # Appearance is the system's (followed as it changes) unless Light
-        # or Dark is chosen; Automatic goes back to the system's.
+        # or Dark is chosen; Automatic goes back to the system's. Switching
+        # between light and dark, line numbers and syntax highlighting keep
+        # MyEditor 3.3's keys: Ctrl+Shift+T, L and H.
         self._appearance_group = QActionGroup(self)
         self._appearance_group.setExclusive(True)
         self.act_appearance = {}
@@ -2117,13 +2118,21 @@ class MainWindow(QMainWindow):
                          checked=self.appearance == mode)
             self._appearance_group.addAction(action)
             self.act_appearance[mode] = action
+        # Named for what it does next, as Show Toolbar is.
+        self.act_switch_appearance = add(
+            Command("view.appearance.switch", _("Switch to Dark Appearance"), VIEW,
+                    "Ctrl+Shift+T", listed_as=_("Switch between light and dark"),
+                    keywords=(_("appearance"), _("theme"), "dark", "light")),
+            triggered=self._switch_appearance)
+        if isinstance(self.__dict__.get("is_dark_theme"), bool) and self.is_dark_theme:
+            self.act_switch_appearance.setText(_("Switch to Light Appearance"))
         self.act_toggle_line_numbers = add(
-            Command("view.line_numbers", _("Show Line Numbers"), VIEW,
+            Command("view.line_numbers", _("Show Line Numbers"), VIEW, "Ctrl+Shift+L",
                     checkable=True, listed_as=_("Toggle line numbers")),
             triggered=self._toggle_line_numbers)
         self.act_toggle_syntax_hl = add(
             Command("view.syntax_highlighting", _("Syntax Highlighting"), VIEW,
-                    checkable=True, listed_as=_("Toggle syntax highlighting")),
+                    "Ctrl+Shift+H", checkable=True, listed_as=_("Toggle syntax highlighting")),
             triggered=self._toggle_syntax_highlighting, checked=False)
 
         # View menu: background viewing aids. All four toggles are independent
@@ -2248,28 +2257,29 @@ class MainWindow(QMainWindow):
 
         # Nostr. Only the ones that need an account are marked: Create
         # Account, Connect Signer, Restore and the membership window are
-        # how a person starts using Nostr. No keys: no platform has a
-        # convention for them (Shift-Command-P is Page Setup in Apple's
-        # apps), and keys are not invented (decision Q-A).
+        # how a person starts using Nostr. MyEditor 3.3's Ctrl+Shift family
+        # (P, A, M, I, D); on a Mac Publish as Note is Option-Command-P, as
+        # Shift-Command-P is Page Setup there.
         self.act_nostr_publish_note = add(
             Command("nostr.publish_note", _("Publish as Note…"), NOSTR,
+                    platform_keys("Ctrl+Alt+P", "Ctrl+Shift+P"),
                     nostr=True, listed_as=_("Publish as note"), keywords=("post", "kind 1")),
             triggered=self._on_nostr_publish_note)
         self.act_nostr_publish_article = add(
             Command("nostr.publish_article", _("Publish as Article…"), NOSTR,
-                    nostr=True, listed_as=_("Publish as article"), keywords=("long", "blog")),
+                    "Ctrl+Shift+A", nostr=True, listed_as=_("Publish as article"), keywords=("long", "blog")),
             triggered=self._on_nostr_publish_article)
         # Media (Blossom) - browse the user's uploaded blobs, upload new
         # ones, or insert one into the current document at the cursor.
         self.act_nostr_media = add(
             Command("nostr.media_library", _("Media Library…"), NOSTR,
-                    nostr=True, listed_as=_("Media library"), keywords=("images", "upload")),
+                    "Ctrl+Shift+M", nostr=True, listed_as=_("Media library"), keywords=("images", "upload")),
             triggered=self._on_nostr_media_library)
         # A file of the media library, already on the media servers: not
         # Insert > Image..., which puts in a file from the computer.
         self.act_nostr_insert_image = add(
             Command("nostr.insert_image", _("Insert Image from Media Library…"), NOSTR,
-                    nostr=True, listed_as=_("Insert image from media library"),
+                    "Ctrl+Shift+I", nostr=True, listed_as=_("Insert image from media library"),
                     keywords=(_("picture"), _("photo"), _("image")),
                     slash_section=slash_menu.INSERT,
                     insert_title=_("Image from Media Library…")),
@@ -2304,9 +2314,9 @@ class MainWindow(QMainWindow):
                     insert_title=_("Audio or Video…")),
             triggered=self._ask_audio_or_video)
         # Drafts surface - the side-docked panel, toggled from the Nostr
-        # menu (no key, as above).
+        # menu or with MyEditor 3.3's Ctrl+Shift+D.
         self.act_nostr_drafts = add(
-            Command("nostr.drafts", _("Drafts"), NOSTR, checkable=True,
+            Command("nostr.drafts", _("Drafts"), NOSTR, "Ctrl+Shift+D", checkable=True,
                     nostr=True, listed_as=_("Toggle Drafts panel")),
             triggered=self._on_toggle_drafts_panel)
         # The Drafts panel's view reads again (its title follows the view
@@ -2539,6 +2549,8 @@ class MainWindow(QMainWindow):
         self.m_appearance = m_view.addMenu(_("Appearance"))
         for action in self.act_appearance.values():
             self.m_appearance.addAction(action)
+        self.m_appearance.addSeparator()
+        self.m_appearance.addAction(self.act_switch_appearance)
         m_view.addAction(self.act_toggle_line_numbers)
         m_view.addAction(self.act_toggle_syntax_hl)
         m_view.addSeparator()
@@ -5607,6 +5619,11 @@ class MainWindow(QMainWindow):
             self._set_theme(is_dark)
         self.act_appearance[mode].setChecked(True)
 
+    def _switch_appearance(self) -> None:
+        """View > Appearance > Switch to Dark (or Light) Appearance: the
+        other of the two, chosen and kept, from Automatic too."""
+        self.set_appearance("light" if self.is_dark_theme else "dark")
+
     def _set_theme(self, is_dark: bool):
         """Apply is_dark to every theme-aware widget in the window.
 
@@ -5616,6 +5633,9 @@ class MainWindow(QMainWindow):
         said about it.
         """
         self.is_dark_theme = is_dark
+        if hasattr(self, "act_switch_appearance"):
+            self.act_switch_appearance.setText(
+                _("Switch to Light Appearance") if is_dark else _("Switch to Dark Appearance"))
         self._apply_theme()
         if hasattr(self, 'findbar'):
             self.findbar.is_dark = self.is_dark_theme

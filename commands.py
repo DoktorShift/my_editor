@@ -109,6 +109,14 @@ def platform_keys(mac: ShortcutSpec, other: ShortcutSpec, *,
     return mac if (platform or sys.platform) == "darwin" else other
 
 
+def standard_and(standard: QKeySequence.StandardKey, *keys: str) -> Tuple[str, ...]:
+    """Every key the system binds to ``standard``, then ``keys`` where the
+    system's list lacks them (F3 for Find Next on a Mac, as MyEditor 3.3
+    had it everywhere). Menus show the system's first key."""
+    texts = all_key_texts(standard)
+    return tuple(texts) + tuple(k for k in keys if k not in texts)
+
+
 def all_key_texts(shortcut: ShortcutSpec) -> List[str]:
     """Every key combination a shortcut answers to: a standard key (Copy,
     Find Next) has the platform's whole set, anything else one."""

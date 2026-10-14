@@ -237,6 +237,7 @@ class MediaLibraryDialog(QDialog):
         self._grid.quick_look_requested.connect(self._toggle_quick_look)
         self._grid.delete_requested.connect(self._delete)
         self._grid.copy_requested.connect(self._copy_links)
+        self._grid.save_requested.connect(self._save_as)
         self._grid.paste_requested.connect(self._paste)
         self._grid.files_dropped.connect(self._add_paths)
         self._grid.cancel_requested.connect(self._cancel_upload)

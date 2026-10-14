@@ -46,6 +46,7 @@ import theme
 from atomic_file import read_json, write_json
 from i18n import _, ngettext
 from url_safety import is_safe_external_url
+from commands import standard_and
 from widgets import FindBar
 
 _POSITIONS_PATH = os.path.expanduser("~/.config/my_editor/pdf_positions.json")
@@ -176,6 +177,53 @@ def _with_keys(words: str, keys: QKeySequence) -> str:
     told to press Ctrl."""
     text = keys.toString(QKeySequence.SequenceFormat.NativeText)
     return _("{command} ({keys})").format(command=words, keys=text) if text else words
+
+
+# The reader's own keys, in the order Help > Keyboard Shortcuts lists them:
+# (section, words, what it does to the tab, keys that work anywhere in the
+# tab, keys that work on the page only). Keys with Ctrl work in the find
+# field too; bare keys (a space, a letter, Home) only on the page, so the
+# find field and the page box still type them. J, K, N, P and G are
+# SumatraPDF's; Ctrl+0, 1 and 2 SumatraPDF's zoom keys, as in MyEditor 3.3.
+# Find (Ctrl+F) and Copy (Ctrl+C) are the window's Edit commands, which
+# act on the reader in a PDF tab; they are listed, not bound, here.
+MOVE, ZOOM, FIND = "Move Around", "Zoom", "Find and Copy"
+
+
+def reader_keys():
+    """The table above, its words in the reader's language."""
+    return (
+        (MOVE, _("Next screenful"), lambda tab: tab._scroll_page(+1), (), ("Space",)),
+        (MOVE, _("Previous screenful"), lambda tab: tab._scroll_page(-1), (), ("Shift+Space",)),
+        (MOVE, _("Next page"), lambda tab: tab.next_page(), (), ("N",)),
+        (MOVE, _("Previous page"), lambda tab: tab.prev_page(), (), ("P",)),
+        (MOVE, _("Scroll down"), lambda tab: tab._scroll_lines(+1), (), ("J",)),
+        (MOVE, _("Scroll up"), lambda tab: tab._scroll_lines(-1), (), ("K",)),
+        (MOVE, _("First page"), lambda tab: tab.jump_to_page(0), (), ("Home",)),
+        (MOVE, _("Last page"),
+         lambda tab: tab.jump_to_page(tab.document.pageCount() - 1), (), ("End",)),
+        (MOVE, _("Go to page"), lambda tab: tab._focus_page_box(), (), ("G",)),
+        (MOVE, _("Show or hide the table of contents"), lambda tab: tab.toggle_outline(),
+         ("F12",), ()),
+        (ZOOM, _("Zoom in"), lambda tab: tab.zoom_in(),
+         standard_and(QKeySequence.StandardKey.ZoomIn, "Ctrl+="), ("+",)),
+        (ZOOM, _("Zoom out"), lambda tab: tab.zoom_out(),
+         standard_and(QKeySequence.StandardKey.ZoomOut), ("-",)),
+        (ZOOM, _("Fit page width"), lambda tab: tab.fit_width(), ("Ctrl+0",), ()),
+        (ZOOM, _("Actual size"), lambda tab: tab.actual_size(), ("Ctrl+1",), ()),
+        (ZOOM, _("Fit whole page"), lambda tab: tab.fit_page(), ("Ctrl+2",), ()),
+        (FIND, _("Find in PDF"), None, ("Ctrl+F",), ()),
+        (FIND, _("Copy selected text"), None, standard_and(QKeySequence.StandardKey.Copy), ()),
+        (FIND, _("Clear selection"), lambda tab: tab.view.clear_selection(), (), ("Esc",)),
+    )
+
+
+def _reader_key(words: str) -> QKeySequence:
+    """The first key of the reader's command ``words``, for its tooltip."""
+    for _section, name, _act, tab_keys, view_keys in reader_keys():
+        if name == words:
+            return QKeySequence((tab_keys + view_keys)[0])
+    return QKeySequence()
 
 
 # Painted over selected text. Pages always render white (see module
@@ -601,7 +649,8 @@ class PdfViewerTab(QWidget):
 
         self._outline_btn = QToolButton()
         self._outline_btn.setText(_("Contents"))
-        self._outline_btn.setToolTip(_with_keys(_("Table of contents"), QKeySequence(Qt.Key_F12)))
+        self._outline_btn.setToolTip(_with_keys(
+            _("Table of contents"), _reader_key(_("Show or hide the table of contents"))))
         self._outline_btn.setCheckable(True)
         self._outline_btn.setEnabled(False)
         self._outline_btn.clicked.connect(self.toggle_outline)
@@ -651,55 +700,34 @@ class PdfViewerTab(QWidget):
 
         self._fit_width_btn = QToolButton()
         self._fit_width_btn.setText(_("Fit Width"))
-        self._fit_width_btn.setToolTip(_with_keys(_("Fit page width"), QKeySequence("Ctrl+0")))
+        self._fit_width_btn.setToolTip(_with_keys(_("Fit page width"),
+                                                  _reader_key(_("Fit page width"))))
         self._fit_width_btn.setCheckable(True)
         self._fit_width_btn.setChecked(True)
-        self._fit_width_btn.clicked.connect(lambda: self._set_zoom_mode(QPdfView.ZoomMode.FitToWidth))
+        self._fit_width_btn.clicked.connect(self.fit_width)
         bar.addWidget(self._fit_width_btn)
 
         self._fit_page_btn = QToolButton()
         self._fit_page_btn.setText(_("Fit Page"))
-        self._fit_page_btn.setToolTip(_with_keys(_("Fit whole page"), QKeySequence("Ctrl+2")))
+        self._fit_page_btn.setToolTip(_with_keys(_("Fit whole page"),
+                                                 _reader_key(_("Fit whole page"))))
         self._fit_page_btn.setCheckable(True)
-        self._fit_page_btn.clicked.connect(lambda: self._set_zoom_mode(QPdfView.ZoomMode.FitInView))
+        self._fit_page_btn.clicked.connect(self.fit_page)
         bar.addWidget(self._fit_page_btn)
 
     def _build_shortcuts(self):
-        # Ctrl combos work anywhere inside the tab, including while the
-        # find bar's edit has focus.
-        for keys, handler in (
-            (QKeySequence.ZoomIn, self.zoom_in),
-            (QKeySequence("Ctrl+="), self.zoom_in),
-            (QKeySequence.ZoomOut, self.zoom_out),
-            (QKeySequence("Ctrl+0"), lambda: self._set_zoom_mode(QPdfView.ZoomMode.FitToWidth)),
-            (QKeySequence("Ctrl+1"), self.actual_size),
-            (QKeySequence("Ctrl+2"), lambda: self._set_zoom_mode(QPdfView.ZoomMode.FitInView)),
-            (QKeySequence(Qt.Key_F12), self.toggle_outline),
-        ):
-            sc = QShortcut(keys, self)
-            sc.setContext(Qt.WidgetWithChildrenShortcut)
-            sc.activated.connect(handler)
-
-        # Bare reading keys bind to the view only, so typing a space, a
-        # letter, or pressing Home in the find bar's edit still edits
-        # text there. j/k/n/p/g mirror SumatraPDF's vim-style bindings.
-        for keys, handler in (
-            (QKeySequence(Qt.Key_Space), lambda: self._scroll_page(+1)),
-            (QKeySequence(Qt.SHIFT | Qt.Key_Space), lambda: self._scroll_page(-1)),
-            (QKeySequence(Qt.Key_Home), lambda: self.jump_to_page(0)),
-            (QKeySequence(Qt.Key_End), lambda: self.jump_to_page(self.document.pageCount() - 1)),
-            (QKeySequence(Qt.Key_J), lambda: self._scroll_lines(+1)),
-            (QKeySequence(Qt.Key_K), lambda: self._scroll_lines(-1)),
-            (QKeySequence(Qt.Key_N), self.next_page),
-            (QKeySequence(Qt.Key_P), self.prev_page),
-            (QKeySequence(Qt.Key_Plus), self.zoom_in),
-            (QKeySequence(Qt.Key_Minus), self.zoom_out),
-            (QKeySequence(Qt.Key_G), self._focus_page_box),
-            (QKeySequence(Qt.Key_Escape), self.view.clear_selection),
-        ):
-            sc = QShortcut(keys, self.view)
-            sc.setContext(Qt.WidgetShortcut)
-            sc.activated.connect(handler)
+        """The reader's keys (reader_keys): keys with Ctrl anywhere in the
+        tab, including while the find bar's field has focus; bare keys on
+        the page only, so typing a space or a letter in a field types it."""
+        for _section, _words, act, tab_keys, view_keys in reader_keys():
+            if act is None:
+                continue
+            for keys, widget, context in ((tab_keys, self, Qt.WidgetWithChildrenShortcut),
+                                          (view_keys, self.view, Qt.WidgetShortcut)):
+                for text in keys:
+                    shortcut = QShortcut(QKeySequence(text), widget)
+                    shortcut.setContext(context)
+                    shortcut.activated.connect(lambda act=act: act(self))
 
     # -- loading -----------------------------------------------------------
 
@@ -910,6 +938,12 @@ class PdfViewerTab(QWidget):
         self._fit_width_btn.setChecked(mode == QPdfView.ZoomMode.FitToWidth)
         self._fit_page_btn.setChecked(mode == QPdfView.ZoomMode.FitInView)
         self._update_zoom_label()
+
+    def fit_width(self):
+        self._set_zoom_mode(QPdfView.ZoomMode.FitToWidth)
+
+    def fit_page(self):
+        self._set_zoom_mode(QPdfView.ZoomMode.FitInView)
 
     def zoom_in(self):
         self._apply_custom_zoom(self.view.zoomFactor() * _ZOOM_STEP)
