@@ -159,40 +159,47 @@ If your signer (Amber, nsec.app) times out a decrypt approval or you dismiss the
 
 ## Media library (Blossom)
 
-Upload images, video, and audio to your own Blossom servers, browse them in a built-in library, and drop them into notes and articles. All uploads are authorised by a kind 24242 event signed through your existing signer; no separate API key, no third-party account.
+Keep images, video, audio and PDFs on your own Blossom media servers, browse them in a library that works like a Finder window or Photos, and put them into notes and articles. Every upload is authorised by a kind 24242 event your signer signs; no separate API key, no third-party account.
 
-### Capabilities
+### The library
 
-- **Library dialog** (`Nostr > Media Library…`): sortable, filterable grid of every blob your pubkey hosts on the configured servers. Per-file: preview, copy URL, download, open in browser, delete (across all mirrors).
-- **Upload** four ways: the **Upload** button, drag a file onto the drop zone, **paste** an image with `Ctrl+V` while the grid has focus, or drag an image onto the editor itself.
-- **Insert into notes** (`Nostr > Insert Image from Media Library…`, also in the Insert menu while an account is in use, as `Insert > Image from Media Library…`): pick from the library (a picture from your computer is `Insert > Image…`); alt text is offered inline. Markdown tabs get `![alt](url)`; rich-text tabs embed the cached image. Pasted screenshots auto-upload and auto-insert at the cursor.
-- **Hero image for articles**: the Publish Article dialog has a *Cover image* row with a built-in picker; selected images upload to Blossom in the same flow.
-- **Mirroring by default**: every upload is mirrored to all configured servers in parallel. Deletes fan out across every server the blob lives on; success on one is treated as success.
-- **Dedupe by sha256**: the same file across N servers shows up as one entry; the tile shows a *Nx* badge so you know how widely it's mirrored.
-- **Preview lightbox**: 1024 x 720, keyboard nav, shows dimensions, size, mime type, and mirror count alongside Copy URL / Download / Open in browser.
+`Nostr > Media Library…` opens it; `Nostr > Insert Image from Media Library…` (in the Insert menu as `Insert > Image from Media Library…` while an account is in use; a picture from your computer is `Insert > Image…`) and an article's cover open the same window to pick a file.
 
-### Default servers
+- **Toolbar**: **Add…** (the system's file dialog; several files at once), the kind of file to show (All Items, Images, Videos, Audio), the order (newest, oldest, largest, smallest, name), a search field for names (`Cmd+F`), and an action menu (⋯) with the selected files' commands, **Refresh** and **Media Servers…**.
+- **Grid**: square thumbnails that scroll (no pages; pictures load as they come into view), each with its name and the day it was added. Media servers keep no file names, so the library remembers the name a file had when it was added here (`~/.config/my_editor/media_names.json`); a file added elsewhere shows the day it was added.
+- **Commands**, in the context menu and the action menu alike: **Insert** (when picking), **Quick Look**, **Copy Link**, **Open in Browser**, **Save As…** (several files: **Save to Folder…**), **Stop Sharing** (see below) and **Delete**, which asks first. Keys as in the Finder: arrows move, `Space` is Quick Look (it follows the selection, so the arrows page through it), `Return` or a double-click inserts when picking and otherwise opens Quick Look, `Delete` or `Cmd+Backspace` deletes, `Cmd+C` copies the links, `Cmd+V` adds a pasted image.
+- **Adding**: Add…, files dragged onto the grid, or a pasted image. A file being added is a tile of its own, dimmed under a ring that fills as it uploads; the × in the ring cancels while the file is on its way. A file that did not upload says why under it (no connection, your signer app did not approve, the file is larger than your servers take, no space left), with **Retry** on it. Closing the window doesn't stop an upload; one that fails after it closed is counted in the status bar of the main window ("3 files weren’t added to your Media Library.", each reason in its tooltip) with **Open Media Library**, until the library is opened.
+- **Dragging out**: a tile dragged onto a document is inserted there, as Insert Image from Media Library would insert it.
+- **Saving**: Save As… downloads the file (a private one is saved as the file, not encrypted), checked against its hash before it takes its name, with progress and Stop at the foot of the window. Several files (Save to Folder…) are saved one after another; a file of the same name in the folder stays, and the new one is numbered as the Finder numbers a copy ("May 23, 2026 2.png"). One that didn't save every file says so at its end ("Saved 2 of 3 files. …"), with each reason in the tooltip. Closing the window doesn't stop a save, as in the Finder: the status bar of the main window says it is saving, and then that it is saved or why it wasn't. Quitting MyEditor while a file is still being saved asks first, in the same question as uploads still running; Quit Anyway stops it, and nothing half-saved is left in the folder.
+- **Storage**: when a server gives you an allowance (the members' server), one line at the foot of the window says how much is used ("1.2 GB of 5 GB used", "Almost full" from 90 percent). When it is not known, nothing is shown.
 
-Two operators, chosen for vendor diversity and a published per-file cap:
+### Who can see a file
 
-| URL | Free cap | Notes |
+Everything MyEditor uploads can be opened by anyone who has its link: a media server serves a file to whoever asks for its address. That is the normal case, so no tile is marked for it; the library says it once, in the quiet line at its foot ("Anyone with the link can see the files you add here."), and the questions before a pasted or dropped image is uploaded say it too. The exception is marked: files kept privately (encrypted, in the kind 34578 library other apps such as Lotus write) carry a small lock in the corner of their thumbnail ("Only you can see this"); MyEditor shows their pictures by opening them in memory, never on disk.
+
+Inserting a private image, or choosing it as a cover, asks first ("Share “beach.jpg”? Anyone with the link will be able to see it. Camera and location details are removed first."). Sharing makes a separate public copy without camera and location details: a JPEG, PNG, WebP or BMP is re-encoded from its pixels, and a GIF keeps its frames, their timing and its loop as they are, and loses every other block (comments, application blocks such as XMP, text, anything unknown). Other kinds (HEIC, AVIF, video, audio, PDF) cannot be cleaned here yet, so a private file of those kinds is not offered for sharing, and the picker says why; the private original stays as it is, and the library shows the two as one tile, without the lock while the copy is out there. **Stop Sharing** deletes the public copy, after asking, from every server it was put on (also one since removed from Media Servers), and asks every server in use too, in case it is there unrecorded; while a server it is on cannot be reached, the image stays shared and the library says so (a server in use that never had it doesn't count); deleting the original deletes its copy too. While the private files are still being checked, or could not be checked (your signer app did not answer), the picker does not insert a file it cannot vouch for and says so under the grid, with **Try Again**.
+
+### Media servers
+
+**Media Servers…** (in the library's action menu) lists your servers in the order uploads use them: new files go to the first, the others keep copies. **Make Primary**, **Remove** (after asking; files already there stay there) and **Add Server** (by its address) change the list, which is saved in `~/.config/my_editor/blossom_servers.json`. The servers your Nostr account lists (its kind 10063 list) and MyEditor does not use yet are offered there; on a first run with nothing set up, that list is used as it is. **Share with Other Apps…** publishes your list as your account's kind 10063, after asking, so other Nostr apps find your files.
+
+The defaults, chosen for two independent operators with a published per-file limit:
+
+| URL | Per file | |
 |---|---|---|
-| `https://nostr.download` | 100 MiB | Primary (uploads land here first) |
-| `https://blossom.primal.net` | ~100 MiB (unpublished) | Mirror |
+| `https://nostr.download` | 100 MiB | first |
+| `https://blossom.primal.net` | about 100 MiB (unpublished) | copies |
 
-The list lives in `~/.config/my_editor/blossom_servers.json`. Edit the file to add custom servers; an empty `custom` list falls back to the defaults. (A Settings dialog for in-app management is planned.)
+**EINUNDZWANZIG members** also get the members' server, `https://blossom.einundzwanzig.space` (1 GiB per file, 5 GiB per member), while the membership is active. It is listed in Media Servers under the association's name, its files appear in the library even when another app uploaded them, and its storage line is the one at the foot of the library.
 
-**EINUNDZWANZIG members** also get the members' server, `https://blossom.einundzwanzig.space` (1 GiB per file, 5 GiB per member), added while the membership is active. Its files show up in the library even when another app uploaded them. **Show files from** narrows the grid to one server, and a storage meter shows how much of the members' space is used. Deleting a file the library can't confirm is public asks first.
-
-### Upload sizing
-
-The planner checks each configured server's documented per-file limit before sending. If your primary can't take the file but a mirror can, the upload is **rerouted** to the mirror automatically and the status line shows a short note (`blossom.band can't take this file, routing to nostr.download instead`). Each server's own published limit decides: 100 MiB on the defaults, 1 GiB on the members' server.
+What happens across servers stays in the background: an upload goes to the first server that can take the file (each server's published limit decides, before anything is sent) and is then copied to the others one at a time, through BUD-04 mirroring or, where a server cannot mirror, a direct upload; a server whose allowance is full is left out. When a server does not keep a copy, the library says so once, when the file is added. A delete goes to every server the file is on; when one cannot be reached, the file stays in the library, saying it is still on one of your servers, until a later Delete reaches it.
 
 ### Security model
 
 - **No separate credential.** Every privileged Blossom request carries an `Authorization: Nostr <base64(signed event)>` header where the event is a kind 24242 you signed via NIP-46. Your signer prompts you to approve the first upload / list call in a session.
 - **No CORS proxy.** Requests go straight from the desktop app to the Blossom servers.
-- **Content-addressed cache.** Thumbnails and previewed bytes are cached at `~/.config/my_editor/blossom_cache/<sha256>` and verified against the hash before use.
+- **Content-addressed cache.** Thumbnails and previewed bytes are cached at `~/.config/my_editor/blossom_cache/<sha256>` and verified against the hash before use; a file loaded by an address that names its hash (the last 64-hex run, BUD-03) is refused when the bytes are another file.
+- **Your own copy on each server.** A server that already has the bytes (someone else uploaded them) still gets the upload, so the file is in your own listing, yours to delete, and does not vanish when the other owner deletes theirs. Only a server your own fresh listing shows holding the file is skipped.
 
 ---
 

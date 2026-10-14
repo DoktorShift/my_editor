@@ -20,10 +20,15 @@ format outside it, an SVG that could pull in external resources, or a
 header claiming an implausible size is refused here too rather than
 being re-encoded into something that looks trustworthy.
 
-Animated GIFs are passed through untouched. Re-encoding one through a
-still-image decoder would silently reduce it to its first frame, and
-GIF is not a format that carries location or camera metadata, so the
-trade runs the wrong way.
+A GIF is not re-encoded: a still-image decoder would silently reduce an
+animation to its first frame. GIF does carry text a person cannot see,
+though: comment blocks, and application blocks such as XMP, which can
+hold a location. Those are cut out of the file, and every frame (with
+its timing and the loop) is kept byte for byte.
+
+``can_scrub`` says which kinds of file this module can make safe, so the
+question before a private file is shared promises the removal only for
+those, and the others are not offered for sharing at all.
 """
 
 from __future__ import annotations
@@ -35,7 +40,6 @@ from PySide6.QtCore import QBuffer, QIODevice
 from PySide6.QtGui import QImage
 
 import image_safety
-from i18n import _
 
 
 # Formats we re-encode, mapped to what we write them back out as. JPEG
@@ -49,10 +53,10 @@ _REENCODE_AS: Final[dict] = {
     "image/bmp": (b"PNG", "image/png"),
 }
 
-# Passed through as-is, with the reason recorded.
-_PASS_THROUGH: Final[dict] = {
-    "image/gif": "re-encoding would drop the animation",
-}
+# GIF application blocks that are part of the animation (the loop), by
+# their identifier and code: kept. Every other application block (XMP,
+# colour profiles, vendors' own) is not.
+_GIF_KEPT_APPLICATIONS: Final[frozenset] = frozenset({b"NETSCAPE2.0", b"ANIMEXTS1.0"})
 
 # High enough that a re-encoded photo is visually unchanged, low enough
 # that publishing does not inflate the file.
@@ -84,27 +88,24 @@ def scrub_for_publication(data: bytes, declared_mime: str = "") -> ScrubResult:
     which is deliberately the same set it will not decode.
     """
     if not isinstance(data, (bytes, bytearray)) or not data:
-        raise ScrubError(_("there are no bytes to publish"))
+        raise ScrubError("there are no bytes to publish")
 
     mime = image_safety.sniff_image_mime(bytes(data))
     if mime is None:
-        raise ScrubError(_("this file is not an image this app can publish"))
+        raise ScrubError("this file is not an image this app can publish")
 
-    passthrough_reason = _PASS_THROUGH.get(mime)
-    if passthrough_reason:
-        return ScrubResult(
-            data=bytes(data), mime=mime, scrubbed=False, note=passthrough_reason,
-        )
+    if mime == "image/gif":
+        return ScrubResult(data=_gif_frames_only(bytes(data)), mime=mime, scrubbed=True)
 
     target = _REENCODE_AS.get(mime)
     if target is None:
         # Sniffed as an image, but not one we are willing to re-encode.
         # Publishing it unscrubbed would defeat the point of this module.
-        raise ScrubError(_("{type} cannot be prepared for publication").format(type=mime))
+        raise ScrubError(f"{mime} cannot be prepared for publication")
 
     image = image_safety.decode_image_bytes(bytes(data))
     if image is None or image.isNull():
-        raise ScrubError(_("this image could not be read"))
+        raise ScrubError("this image could not be read")
 
     image = _pixels_only(image)
     fmt, out_mime = target
@@ -117,11 +118,11 @@ def scrub_for_publication(data: bytes, declared_mime: str = "") -> ScrubResult:
     )
     buffer.close()
     if not ok:
-        raise ScrubError(_("this image could not be re-encoded"))
+        raise ScrubError("this image could not be re-encoded")
 
     out = bytes(buffer.data())
     if not out:
-        raise ScrubError(_("re-encoding produced nothing"))
+        raise ScrubError("re-encoding produced nothing")
     return ScrubResult(data=out, mime=out_mime, scrubbed=True)
 
 
@@ -146,6 +147,66 @@ def _pixels_only(image: QImage) -> QImage:
     return clean
 
 
+def can_scrub(mime: str) -> bool:
+    """Whether a file of this type can be made safe to publish here: its
+    camera and location details removed."""
+    return mime == "image/gif" or mime in _REENCODE_AS
+
+
+def _gif_frames_only(data: bytes) -> bytes:
+    """The GIF ``data`` with only what showing it needs: the header and
+    palettes, each frame, its graphic control (delay, transparency) and
+    the loop, copied as they are. Every other block goes, whatever its
+    label: comments, application blocks such as XMP, plain text, labels
+    no decoder knows, and anything after the loop count in a loop block.
+    Raises ScrubError when it cannot be read to its end."""
+    def sub_blocks(at: int):
+        """Where the run of sub-blocks starting at ``at`` ends, and where
+        its first loop sub-block (three bytes, the first 1) starts, if
+        it has one."""
+        loop = None
+        while True:
+            if at >= len(data):
+                raise ScrubError("this GIF ends early")
+            size = data[at]
+            if size == 0:
+                return at + 1, loop
+            if size == 3 and loop is None and at + 1 < len(data) and data[at + 1] == 1:
+                loop = at
+            at += 1 + size
+
+    if len(data) < 13:
+        raise ScrubError("this GIF ends early")
+    flags = data[10]
+    at = 13 + (3 * 2 ** ((flags & 7) + 1) if flags & 0x80 else 0)
+    out = bytearray(data[:at])
+    while at < len(data):
+        introducer = data[at]
+        if introducer == 0x3B:                         # trailer
+            return bytes(out) + b"\x3b"
+        if introducer == 0x2C:                         # a frame
+            if at + 10 > len(data):
+                raise ScrubError("this GIF ends early")
+            local = data[at + 9]
+            start = at
+            at += 10 + (3 * 2 ** ((local & 7) + 1) if local & 0x80 else 0) + 1
+            at, _loop = sub_blocks(at)
+            out += data[start:at]
+            continue
+        if introducer != 0x21 or at + 2 > len(data):
+            raise ScrubError("this GIF has a block it cannot read")
+        label = data[at + 1]
+        end, loop = sub_blocks(at + 2)
+        size = data[at + 2]
+        first = data[at + 3:at + 3 + size]
+        if label == 0xF9 and size == 4:                # graphic control
+            out += b"\x21\xf9\x04" + first + b"\x00"
+        elif label == 0xFF and first in _GIF_KEPT_APPLICATIONS and loop is not None:
+            out += b"\x21\xff" + data[at + 2:at + 3 + size] + data[loop:loop + 4] + b"\x00"
+        at = end
+    raise ScrubError("this GIF ends early")
+
+
 def would_scrub(data: bytes) -> Optional[bool]:
     """Whether publishing these bytes would re-encode them.
 
@@ -155,6 +216,4 @@ def would_scrub(data: bytes) -> Optional[bool]:
     mime = image_safety.sniff_image_mime(bytes(data)) if data else None
     if mime is None:
         return None
-    if mime in _PASS_THROUGH:
-        return False
-    return mime in _REENCODE_AS or None
+    return True if can_scrub(mime) else None

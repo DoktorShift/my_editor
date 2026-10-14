@@ -19,9 +19,12 @@ Codes are additive. Later work extends this module, never replaces it.
 
 from __future__ import annotations
 
+import logging
 import re
 
 from i18n import N_, _
+
+_log = logging.getLogger(__name__)
 
 
 class ERROR_CODES:
@@ -39,6 +42,13 @@ class ERROR_CODES:
     UPLOAD_FAILED = "UPLOAD_FAILED"
     NETWORK_UNAVAILABLE = "NETWORK_UNAVAILABLE"
     SIGNER_IDENTITY_MISMATCH = "SIGNER_IDENTITY_MISMATCH"
+    NO_SIGNER = "NO_SIGNER"
+
+    # Refused before anything was sent: the file, or where it would go.
+    FILE_UNREADABLE = "FILE_UNREADABLE"
+    FILE_TOO_LARGE = "FILE_TOO_LARGE"
+    QUOTA_FULL = "QUOTA_FULL"
+    NO_SERVER = "NO_SERVER"
 
     # Server verdicts. Distinct from the transport codes above because
     # the server answered: it just refused, and the reasons need
@@ -48,77 +58,70 @@ class ERROR_CODES:
     PAYMENT_REQUIRED = "PAYMENT_REQUIRED"
     RATE_LIMITED = "RATE_LIMITED"
     AUTH_REJECTED = "AUTH_REJECTED"
+    UNSUPPORTED_TYPE = "UNSUPPORTED_TYPE"
+    # No server could list the person's files, for a reason of its own
+    # (not the connection, not the signer, not a refusal of the account).
+    LIST_FAILED = "LIST_FAILED"
 
 
-# Friendly copy per code. Sentence case, no "we", no blame, says what
-# happened and what to do next. An image never disappears from a
-# document because of any of these, and the copy says so where it is
-# the user's first question.
+# One short sentence per code, or two: what happened, and what to do
+# about it. No protocol words, no host names, no "we", no blame. The
+# library shows these under a file and the editor in its status bar, so
+# none of them assumes where the file is.
+_TRY_AGAIN = N_("The upload didn’t finish. Try again.")
 _FRIENDLY = {
     ERROR_CODES.REDIRECT_REFUSED: _(
-        "The server redirected this request. For safety it was not sent "
-        "again. Try a different server."
+        "Your media server answered in a way MyEditor doesn’t trust, so nothing "
+        "was sent."
     ),
-    ERROR_CODES.UNSAFE_URL: _(
-        "That address is not allowed. Only regular web links can be used "
-        "here."
-    ),
+    ERROR_CODES.UNSAFE_URL: _("That address can’t be used."),
     ERROR_CODES.TOO_LARGE: _(
-        "The transfer was larger than allowed and was stopped."
+        "A media server sent more than MyEditor accepts, so it was stopped."
     ),
-    ERROR_CODES.UNSUPPORTED_FORMAT: _(
-        "That file format cannot be shown here. The file itself is "
-        "unaffected."
-    ),
-    ERROR_CODES.HOST_MISMATCH: _(
-        "The signed authorization does not match this server. Nothing was "
-        "sent."
-    ),
+    ERROR_CODES.UNSUPPORTED_FORMAT: _("MyEditor can’t show this kind of file."),
+    # Only a mis-wired request reaches this, never the person's doing.
+    ERROR_CODES.HOST_MISMATCH: _(_TRY_AGAIN),
     ERROR_CODES.SIGNER_REJECTED: _(
-        "Your signer app declined the request. Approve it there and try "
-        "again."
+        "Your signer app didn’t approve the request. Check it and try again."
     ),
-    ERROR_CODES.UPLOAD_FAILED: _(
-        "The upload did not finish. The file stays in your document and "
-        "can be retried."
-    ),
+    ERROR_CODES.UPLOAD_FAILED: _(_TRY_AGAIN),
     ERROR_CODES.NETWORK_UNAVAILABLE: _(
-        "The server could not be reached. The file stays in your document "
-        "and can be uploaded later."
+        "Couldn’t reach your media server. Check your internet connection."
     ),
     ERROR_CODES.SIGNER_IDENTITY_MISMATCH: _(
-        "Your signer app answered for a different account. Nothing was sent."
+        "Your signer app answered for a different account, so nothing was sent."
     ),
+    ERROR_CODES.NO_SIGNER: _("Connect your signer app first."),
+    ERROR_CODES.FILE_UNREADABLE: _("This file couldn’t be read."),
+    ERROR_CODES.FILE_TOO_LARGE: _("This file is larger than your media servers take."),
+    ERROR_CODES.QUOTA_FULL: _(
+        "There isn’t enough space left on your media servers for this file."
+    ),
+    ERROR_CODES.NO_SERVER: _("Add a media server first, in Media Servers."),
+    # The check stays (client.py, replicate.py); the words are plain.
     ERROR_CODES.HASH_MISMATCH: _(
-        "The server described a different file than the one that was sent. "
-        "Nothing was stored and the file stays in your document."
+        "A media server returned the wrong file, so it wasn’t used. Try again."
     ),
-    ERROR_CODES.SERVER_TOO_LARGE: _(
-        "That server refused the file for being too large. Try another "
-        "server, or a smaller file."
-    ),
+    ERROR_CODES.SERVER_TOO_LARGE: _("This file is too large for your media server."),
     ERROR_CODES.PAYMENT_REQUIRED: _(
-        "That server asks for payment for uploads. The file stays in your "
-        "document. Try another server."
+        "Your media server asks for payment. Choose another one in Media Servers."
     ),
-    ERROR_CODES.RATE_LIMITED: _(
-        "That server is asking for a slower pace. Wait a moment and try "
-        "again."
-    ),
+    ERROR_CODES.RATE_LIMITED: _("Your media server is busy. Try again later."),
     ERROR_CODES.AUTH_REJECTED: _(
-        "That server did not accept the signed authorization. Check that "
-        "your signer app is connected, then try again."
+        "This media server doesn’t accept your account. Choose another one in Media Servers."
+    ),
+    ERROR_CODES.UNSUPPORTED_TYPE: _(
+        "This media server doesn’t take this kind of file. Choose another one in Media Servers."
+    ),
+    ERROR_CODES.LIST_FAILED: _(
+        "Your media servers didn’t list your files. Try again later."
     ),
 }
 
 _FALLBACK = _("Something went wrong with that media request. Nothing was lost.")
 
-# The two sentences that say the signer, not a server, stopped a request.
-# The asset manager tells the two kinds of failure apart by them
-# (nostr/media/manager.py), so they are written once, here, and compared
-# in the language they are shown in. Temporary until the store reports
-# structured codes for every failure.
-NO_SIGNER = _("Connect your signer app first.")
+# The signer's own words, for the importer's record of what it copied.
+# The person reads the code's sentence above instead.
 _SIGNER_REJECTED = N_("Your signer app declined the request to the media server: {reason}")
 
 
@@ -126,15 +129,6 @@ def signer_rejected(reason) -> str:
     """The sentence for a signer that refused to sign, with its own words."""
     return _(_SIGNER_REJECTED).format(reason=reason)
 
-
-def is_signer_failure(text) -> bool:
-    """Whether ``text`` is one of the two sentences above."""
-    text = str(text or "")
-    if text.startswith(NO_SIGNER):
-        return True
-    # The signer's own words come last, so the sentence is known up to them.
-    opening = _(_SIGNER_REJECTED).partition("{reason}")[0]
-    return bool(opening) and text.startswith(opening)
 
 # A raw header can carry anything the operator typed, including CR LF.
 # This string lands in a plain-text label, so newlines and control
@@ -168,18 +162,13 @@ def sanitize_reason(raw) -> str:
 def friendly_message(code: str, raw: str = "", *, detail: str = "") -> str:
     """Copy for ``code``, suitable to show a user directly.
 
-    ``raw`` is the diagnostic string the transport produced. It is
-    accepted so callers can pass it without branching, and deliberately
-    not rendered: Qt error strings are not user copy.
-
-    ``detail`` is the server's own sanitized ``X-Reason``. When present
-    it is appended as its own sentence, so the mapped copy still leads
-    and the operator's wording never replaces it.
+    ``raw`` (the transport's diagnostic) and ``detail`` (the server's
+    own ``X-Reason``) are accepted so callers can pass them without
+    branching, and never rendered: the transport's words are not copy,
+    and the server's are a diagnostic in its own terms and language
+    (BUD-01). ``detail`` goes to the diagnostics log.
     """
-    message = _FRIENDLY.get(code) or _FALLBACK
     reason = sanitize_reason(detail)
-    if not reason:
-        return message
-    if not reason.endswith((".", "!", "?")):
-        reason = f"{reason}."
-    return f"{message} {reason[0].upper()}{reason[1:]}"
+    if reason:
+        _log.info("media server said: %s (%s)", reason, code)
+    return _FRIENDLY.get(code) or _FALLBACK

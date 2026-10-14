@@ -18,6 +18,7 @@ from __future__ import annotations
 import os
 from typing import Optional
 
+import i18n
 from i18n import _
 
 AUDIO_TYPES = {".mp3": "audio/mpeg", ".m4a": "audio/mp4", ".aac": "audio/aac",
@@ -27,7 +28,8 @@ VIDEO_TYPES = {".mp4": "video/mp4", ".webm": "video/webm", ".mov": "video/quickt
                ".m4v": "video/mp4"}
 IMAGE_TYPES = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
                ".gif": "image/gif", ".webp": "image/webp", ".svg": "image/svg+xml",
-               ".bmp": "image/bmp"}
+               ".bmp": "image/bmp", ".heic": "image/heic", ".heif": "image/heif",
+               ".avif": "image/avif"}
 DOCUMENT_TYPES = {".pdf": "application/pdf"}
 TYPES = {**AUDIO_TYPES, **VIDEO_TYPES, **IMAGE_TYPES, **DOCUMENT_TYPES}
 # What Insert > Audio or Video takes, and what the Media Library does.
@@ -78,3 +80,14 @@ def link_words(mime: str, name: str) -> str:
     if kind_of(mime) == VIDEO:
         return _("▶ Video: {name}").format(name=name)
     return _("▶ Audio: {name}").format(name=name)
+
+
+def format_size(byte_count: int) -> str:
+    """A file's size the way a person reads it: 117 KB, 1.2 MB, with the
+    decimal point the app's language writes (1,2 MB in German)."""
+    if byte_count >= 1024 * 1024:
+        text = f"{byte_count / (1024 * 1024):.1f} MB"
+        return text.replace(".", i18n.display_locale().decimalPoint())
+    if byte_count >= 1024:
+        return f"{round(byte_count / 1024)} KB"
+    return f"{byte_count} B"

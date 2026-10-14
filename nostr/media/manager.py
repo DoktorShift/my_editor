@@ -35,12 +35,12 @@ import url_safety
 from export_html import sniff_image_mime
 
 from ..blossom import BLOSSOM_MAX_FILE_SIZE
-from ..blossom.errors import is_signer_failure
 
 # The one BUD-03 hash-from-URL rule, imported rather than repeated: a
 # third copy of it is how the copies drift apart. ``blob_url`` builds the
 # canonical address BUD-01 guarantees, which is what makes a recovery
 # attempt against a sibling server honest rather than a guess.
+from ..blossom.errors import friendly_message
 from ..blossom.hashes import blob_url, hash_from_url
 from ..imports.workers import run_for_size
 from .assets import (
@@ -108,7 +108,8 @@ class Uploader(Protocol):
     Exposes ``files``: a sha256 to media-record map whose records carry
     ``hash``, ``url``, ``urls``, ``mime_type`` and ``size``. Also emits
     ``upload_status(name, status)``, ``upload_finished(name, media)`` and
-    ``upload_failed(name, reason)``.
+    ``upload_failed_code(name, code)``, the stable code of a failure
+    (``nostr/blossom/errors.py``).
     """
 
     def upload_bytes(self, body: bytes, *, name: str, mime_type: str) -> None: ...
@@ -173,7 +174,7 @@ class AssetManager(QObject):
 
         uploader.upload_status.connect(self._on_upload_status)
         uploader.upload_finished.connect(self._on_upload_finished)
-        uploader.upload_failed.connect(self._on_upload_failed)
+        uploader.upload_failed_code.connect(self._on_upload_failed)
         blob_store.ready.connect(self._on_blob_ready)
         blob_store.failed.connect(self._on_blob_failed)
 
@@ -448,12 +449,21 @@ class AssetManager(QObject):
         size: int = 0,
         alt: str = "",
     ) -> Optional[DocumentAsset]:
-        """Adopt a blob that is already hosted, e.g. a library pick."""
+        """Adopt a blob that is already hosted, e.g. a library pick (an
+        image, or audio or video, which a document shows as its card).
+
+        Recorded as an upload of it would be: hash, address, type, size,
+        name, and the servers that hold it (from the library's record, else
+        the address's own), so it publishes the same imeta. Nothing is
+        downloaded or sent: it is there already.
+        """
         sha = (sha256 or "").lower()
         if not is_sha256(sha):
             return None
         if not _acceptable_remote_url(remote_url, sha):
             return None
+        servers = _servers_of(self._library_record(sha)) or \
+            [origin for origin in [url_safety.origin_of(remote_url)] if origin]
 
         existing = self._index.get(sha)
         if existing is not None:
@@ -464,7 +474,7 @@ class AssetManager(QObject):
                     # Learning the blob is already hosted is an ingest
                     # fact, not a queue transition: it re-enters at
                     # COMPLETE exactly as a fresh library adopt would.
-                    self._enter_complete(existing, remote_url, existing.servers)
+                    self._enter_complete(existing, remote_url, existing.servers or servers)
             if alt and not existing.alt:
                 existing.alt = alt
             existing.updated_at = int(time.time())
@@ -479,6 +489,7 @@ class AssetManager(QObject):
             alt=alt,
             upload_state=AssetState.COMPLETE,
             remote_url=remote_url,
+            servers=servers,
             created_at=now,
             updated_at=now,
         )
@@ -667,17 +678,15 @@ class AssetManager(QObject):
         self._enter_complete(asset, url, _servers_of(media))
         self._pump()
 
-    def _on_upload_failed(self, name: str, reason: str) -> None:
+    def _on_upload_failed(self, name: str, code: str) -> None:
+        """The store's code, passed on as it is: what the person is told
+        depends on it (no connection, a full server, a declined signer),
+        so it is never guessed from a sentence."""
         asset = self._job_asset(name)
         if asset is None:
             return
-        text = str(reason or "")
-        code = (
-            AssetErrorCodes.SIGNER_REJECTED
-            if is_signer_failure(text)
-            else AssetErrorCodes.UPLOAD_FAILED
-        )
-        self._fail(asset, code, text)
+        code = str(code or AssetErrorCodes.UPLOAD_FAILED)
+        self._fail(asset, code, friendly_message(code))
 
     def _on_blob_ready(self, sha256: str, path: str, pixmap: object) -> None:
         sha = (sha256 or "").lower()

@@ -64,9 +64,8 @@ class FakeStore(QObject):
         self.files = {SHA: MediaFile(hash=SHA, url=LIBRARY_URL, mime_type="image/png")}
         self.uploads = []
 
-    def upload_bytes(self, body, *, name, mime_type="application/octet-stream", shown_as=""):
+    def upload_bytes(self, body, *, name, mime_type="application/octet-stream"):
         self.uploads.append((body, name, mime_type))
-        self.shown_as = shown_as
 
 
 @pytest.fixture
@@ -289,29 +288,24 @@ def test_the_window_gives_article_details_the_document_a_cover_lands_on():
     assert "cover_uploaded.connect" in inspect.getsource(MainWindow)
 
 
-def test_the_media_library_names_a_cover_upload_by_its_file(field, tmp_path, monkeypatch):
-    """Review round 3: a cover dropped on the well is uploaded under a name
-    of its own ("cover-1a2b3c4d.png", so it is told from other uploads),
-    and the Media Library, open meanwhile, said "Uploading
-    cover-1a2b3c4d.png…". It says the file's name."""
-    from nostr.ui import media_library_dialog as dialog_module
-    from tests.test_blossom_store import make_store
-    from tests.test_media_library_visibility import FakeLoader as LibraryLoader
-    from tests.test_media_library_visibility import FakeStore as LibraryStore
+def test_the_media_library_never_names_a_cover_upload_by_its_job(field, tmp_path,
+                                                                    monkeypatch):
+    """Review round 3 (publish-ux): a cover dropped on the well is uploaded
+    under a name of its own ("cover-1a2b3c4d.png", so it is told from other
+    uploads), and the Media Library, open meanwhile, said "Uploading
+    cover-1a2b3c4d.png…". The library shows only the uploads it started
+    now (media-ux): nothing of the cover's job, as for any upload of the
+    editor's, whose file comes in once a server has it."""
+    from tests.test_media_library import build, tiles
     made, store, _problems = field
     made.drop(str(picture_file(tmp_path, "cover.png")))
     job = store.uploads[0][1]
-    assert job != "cover.png" and store.shown_as == "cover.png"
-    real = make_store(tmp_path).store
-    real.upload_bytes(b"", name=job, mime_type="image/png", shown_as="cover.png")
-    assert real.shown_name(job) == "cover.png" and real.shown_name("other.png") == "other.png"
-    monkeypatch.setattr(dialog_module, "ThumbnailLoader",
-                        lambda parent=None: LibraryLoader(tmp_path / "cache", parent=parent))
-    library_store = LibraryStore()
-    library_store.shown_name = lambda name: "cover.png" if name == job else name
-    library = dialog_module.MediaLibraryDialog(store=library_store, is_dark=False)
-    library._on_upload_started(job)
-    assert "Uploading cover.png" in library._status_label.text()
-    library._on_upload_failed(job, "the server said no")
-    assert "cover.png" in library._status_label.text() and job not in library._status_label.text()
-    library.close()
+    assert job != "cover.png"
+    world = build(tmp_path, monkeypatch)
+    world.store.upload_started.emit(job)
+    world.store.upload_progress.emit(job, 1, 2)
+    world.store.mirror_failed.emit(job, "cdn.example.com", "refused")
+    world.store.upload_failed.emit(job, "the server said no")
+    assert tiles(world) == []
+    assert job not in world.dialog._status.text()
+    world.dialog.close()

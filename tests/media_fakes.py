@@ -118,25 +118,30 @@ class FakeBlobStore(QObject):
 
 
 class FakeUploader(QObject):
-    """MediaStore's observed surface: a library map plus three signals."""
+    """MediaStore's observed surface: a library map plus its signals.
+
+    A failure is reported the way the store reports one: the plain
+    sentence, then the stable code."""
 
     upload_status = Signal(str, str)      # name, status
     upload_finished = Signal(str, object)  # name, media record
     upload_failed = Signal(str, str)      # name, reason
+    upload_failed_code = Signal(str, str)  # name, code
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self.files: dict = {}
         self.calls: list = []
-        # When set, ``upload_bytes`` fails inside the call, the way the
-        # real store does when no profile or no server is available.
+        # A code: when set, ``upload_bytes`` fails inside the call, the
+        # way the real store does when no profile or no server is
+        # available.
         self.fail_synchronously: str | None = None
 
     def upload_bytes(self, body: bytes, *, name: str,
                      mime_type: str = "application/octet-stream") -> None:
         self.calls.append(SimpleNamespace(name=name, mime_type=mime_type, body=body))
         if self.fail_synchronously is not None:
-            self.upload_failed.emit(name, self.fail_synchronously)
+            self.fail(name, self.fail_synchronously)
 
     # -- test drivers ------------------------------------------------------
 
@@ -146,8 +151,9 @@ class FakeUploader(QObject):
     def finish(self, name: str, media) -> None:
         self.upload_finished.emit(name, media)
 
-    def fail(self, name: str, reason: str) -> None:
-        self.upload_failed.emit(name, reason)
+    def fail(self, name: str, code: str = "UPLOAD_FAILED") -> None:
+        self.upload_failed.emit(name, f"plain sentence for {code}")
+        self.upload_failed_code.emit(name, code)
 
 
 def fake_alert(click: str | None = None):

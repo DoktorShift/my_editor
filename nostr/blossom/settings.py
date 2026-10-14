@@ -30,6 +30,8 @@ import os
 from pathlib import Path
 from typing import List, Optional
 
+from PySide6.QtCore import QUrl
+
 import url_safety
 from atomic_file import write_text
 
@@ -69,10 +71,14 @@ def _normalize(url: str) -> Optional[str]:
     loopback, which is what the docstring above always promised and the
     old scheme check did not enforce. ``_load`` re-normalizes every
     persisted entry, so a hand-edited file naming a plain-http host is
-    dropped on read as well as on write."""
-    if not isinstance(url, str):
+    dropped on read as well as on write. A host in another script is
+    kept in its ASCII form, as the Media Servers sheet adds a typed one:
+    the two ways of writing it are one server, shown by one rule."""
+    if not isinstance(url, str) or any(ch.isspace() for ch in url.strip()):
         return None
     origin = url_safety.origin_of(url.strip())
+    if origin is not None and not origin.isascii():
+        origin = url_safety.origin_of(bytes(QUrl(origin).toEncoded()).decode("ascii", "replace"))
     if origin is None or not url_safety.is_safe_media_url(origin):
         return None
     return origin

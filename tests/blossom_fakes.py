@@ -581,7 +581,10 @@ class FakeBlossomServer:
             names = [b["sha256"] for b in ordered]
             if cursor in names:
                 ordered = ordered[names.index(cursor) + 1:]
-        size = limit or self.page_size
+        # ``limit`` is a maximum (BUD-12): a server with a smaller page
+        # of its own answers with that.
+        sizes = [n for n in (limit, self.page_size) if n]
+        size = min(sizes) if sizes else None
         if size:
             ordered = ordered[:size]
         return json_reply(ordered)

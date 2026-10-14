@@ -240,3 +240,91 @@ def more(color: QColor) -> QIcon:
             path.lineTo(QPointF(x, 14))
         painter.drawPath(path)
     return _icon(draw, color)
+
+
+# -- the Media Library's glyphs ----------------------------------------------
+# Drawn at any size with ``paint``: a tile's kind, and the lock on the
+# thumbnail of a private file.
+
+def _draw_lock(painter: QPainter, ink: QColor) -> None:
+    """A padlock: only the person can open the file."""
+    painter.setPen(_pen(ink, 1.6))
+    painter.setBrush(Qt.BrushStyle.NoBrush)
+    shackle = QPainterPath()
+    shackle.moveTo(QPointF(5.5, 8.5))
+    shackle.lineTo(QPointF(5.5, 6))
+    shackle.arcTo(QRectF(5.5, 2.5, 7, 7), 180, -180)
+    shackle.lineTo(QPointF(12.5, 8.5))
+    painter.drawPath(shackle)
+    painter.setPen(Qt.PenStyle.NoPen)
+    painter.setBrush(ink)
+    painter.drawRoundedRect(QRectF(3.5, 8, 11, 8), 1.6, 1.6)
+
+
+def _draw_video(painter: QPainter, ink: QColor) -> None:
+    """A frame of film with a play triangle."""
+    painter.setPen(_pen(ink, 1.4))
+    painter.setBrush(Qt.BrushStyle.NoBrush)
+    painter.drawRoundedRect(QRectF(1.5, 3.5, 15, 11), 2, 2)
+    painter.setPen(Qt.PenStyle.NoPen)
+    painter.setBrush(ink)
+    triangle = QPainterPath()
+    triangle.moveTo(QPointF(7.4, 6.4))
+    triangle.lineTo(QPointF(12, 9))
+    triangle.lineTo(QPointF(7.4, 11.6))
+    triangle.closeSubpath()
+    painter.drawPath(triangle)
+
+
+def _draw_audio(painter: QPainter, ink: QColor) -> None:
+    """A note: two heads on a beam."""
+    painter.setPen(_pen(ink, 1.5))
+    painter.drawLine(QPointF(7, 13), QPointF(7, 4))
+    painter.drawLine(QPointF(14.5, 11.5), QPointF(14.5, 2.5))
+    painter.drawLine(QPointF(7, 4), QPointF(14.5, 2.5))
+    painter.setPen(Qt.PenStyle.NoPen)
+    painter.setBrush(ink)
+    painter.drawEllipse(QRectF(2.6, 11, 4.8, 3.8))
+    painter.drawEllipse(QRectF(10.1, 9.5, 4.8, 3.8))
+
+
+def _draw_document(painter: QPainter, ink: QColor) -> None:
+    """A page with a folded corner: any other file."""
+    painter.setPen(_pen(ink, 1.4))
+    painter.setBrush(Qt.BrushStyle.NoBrush)
+    page = QPainterPath()
+    page.moveTo(QPointF(4, 1.8))
+    page.lineTo(QPointF(10.5, 1.8))
+    page.lineTo(QPointF(14.5, 5.8))
+    page.lineTo(QPointF(14.5, 16.2))
+    page.lineTo(QPointF(4, 16.2))
+    page.closeSubpath()
+    painter.drawPath(page)
+    painter.drawLine(QPointF(10.5, 1.8), QPointF(10.5, 5.8))
+    painter.drawLine(QPointF(10.5, 5.8), QPointF(14.5, 5.8))
+
+
+def _draw_alert(painter: QPainter, ink: QColor) -> None:
+    """An exclamation mark in a circle: this did not work."""
+    painter.setPen(_pen(ink, 1.6))
+    painter.setBrush(Qt.BrushStyle.NoBrush)
+    painter.drawEllipse(QRectF(1.8, 1.8, 14.4, 14.4))
+    painter.drawLine(QPointF(9, 5.2), QPointF(9, 10))
+    painter.setPen(Qt.PenStyle.NoPen)
+    painter.setBrush(ink)
+    painter.drawEllipse(QRectF(8, 11.8, 2, 2))
+
+
+_GLYPHS = {"lock": _draw_lock, "video": _draw_video, "audio": _draw_audio,
+           "document": _draw_document, "alert": _draw_alert}
+
+
+def paint(name: str, painter: QPainter, rect: QRectF, color: QColor) -> None:
+    """Draw glyph ``name`` (lock, video, audio, document, alert) to fill
+    the square ``rect``, sharp at any size."""
+    painter.save()
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+    painter.translate(rect.topLeft())
+    painter.scale(rect.width() / SIZE, rect.height() / SIZE)
+    _GLYPHS[name](painter, QColor(color))
+    painter.restore()

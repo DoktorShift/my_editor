@@ -24,7 +24,7 @@ from PySide6.QtCore import QBuffer, QIODevice
 from PySide6.QtGui import QColor, QImage
 from PySide6.QtWidgets import QApplication
 
-from nostr.media.scrub import ScrubError, scrub_for_publication, would_scrub
+from nostr.media.scrub import ScrubError, can_scrub, scrub_for_publication, would_scrub
 
 from tests.media_fakes import GIF_BYTES
 
@@ -110,14 +110,86 @@ def test_a_bmp_becomes_a_png():
     assert out.mime == "image/png" and out.scrubbed
 
 
-def test_an_animated_gif_is_passed_through_rather_than_flattened():
-    # A still-image re-encode would silently reduce it to frame one, and
-    # GIF carries no location metadata, so the trade runs the wrong way.
-    gif = GIF_BYTES
-    out = scrub_for_publication(gif)
-    assert out.data == gif
-    assert out.scrubbed is False
-    assert "animation" in out.note
+# A two-frame GIF with a loop, a comment and an XMP packet holding a
+# location. The frames are kept byte for byte; what is not a frame (the
+# comment, XMP, any other application block) is not.
+_GIF_HEAD = bytes.fromhex("474946383961" "0100" "0100" "80" "00" "00" "000000" "ffffff")
+_LOOP = b"\x21\xff\x0bNETSCAPE2.0\x03\x01\x00\x00\x00"
+_FRAME = (bytes.fromhex("21f904" "04" "0a00" "00" "00")            # graphic control
+          + bytes.fromhex("2c" "0000" "0000" "0100" "0100" "00")    # image descriptor
+          + bytes.fromhex("02" "02" "4401" "00"))                    # pixels
+_XMP = b'<x:xmpmeta><rdf:Description exif:GPSLatitude="52,31.0N"/></x:xmpmeta>'
+
+
+def _blocks(data: bytes) -> bytes:
+    return b"".join(bytes([len(data[i:i + 255])]) + data[i:i + 255]
+                    for i in range(0, len(data), 255)) + b"\x00"
+
+
+def _tagged_gif() -> bytes:
+    return (_GIF_HEAD + _LOOP + b"\x21\xff\x0bXMP DataXMP" + _blocks(_XMP)
+            + b"\x21\xfe" + _blocks(b"taken at home, 52.5N 13.4E")
+            + _FRAME + _FRAME + b"\x3b")
+
+
+def test_a_gif_loses_its_comment_and_xmp_and_keeps_every_frame():
+    """GIF carries XMP (where a location can be) and comments in blocks of
+    its own: they go, and the frames, loop included, stay byte for byte,
+    so an animation is not flattened to its first frame."""
+    out = scrub_for_publication(_tagged_gif())
+    assert out.mime == "image/gif" and out.scrubbed
+    assert b"GPSLatitude" not in out.data and b"52.5N" not in out.data
+    assert out.data == _GIF_HEAD + _LOOP + _FRAME + _FRAME + b"\x3b"
+    assert not QImage.fromData(out.data).isNull()
+
+
+@pytest.mark.parametrize("label", [0x01, 0x02, 0x7F, 0xCE, 0xFA])
+def test_a_gif_keeps_only_the_blocks_it_needs_to_show(label):
+    """An allow list, not a deny list: any extension but the graphic
+    control and the loop goes (plain text, and every label no decoder
+    knows), whatever it may carry."""
+    hidden = b"\x21" + bytes([label]) + _blocks(b"52.5N 13.4E")
+    out = scrub_for_publication(_GIF_HEAD + _LOOP + hidden + _FRAME + b"\x3b")
+    assert out.data == _GIF_HEAD + _LOOP + _FRAME + b"\x3b"
+
+
+@pytest.mark.parametrize("identifier", [b"NETSCAPE2.0", b"ANIMEXTS1.0"])
+def test_a_loop_block_keeps_only_its_loop(identifier):
+    """What follows the loop count in a loop block (a buffering hint, or
+    anything else) goes; the loop count stays."""
+    loop = (b"\x21\xff\x0b" + identifier + b"\x03\x01\x05\x00" + b"\x05\x02\x00\x10\x00\x00"
+            + _blocks(b"52.5N 13.4E")[:-1] + b"\x00")
+    out = scrub_for_publication(_GIF_HEAD + loop + _FRAME + b"\x3b")
+    assert out.data == (_GIF_HEAD + b"\x21\xff\x0b" + identifier + b"\x03\x01\x05\x00\x00"
+                        + _FRAME + b"\x3b")
+
+
+def test_a_loop_block_without_a_loop_goes():
+    loop = b"\x21\xff\x0bNETSCAPE2.0" + _blocks(b"52.5N 13.4E")
+    out = scrub_for_publication(_GIF_HEAD + loop + _FRAME + b"\x3b")
+    assert out.data == _GIF_HEAD + _FRAME + b"\x3b"
+
+
+def test_a_graphic_control_keeps_only_its_four_bytes():
+    frame = (bytes.fromhex("21f904" "04" "0a00" "00") + _blocks(b"52.5N 13.4E")
+             + _FRAME[8:])
+    out = scrub_for_publication(_GIF_HEAD + frame + b"\x3b")
+    assert out.data == _GIF_HEAD + _FRAME + b"\x3b"
+    malformed = bytes.fromhex("21f9" "03" "040a00" "00") + _FRAME[8:]
+    out = scrub_for_publication(_GIF_HEAD + malformed + b"\x3b")
+    assert out.data == _GIF_HEAD + _FRAME[8:] + b"\x3b"
+
+
+def test_a_gif_that_cannot_be_read_is_refused():
+    with pytest.raises(ScrubError):
+        scrub_for_publication(_GIF_HEAD + b"\x21\xfe\x05abc")   # cut short
+
+
+def test_the_kinds_whose_details_can_be_removed():
+    assert all(can_scrub(m) for m in ("image/jpeg", "image/png", "image/gif",
+                                      "image/webp", "image/bmp"))
+    assert not any(can_scrub(m) for m in ("image/heic", "image/avif", "video/mp4",
+                                          "audio/mpeg", "application/pdf", ""))
 
 
 # --------------------------------------------------------------------- #
@@ -164,7 +236,7 @@ def test_a_truncated_image_is_refused_rather_than_half_published():
 def test_would_scrub_reports_what_publishing_will_do():
     assert would_scrub(encoded("JPEG")) is True
     assert would_scrub(encoded("PNG")) is True
-    assert would_scrub(GIF_BYTES) is False
+    assert would_scrub(GIF_BYTES) is True
 
 
 def test_would_scrub_separates_nothing_to_strip_from_cannot_publish():

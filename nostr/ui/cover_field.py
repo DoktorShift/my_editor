@@ -342,8 +342,7 @@ class CoverImageField(QWidget):
         self._show_placeholder(_("Uploading…"))
         self.uploading_changed.emit(True)
         self._media_store.upload_bytes(public.data, name=self._uploading,
-                                       mime_type=public.mime,
-                                       shown_as=os.path.basename(path) or "cover")
+                                       mime_type=public.mime)
 
     def _on_upload_progress(self, name: str, sent: int, total: int) -> None:
         if self.uploading() and name == self._uploading and total > 0:

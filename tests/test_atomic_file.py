@@ -300,6 +300,64 @@ def test_a_new_document_gets_the_usual_permissions(tmp_path):
 
 
 @posix_only
+@pytest.mark.parametrize("existing_mode", [None, 0o600, 0o644])
+def test_the_new_text_is_private_until_it_takes_the_documents_place(tmp_path, monkeypatch,
+                                                                    existing_mode):
+    """While it is written, and if a crash leaves it behind, the
+    temporary file is readable by this account only; the document then
+    gets its own permissions (a new one, a new file's)."""
+    path = tmp_path / "Diary.md"
+    if existing_mode is not None:
+        path.write_bytes(b"old")
+        os.chmod(path, existing_mode)
+    seen = []
+    real_fsync = os.fsync
+
+    def fsync(fd):
+        seen.append(stat.S_IMODE(os.fstat(fd).st_mode))
+        real_fsync(fd)
+
+    monkeypatch.setattr(atomic_file.os, "fsync", fsync)
+    save_document(path, b"new private text")
+    assert seen[0] == 0o600
+    assert stat.S_IMODE(os.stat(path).st_mode) == (
+        existing_mode if existing_mode is not None else atomic_file._NEW_FILE_MODE)
+
+
+def test_a_temporary_file_says_which_document_it_belongs_to(tmp_path):
+    """A crash can leave it behind: its name starts with the document's."""
+    fd, temporary = atomic_file.new_document_file(tmp_path / "Diary.md")
+    os.close(fd)
+    name = os.path.basename(temporary)
+    assert name.startswith(".Diary.md.") and name.endswith(".tmp")
+    if os.name == "posix":
+        assert stat.S_IMODE(os.stat(temporary).st_mode) == 0o600
+
+
+def test_a_temporary_file_of_the_longest_name_still_fits(tmp_path):
+    long_name = "ü" * 125 + ".md"                    # 253 bytes in UTF-8
+    fd, temporary = atomic_file.new_document_file(tmp_path / long_name)
+    os.close(fd)
+    assert len(os.path.basename(temporary).encode("utf-8")) <= 255
+    assert os.path.basename(temporary).startswith(".üüü")
+
+
+@posix_only
+def test_a_document_keeps_its_group(tmp_path):
+    """As the system's own editors keep it, not the folder's or the
+    person's main group."""
+    path = tmp_path / "team.md"
+    path.write_bytes(b"old")
+    other = [g for g in os.getgroups() if g != os.stat(path).st_gid]
+    if not other:
+        pytest.skip("this account is in no other group")
+    os.chown(path, -1, other[0])
+    save_document(path, b"new")
+    assert os.stat(path).st_gid == other[0]
+    assert path.read_bytes() == b"new"
+
+
+@posix_only
 def test_a_link_stays_a_link(tmp_path):
     real = tmp_path / "real.md"
     real.write_bytes(b"old")
@@ -335,6 +393,217 @@ def test_a_document_in_a_folder_that_cannot_take_new_files_is_still_saved(tmp_pa
         assert path.read_bytes() == b"new"
     finally:
         os.chmod(folder, 0o755)
+
+
+def _in_place_case(tmp_path, kind):
+    """A document saved in place: one with a second name (a hard link), or
+    in a folder that can't take a new file."""
+    folder = tmp_path / "docs"
+    folder.mkdir()
+    path = folder / "Essay.md"
+    path.write_bytes(b"my whole essay\n" * 1000)
+    if kind == "hard link":
+        os.link(path, folder / "Other.md")
+    else:
+        os.chmod(folder, 0o555)
+    return folder, path
+
+
+@posix_only
+@pytest.mark.skipif(hasattr(os, "geteuid") and os.geteuid() == 0,
+                    reason="root may write into any folder")
+@pytest.mark.parametrize("kind", ["hard link", "read-only folder"])
+def test_a_document_saved_in_place_survives_a_disk_that_cant_take_the_new_text(tmp_path, kind):
+    """The new text needs more room than is left: the save fails, and the
+    document is as it was, not emptied or half written."""
+    resource = pytest.importorskip("resource")
+    folder, path = _in_place_case(tmp_path, kind)
+    old = path.read_bytes()
+    soft, hard = resource.getrlimit(resource.RLIMIT_FSIZE)
+    resource.setrlimit(resource.RLIMIT_FSIZE, (len(old) + 4096, hard))
+    try:
+        with pytest.raises(OSError):
+            save_document(path, b"a much longer new version\n" * 10_000)
+    finally:
+        resource.setrlimit(resource.RLIMIT_FSIZE, (soft, hard))
+        os.chmod(folder, 0o755)
+    assert path.read_bytes() == old
+
+
+@posix_only
+@pytest.mark.skipif(hasattr(os, "geteuid") and os.geteuid() == 0,
+                    reason="root may write into any folder")
+@pytest.mark.parametrize("kind", ["hard link", "read-only folder"])
+@pytest.mark.parametrize("new", [b"a much longer new version\n" * 10_000, b"short"],
+                         ids=["longer", "shorter"])
+def test_a_document_saved_in_place_is_put_back_when_writing_it_fails(tmp_path, monkeypatch,
+                                                                    kind, new):
+    """The room was there, and writing the new text over it failed all the
+    same (a removed volume): the old text is written back."""
+    folder, path = _in_place_case(tmp_path, kind)
+    old = path.read_bytes()
+    real_fsync = os.fsync
+
+    def fsync(fd):
+        if os.pread(fd, len(new), 0) == new:      # the new text, written over the old
+            raise OSError(28, "No space left on device")
+        real_fsync(fd)
+
+    monkeypatch.setattr(atomic_file.os, "fsync", fsync)
+    try:
+        with pytest.raises(OSError):
+            save_document(path, new)
+    finally:
+        os.chmod(folder, 0o755)
+    assert path.read_bytes() == old
+
+
+class _CopyOnWriteFile:
+    """An open file on a copy-on-write disk with ``room`` bytes left and
+    its blocks shared with a clone (btrfs, XFS, an APFS clone or
+    snapshot): every byte written takes fresh room, over the old text
+    too, and only cutting off what was written past the old end gives
+    room back. A write that doesn't fit writes what does; the next fails."""
+
+    def __init__(self, raw, room):
+        self._raw, self._room = raw, room
+        self._old_end = os.fstat(raw.fileno()).st_size
+        self._written_past = bytearray()     # per byte past the old end: written?
+
+    def __getattr__(self, name):
+        return getattr(self._raw, name)
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        self._raw.close()
+
+    def write(self, data):
+        if self._room <= 0 < len(data):
+            raise OSError(28, "No space left on device")
+        start = self._raw.tell()
+        written = self._raw.write(data[:self._room])
+        self._room -= written
+        first, end = max(start, self._old_end) - self._old_end, start + written - self._old_end
+        if end > first:
+            self._written_past.extend(bytes(max(0, end - len(self._written_past))))
+            self._written_past[first:end] = b"\1" * (end - first)
+        return written
+
+    def truncate(self, size):
+        cut = max(size, self._old_end) - self._old_end
+        self._room += self._written_past[cut:].count(1)
+        del self._written_past[cut:]
+        return self._raw.truncate(size)
+
+
+@posix_only
+@pytest.mark.parametrize("new_size", [30_000, 15_000, 5_000], ids=["longer", "same", "shorter"])
+def test_a_document_saved_in_place_on_a_copy_on_write_disk_is_old_or_new(tmp_path, monkeypatch,
+                                                                          new_size):
+    """Writing over the old text takes fresh room there, whatever the new
+    text's length. With any room left on the disk, the save either
+    fails and leaves the document as it was or succeeds with the whole
+    new text: never half of each, never the old text with zeros after it."""
+    room = {"left": 0}
+    real_open = open
+
+    def cow_open(file, mode="r", *args, **kwargs):
+        f = real_open(file, mode, *args, **kwargs)
+        return _CopyOnWriteFile(f, room["left"]) if mode == "r+b" else f
+
+    monkeypatch.setattr(atomic_file, "open", cow_open, raising=False)
+    new = (b"the new version, line by line\n" * 1000)[:new_size]
+    for left in sorted({*range(0, new_size + 8192, 2048), new_size - 1, new_size + 65536}):
+        folder = tmp_path / str(left)
+        folder.mkdir()
+        path = folder / "Essay.md"
+        path.write_bytes(b"my whole essay\n" * 1000)
+        os.link(path, folder / "Other.md")
+        room["left"] = left
+        try:
+            save_document(path, new)
+            saved = True
+        except OSError:
+            saved = False
+        assert path.read_bytes() == (new if saved else b"my whole essay\n" * 1000), left
+        assert left >= new_size if saved else left < new_size + 65536, left
+
+
+@posix_only
+def test_a_shorter_text_saved_in_place_leaves_nothing_of_the_old(tmp_path):
+    folder, path = _in_place_case(tmp_path, "hard link")
+    save_document(path, b"short")
+    assert path.read_bytes() == b"short" == (folder / "Other.md").read_bytes()
+
+
+@pytest.mark.skipif(sys.platform != "darwin", reason="creation dates as macOS keeps them")
+def test_on_macos_a_document_keeps_its_creation_date(tmp_path):
+    """As TextEdit keeps it: Finder's "Created" is when the document was
+    made, not when it was last saved."""
+    path = tmp_path / "essay.md"
+    path.write_bytes(b"old")
+    made = 1_600_000_000                               # an earlier time moves it back
+    os.utime(path, (made, made))
+    assert int(os.stat(path).st_birthtime) == made
+    save_document(path, b"new")
+    assert int(os.stat(path).st_birthtime) == made
+    assert path.read_bytes() == b"new"
+
+
+@pytest.mark.skipif(sys.platform != "darwin", reason="the quarantine attribute is macOS's")
+def test_on_macos_the_quarantine_mark_is_kept_as_it_was(tmp_path):
+    """Where the file came from, as the system recorded it: carried over
+    unchanged, not rewritten."""
+    import subprocess
+    path = tmp_path / "downloaded.md"
+    path.write_bytes(b"old")
+    mark = "0081;5f5e1000;Safari;2C6E1F2A-1111-2222-3333-444455556666"
+    subprocess.run(["xattr", "-w", "com.apple.quarantine", mark, str(path)], check=True)
+    save_document(path, b"new")
+    shown = subprocess.run(["xattr", "-p", "com.apple.quarantine", str(path)],
+                           capture_output=True, text=True, check=True).stdout.strip()
+    assert shown == mark
+
+
+@pytest.mark.skipif(sys.platform != "darwin", reason="access lists as macOS keeps them")
+def test_on_macos_a_document_nobody_may_delete_is_saved_in_place(tmp_path):
+    """Replacing it would delete it, which its access list forbids: it is
+    written in place, keeps its list, and leaves no file behind that
+    nobody could delete either."""
+    import subprocess
+    path = tmp_path / "kept.md"
+    path.write_bytes(b"old")
+    subprocess.run(["chmod", "+a", "everyone deny delete", str(path)], check=True)
+    try:
+        save_document(path, b"new")
+        assert path.read_bytes() == b"new"
+        assert sorted(os.listdir(tmp_path)) == ["kept.md"]
+        listed = subprocess.run(["ls", "-le", str(path)], capture_output=True, text=True,
+                                check=True).stdout
+        assert "deny delete" in listed
+    finally:
+        subprocess.run(["chmod", "-RN", str(tmp_path)], check=False)
+
+
+@pytest.mark.skipif(sys.platform != "darwin", reason="access lists as macOS keeps them")
+def test_on_macos_a_document_that_inherits_a_deny_delete_entry_is_saved_in_place(tmp_path):
+    """The usual way to protect files: the folder passes the entry on, and
+    macOS lists it as "deny,inherited". Saved in place all the same, with
+    no file left beside it that nobody could delete."""
+    import subprocess
+    folder = tmp_path / "kept"
+    folder.mkdir()
+    subprocess.run(["chmod", "+a", "everyone deny delete,file_inherit", str(folder)], check=True)
+    try:
+        path = folder / "Essay.md"
+        path.write_bytes(b"old")
+        save_document(path, b"new")
+        assert path.read_bytes() == b"new"
+        assert sorted(os.listdir(folder)) == ["Essay.md"]
+    finally:
+        subprocess.run(["chmod", "-RN", str(tmp_path)], check=False)
 
 
 @pytest.mark.skipif(sys.platform != "darwin", reason="Finder tags exist on macOS only")

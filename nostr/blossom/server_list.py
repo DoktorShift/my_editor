@@ -53,13 +53,11 @@ from typing import Callable, Dict, List, Optional, Sequence
 
 from PySide6.QtCore import QObject, Signal
 
-import url_safety
-
 from ..events import build_event
 from ..outbox.directory import RelayDirectory
 from ..outbox.lookup import Lookup, fetch_replaceable
 from ..outbox.policy import lookup_relays
-from .settings import BlossomSettings
+from .settings import BlossomSettings, _normalize as normalize_origin
 
 logger = logging.getLogger(__name__)
 
@@ -93,20 +91,18 @@ def _normalize_entry(value: object) -> Optional[str]:
 
     Drops anything without an explicit ``http://`` or ``https://``, then
     applies the media policy, which is https anywhere plus http on
-    loopback. Refusing a plain-http public server is a restriction on
-    what BUD-03 permits, taken deliberately: every entry here becomes a
-    retrieval target and may become an upload target, and both of those
-    paths already require the stronger policy.
+    loopback, and keeps a host in another script in its ASCII form, as
+    the settings keep it. Refusing a plain-http public server is a
+    restriction on what BUD-03 permits, taken deliberately: every entry
+    here becomes a retrieval target and may become an upload target, and
+    both of those paths already require the stronger policy.
     """
     if not isinstance(value, str):
         return None
     text = value.strip()
     if not text or not _SCHEME_RE.match(text):
         return None
-    origin = url_safety.origin_of(text)
-    if origin is None or not url_safety.is_safe_media_url(origin):
-        return None
-    return origin
+    return normalize_origin(text)
 
 
 def parse_server_list(event: object) -> List[str]:

@@ -63,9 +63,12 @@ class Router:
         self.by_host = {QUrl(s.origin).host(): s for s in servers}
         self.down = set()
         self.wants_token = set()
+        self.unreachable = set()
 
     def __call__(self, verb, request, body):
         host = request.url().host()
+        if host in self.unreachable and verb != "get":
+            return error_reply(0)
         if host in self.down and verb == "get":
             return error_reply(503, reason="Down for maintenance.")
         if host in self.wants_token and verb == "get" and \
@@ -119,6 +122,46 @@ def test_an_unreachable_server_keeps_its_files_from_last_time(tmp_path):
     assert set(store.files) == {A, C}            # C is not gone, only unconfirmed
     assert not store.server_listings()[MIRROR].ok
     assert store.files[C].urls[0]["server"] == MIRROR
+
+
+def _listed_on_both(tmp_path):
+    router = Router(FakeBlossomServer(SERVER, blobs=[descriptor(A)]),
+                    FakeBlossomServer(MIRROR, blobs=[descriptor(A, server=MIRROR)]))
+    store, nam, _signer, _ = make(tmp_path, router)
+    store.fetch()
+    nam.settle()
+    deleted, failed = [], []
+    store.file_deleted.connect(deleted.append)
+    store.delete_failed.connect(lambda sha, code: failed.append((sha, code)))
+    return store, nam, router, deleted, failed
+
+
+def test_a_delete_no_server_takes_keeps_the_file(tmp_path):
+    """Never claim a file is gone when it is not: it comes back on the
+    next listing, and the person believed it deleted."""
+    store, nam, router, deleted, failed = _listed_on_both(tmp_path)
+    router.unreachable |= {"good.example", "mirror.example"}
+    store.delete_file(A)
+    nam.settle()
+    assert deleted == []
+    assert failed == [(A, "NETWORK_UNAVAILABLE")]
+    assert {u["server"] for u in store.files[A].urls} == {SERVER, MIRROR}
+
+
+def test_a_delete_one_server_misses_keeps_the_copy_it_still_has(tmp_path):
+    store, nam, router, deleted, failed = _listed_on_both(tmp_path)
+    router.unreachable.add("mirror.example")
+    store.delete_file(A)
+    nam.settle()
+    assert deleted == []
+    assert failed == [(A, "NETWORK_UNAVAILABLE")]
+    assert [u["server"] for u in store.files[A].urls] == [MIRROR]
+    assert store.files[A].url.startswith(MIRROR)
+
+    router.unreachable.clear()
+    store.delete_file(A)
+    nam.settle()
+    assert deleted == [A] and A not in store.files
 
 
 def test_copies_are_ordered_primary_first(tmp_path):
@@ -196,10 +239,12 @@ def test_no_room_anywhere_fails_plainly(tmp_path):
     store.fetch()
     nam.settle()
     calls = len(nam.calls)
-    failed = []
+    failed, codes = [], []
     store.upload_failed.connect(lambda n, r: failed.append(r))
+    store.upload_failed_code.connect(lambda n, c: codes.append(c))
     store.upload_bytes(BODY, name="photo.png", mime_type="image/png")
     assert failed and "enough space" in failed[0]
+    assert codes == ["QUOTA_FULL"]
     assert len(nam.calls) == calls               # nothing left the machine
 
 
@@ -385,31 +430,178 @@ MB = 1024 ** 2
 
 def test_storage_text_says_the_number_and_warns_in_words():
     ok = ServerListing(origin=E21, ok=True)
-    text, fraction = storage_text(int(1.2 * GB), PER_USER_BYTES, ok)
-    assert text == "1.2 GB of 5 GB used" and fraction == pytest.approx(0.24)
-    text, _ = storage_text(int(4.6 * GB), PER_USER_BYTES, ok)
-    assert text.startswith("Almost full:")
-    text, fraction = storage_text(6 * GB, PER_USER_BYTES, ok)
-    assert text.startswith("Full:") and fraction == 1.0
-    assert storage_text(640 * MB, PER_USER_BYTES, ok)[0] == "640 MB of 5 GB used"
+    assert storage_text(int(1.2 * GB), PER_USER_BYTES, ok) == "1.2 GB of 5 GB used"
+    assert storage_text(int(4.6 * GB), PER_USER_BYTES, ok).startswith("Almost full:")
+    assert storage_text(6 * GB, PER_USER_BYTES, ok).startswith("Full:")
+    assert storage_text(640 * MB, PER_USER_BYTES, ok) == "640 MB of 5 GB used"
 
 
 def test_the_members_allowance_reads_as_the_association_states_it():
     # 5 x 1024^3 bytes once read "5.4 GB" against a "5 GB" promise.
     ok = ServerListing(origin=E21, ok=True)
-    text, _ = storage_text(PER_USER_BYTES, PER_USER_BYTES, ok)
-    assert text == "Full: 5 GB of 5 GB used"
+    assert storage_text(PER_USER_BYTES, PER_USER_BYTES, ok) == "Full: 5 GB of 5 GB used"
     assert PER_USER_LABEL == "5 GB"
 
 
 def test_storage_text_rounds_up_to_a_gigabyte_rather_than_1024_megabytes():
     ok = ServerListing(origin=E21, ok=True)
-    assert storage_text(GB - 1, PER_USER_BYTES, ok)[0].startswith("1 GB of")
+    assert storage_text(GB - 1, PER_USER_BYTES, ok).startswith("1 GB of")
 
 
-def test_storage_text_is_honest_about_what_it_does_not_know():
-    assert storage_text(0, 5 * GB, None)[0] == "Checking…"
+def test_storage_text_says_nothing_rather_than_a_guess():
+    """A number from a listing that failed is a guess: the line is left
+    out (as iCloud leaves it out) rather than saying "unavailable"."""
+    assert storage_text(0, 5 * GB, None) == ""
     down = ServerListing(origin=E21, ok=False)
-    assert storage_text(0, 5 * GB, down)[0] == "Usage unavailable right now."
+    assert storage_text(0, 5 * GB, down) == ""
     cut = ServerListing(origin=E21, ok=True, truncated=True)
-    assert storage_text(GB, 5 * GB, cut)[0].startswith("At least")
+    assert storage_text(GB, 5 * GB, cut).startswith("At least")
+
+
+# --------------------------------------------------------------------------- #
+# When the library cannot be listed, the reason it says is the real one
+# --------------------------------------------------------------------------- #
+
+def _unlistable(tmp_path, *, pool_error=None, signer_failure=None, down=False):
+    router = Router(FakeBlossomServer(SERVER, blobs=[descriptor(A)]))
+    if down:
+        router.down.add("good.example")
+    settings = BlossomSettings(tmp_path / "blossom_servers.json")
+    settings.set_custom_servers([SERVER])
+    nam = FakeNam(None, responder=router)
+    signer = FakeSigner(failure=signer_failure)
+    store = MediaStore(session_pool=FakeSessionPool(signer, error=pool_error),
+                       profile_provider=lambda: FakeProfile(), settings=settings,
+                       client=BlossomClient(nam=nam))
+    errors = []
+    store.fetch_error.connect(errors.append)
+    store.fetch()
+    nam.settle()
+    return errors
+
+
+def test_a_signer_that_declines_listing_is_named_as_the_reason(tmp_path):
+    assert _unlistable(tmp_path, signer_failure="user declined") == ["SIGNER_REJECTED"]
+
+
+def test_a_signer_that_cannot_be_reached_is_named_too(tmp_path):
+    assert _unlistable(tmp_path, pool_error="no answer") == ["SIGNER_REJECTED"]
+
+
+def test_a_server_that_answers_but_does_not_list_is_not_the_connection(tmp_path):
+    """503, or a server without /list (BUD-12 makes it optional): the
+    connection works, so the person is not sent to check it."""
+    assert _unlistable(tmp_path, down=True) == ["LIST_FAILED"]
+
+
+def test_servers_that_cannot_be_reached_are_named_as_the_reason(tmp_path):
+    router_reply = error_reply(0)
+    settings = BlossomSettings(tmp_path / "blossom_servers.json")
+    settings.set_custom_servers([SERVER])
+    nam = FakeNam(None, responder=lambda *a: router_reply)
+    store = MediaStore(session_pool=FakeSessionPool(FakeSigner()),
+                       profile_provider=lambda: FakeProfile(), settings=settings,
+                       client=BlossomClient(nam=nam))
+    errors = []
+    store.fetch_error.connect(errors.append)
+    store.fetch()
+    nam.settle()
+    assert errors == ["NETWORK_UNAVAILABLE"]
+
+
+def test_a_shared_copy_the_listing_does_not_show_is_still_deleted(tmp_path):
+    """Stop Sharing deletes a public copy by the servers its record
+    names, also when this device's listing has not seen it (made on
+    another device, or on a server not listed)."""
+    router = Router(FakeBlossomServer(SERVER, blobs=[descriptor(C)]),
+                    FakeBlossomServer(MIRROR))
+    store, nam, _signer, _ = make(tmp_path, router)
+    deleted = []
+    store.file_deleted.connect(deleted.append)
+    store.delete_file(C, servers=[SERVER])
+    nam.settle()
+    assert deleted == [C]
+    assert router.by_host["good.example"].deletes == [C]
+    assert router.by_host["mirror.example"].deletes == []
+
+
+def test_a_delete_also_reaches_the_servers_its_record_names(tmp_path):
+    """Stop Sharing deletes a public copy from every server it was ever
+    put on, not only where the listing shows it now: a server removed
+    from Media Servers keeps serving the copy otherwise, while the window
+    says it is no longer shared."""
+    router = Router(FakeBlossomServer(SERVER, blobs=[descriptor(C)]),
+                    FakeBlossomServer(MIRROR, blobs=[descriptor(C, server=MIRROR)]))
+    store, nam, _signer, _ = make(tmp_path, router, servers=(SERVER,))
+    store.fetch()
+    nam.settle()
+    assert [u["server"] for u in store.files[C].urls] == [SERVER]   # MIRROR is not listed
+    deleted = []
+    store.file_deleted.connect(deleted.append)
+    store.delete_file(C, servers=[MIRROR])
+    nam.settle()
+    assert deleted == [C]
+    assert router.by_host["good.example"].deletes == [C]
+    assert router.by_host["mirror.example"].deletes == [C]
+
+
+def _refuses_unknown_deletes(server):
+    """A server that answers 401 to a delete of a blob it never had."""
+    def respond(verb, request, body):
+        if verb == "delete":
+            server.deletes.append(request.url().path().strip("/"))
+            return error_reply(401, reason="Blob not owned by pubkey")
+        return server(verb, request, body)
+    respond.origin = server.origin
+    return respond
+
+
+@pytest.mark.parametrize("mirror_answers", ["unreachable", "401"])
+def test_a_server_that_never_had_the_copy_does_not_keep_it_shared(tmp_path, mirror_answers):
+    """Stop Sharing also asks every server in use, in case the copy is
+    there unrecorded. One that never had it (not in the copy's record,
+    not in its listing) can't keep it shared by being unreachable today,
+    or by refusing to delete what it doesn't have."""
+    mirror = FakeBlossomServer(MIRROR)
+    router = Router(FakeBlossomServer(SERVER, blobs=[descriptor(C)]),
+                    _refuses_unknown_deletes(mirror) if mirror_answers == "401" else mirror)
+    if mirror_answers == "unreachable":
+        router.unreachable.add("mirror.example")
+    store, nam, _signer, _ = make(tmp_path, router)
+    store.fetch()
+    nam.settle()
+    deleted, failed = [], []
+    store.file_deleted.connect(deleted.append)
+    store.delete_failed.connect(lambda *args: failed.append(args))
+    store.delete_file(C, servers=[SERVER], best_effort=[SERVER, MIRROR])
+    nam.settle()
+    assert (deleted, failed) == ([C], [])
+    assert router.by_host["good.example"].deletes == [C]
+
+
+def test_a_server_the_copy_was_put_on_keeps_it_shared_while_it_cannot_be_reached(tmp_path):
+    router = Router(FakeBlossomServer(SERVER, blobs=[descriptor(C)]),
+                    FakeBlossomServer(MIRROR, blobs=[descriptor(C, server=MIRROR)]))
+    router.unreachable.add("mirror.example")
+    store, nam, _signer, _ = make(tmp_path, router)
+    failed = []
+    store.delete_failed.connect(lambda *args: failed.append(args))
+    store.delete_file(C, servers=[SERVER, MIRROR], best_effort=[SERVER, MIRROR])
+    nam.settle()
+    assert failed == [(C, "NETWORK_UNAVAILABLE")]
+
+
+def test_a_server_whose_listing_shows_the_copy_keeps_it_shared_while_it_refuses(tmp_path):
+    """Not in the copy's record (another device mirrored it), but listed
+    there: it has the copy."""
+    router = Router(FakeBlossomServer(SERVER, blobs=[descriptor(C)]),
+                    _refuses_unknown_deletes(
+                        FakeBlossomServer(MIRROR, blobs=[descriptor(C, server=MIRROR)])))
+    store, nam, _signer, _ = make(tmp_path, router)
+    store.fetch()
+    nam.settle()
+    failed = []
+    store.delete_failed.connect(lambda *args: failed.append(args))
+    store.delete_file(C, servers=[SERVER], best_effort=[SERVER, MIRROR])
+    nam.settle()
+    assert failed == [(C, "AUTH_REJECTED")]

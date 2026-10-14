@@ -72,7 +72,6 @@ import time as _time
 
 from PySide6.QtCore import QObject, Signal
 
-from i18n import _, ngettext
 
 from ..bunker import BunkerClient, BunkerSessionPool
 from ..outbox import RelayDirectory, ask_private_relays
@@ -94,7 +93,7 @@ _HEX_DIGITS: Final[frozenset] = frozenset("0123456789abcdef")
 # secret and removed. Keys, ciphertext and base64 all match; ordinary
 # prose does not.
 _OPAQUE_RUN: Final = re.compile(r"[A-Za-z0-9+/=_-]{24,}")
-_REDACTED: Final[str] = _("[hidden]")
+_REDACTED: Final[str] = "[hidden]"
 
 # Failure text is for a person to read, not a payload to carry.
 _MAX_REASON_CHARS: Final[int] = 200
@@ -176,10 +175,10 @@ def parse_file_record(plaintext: str, *, identifier: str) -> ParsedRecord:
         # The exception text is not repeated. A truncated payload can
         # end mid-key, and json's message quotes what it choked on.
         return ParsedRecord(
-            reason=_("This file's details could not be read, so it was skipped.")
+            reason="This file's details could not be read, so it was skipped."
         )
     if not isinstance(payload, dict):
-        return ParsedRecord(reason=_("This record is not a file, so it was skipped."))
+        return ParsedRecord(reason="This record is not a file, so it was skipped.")
 
     if payload.get("deleted"):
         # The user deleted this. Not a fault, and not a file.
@@ -212,25 +211,25 @@ def parse_file_record(plaintext: str, *, identifier: str) -> ParsedRecord:
         # identify. That record is claiming to be that file and failing,
         # so the doubt is real, and it stays confined to that one hash.
         return ParsedRecord(
-            reason=_("This record does not name a file, so it was skipped.")
+            reason="This record does not name a file, so it was skipped."
         )
 
     if is_sha256(filed_under) and filed_under != sha256:
         return ParsedRecord(
-            reason=_("This record does not match the file it is filed under, "
+            reason=("This record does not match the file it is filed under, "
                      "so it was skipped.")
         )
 
     key_hex = str(payload.get("encryptionKey") or "").strip()
     if not key_hex:
         return ParsedRecord(
-            reason=_("This file has no key in your library, so it cannot be "
+            reason=("This file has no key in your library, so it cannot be "
                      "opened here.")
         )
     if not _is_file_key(key_hex):
         # The value itself never travels with the complaint.
         return ParsedRecord(
-            reason=_("This file's key is not in a form this app understands, "
+            reason=("This file's key is not in a form this app understands, "
                      "so it cannot be opened.")
         )
 
@@ -249,7 +248,7 @@ def parse_file_record(plaintext: str, *, identifier: str) -> ParsedRecord:
         # PrivateBlob validates too. If the two disagree the record is
         # the thing at fault, so it is skipped rather than crashed on.
         return ParsedRecord(
-            reason=_("This file's record is incomplete, so it was skipped.")
+            reason="This file's record is incomplete, so it was skipped."
         )
     return ParsedRecord(blob=blob)
 
@@ -340,11 +339,11 @@ def _safe_reason(reason: object, *, echo_of: str = "") -> str:
     """
     text = str(reason or "").strip()
     if not text:
-        return _("the signer app gave no reason")
+        return "the signer app gave no reason"
     if len(text) > _MAX_REASON_CHARS:
         text = text[:_MAX_REASON_CHARS].rstrip() + "..."
     if _echoes(text, echo_of):
-        return _("the signer app gave no reason MyEditor can repeat")
+        return "the signer app gave no reason MyEditor can repeat"
     return _OPAQUE_RUN.sub(_REDACTED, text)
 
 
@@ -595,7 +594,7 @@ class PrivateLibrary(QObject):
         self._covered = False
         self._unresolved = set()
         gen = self._generation
-        self._emit_status(_("Opening your private library..."))
+        self._emit_status("Opening your private library...")
 
         def _on_relays(relays) -> None:
             if not self._is_current(gen):
@@ -643,7 +642,7 @@ class PrivateLibrary(QObject):
                 # so the count the user sees adds up.
                 self._failures.append(LibraryFailure(
                     identifier=identifier,
-                    reason=_("This file's details are missing from your "
+                    reason=("This file's details are missing from your "
                              "library, so it was skipped."),
                 ))
         self._batch_active = True
@@ -676,7 +675,7 @@ class PrivateLibrary(QObject):
         self._batch_active = False
         self._loading = False
         self._emit_status(
-            _("Couldn't reach your signer app, so your private library "
+            ("Couldn't reach your signer app, so your private library "
               "stayed closed: {reason}").format(reason=_safe_reason(reason))
         )
         self.library_changed.emit()
@@ -750,7 +749,7 @@ class PrivateLibrary(QObject):
             return
         self._failures.append(LibraryFailure(
             identifier=identifier,
-            reason=_("Your signer app could not open this file: {reason}").format(
+            reason="Your signer app could not open this file: {reason}".format(
                 reason=_safe_reason(reason, echo_of=ciphertext)),
         ))
         self._settle()
@@ -768,18 +767,11 @@ class PrivateLibrary(QObject):
         count = len(self._blobs)
         failed = len(self._failures)
         if not count and not failed:
-            return _("Your private library is empty.")
+            return "Your private library is empty."
+        files = "file" if count == 1 else "files"
         if failed:
-            return ngettext(
-                "{count} file in your private library, {failed} could not be opened.",
-                "{count} files in your private library, {failed} could not be opened.",
-                count,
-            ).format(count=count, failed=failed)
-        return ngettext(
-            "{count} file in your private library.",
-            "{count} files in your private library.",
-            count,
-        ).format(count=count)
+            return f"{count} {files} in your private library, {failed} could not be opened."
+        return f"{count} {files} in your private library."
 
 
 # --------------------------------------------------------------------------- #

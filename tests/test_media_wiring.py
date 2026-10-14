@@ -300,21 +300,14 @@ def test_dead_image_addresses_are_recovered_from_the_published_servers(init_body
     assert 0 <= list_at < assets_at
 
 
-def test_every_library_window_is_offered_the_published_servers():
-    source = textwrap.dedent(inspect.getsource(MainWindow))
-    tree = ast.parse(source)
-    offered = [
-        node for node in ast.walk(tree)
-        if isinstance(node, ast.Call)
-        and getattr(node.func, "attr", "") == "set_server_suggestions"
-    ]
-    libraries = [
-        node for node in ast.walk(tree)
-        if isinstance(node, ast.Call)
-        and getattr(node.func, "id", "") == "MediaLibraryDialog"
-    ]
-    # Each library window when it opens, plus the open one when the list changes.
-    assert len(offered) >= len(libraries) + 1
+def test_the_media_servers_sheet_is_offered_the_published_servers():
+    """The servers the account lists are offered where servers are
+    managed: when the sheet opens, and while it is open when the list
+    changes."""
+    source = textwrap.dedent(inspect.getsource(MainWindow._open_media_servers))
+    assert "suggestions=self._media_server_suggestions()" in source
+    source = textwrap.dedent(inspect.getsource(MainWindow._on_media_server_suggestions))
+    assert "offer(self._media_server_suggestions())" in source
 
 
 def test_sharing_the_server_list_asks_first_then_publishes_what_uploads_use(monkeypatch):
@@ -354,3 +347,244 @@ def test_sharing_the_server_list_asks_first_then_publishes_what_uploads_use(monk
     MainWindow._share_media_server_list(host)          # Share List
     assert published == [["https://a.example", "https://b.example"]]
     assert refreshed == [True] and shown == ["Your media server list is shared."]
+
+
+def test_a_library_upload_that_fails_with_no_library_open_is_said_in_the_window():
+    """The store owns the job, so its failure reaches the person even
+    after the library window that started it was closed: counted in the
+    status bar (tests/test_library_failures_status.py). An open library
+    says it itself."""
+    from types import SimpleNamespace
+    shown = []
+    library = None
+    host = SimpleNamespace(
+        _media_store=SimpleNamespace(can_retry=lambda name: name == "Holiday.png"),
+        _visible_media_library=lambda: library,
+        _library_failures={},
+    )
+    host._show_library_failures = lambda: shown.append(dict(host._library_failures))
+    reason = "Couldn’t reach your media server. Check your internet connection."
+    MainWindow._on_library_upload_failed(host, "Holiday.png", reason)
+    MainWindow._on_library_upload_failed(host, f"asset:{'e' * 64}", reason)   # the editor's own
+    assert shown == [{"Holiday.png": reason}]
+    library = object()
+    MainWindow._on_library_upload_failed(host, "Holiday.png", reason)
+    assert len(shown) == 1
+
+
+def test_the_window_listens_for_library_upload_failures(init_body):
+    source = textwrap.dedent(inspect.getsource(MainWindow.__init__))
+    assert "upload_failed.connect(self._on_library_upload_failed)" in source
+
+
+def _quitting_host(added, saves=()):
+    from types import SimpleNamespace
+    host = SimpleNamespace(
+        tabs=SimpleNamespace(count=lambda: 0, widget=lambda i: None),
+        _media_store=SimpleNamespace(added_uploads=lambda: list(added)),
+        _media_saver=SimpleNamespace(pending=lambda: list(saves)),
+    )
+    for name in ("_uploading", "_still_uploading", "_what_leaving_does", "_may_leave_uploads",
+                 "_save_question_words", "_editor_from_widget", "_library_uploads",
+                 "_media_saves"):
+        method = getattr(MainWindow, name)
+        setattr(host, name, method.__get__(host) if not isinstance(
+            MainWindow.__dict__.get(name), staticmethod) else method)
+    return host
+
+
+def test_quitting_while_the_library_uploads_asks_first(monkeypatch):
+    """As with audio and video in a document: quitting stops the upload,
+    so it is asked, with Cancel the default."""
+    import main_window as mw_module
+    from nostr.blossom.store import AddedUpload
+    asked = []
+    monkeypatch.setattr(mw_module, "confirm_destructive",
+                        lambda parent, **kw: asked.append(kw) or False)
+    host = _quitting_host([AddedUpload(name="Holiday.png", mime="image/png", state="sending"),
+                           AddedUpload(name="Old.png", mime="image/png", state="failed")])
+    assert MainWindow._resolve_unsaved_before_closing(host) is False
+    assert asked[0]["title"] == "“Holiday.png” is still uploading."
+    assert asked[0]["message"] == (
+        "Quitting now stops the upload, and the file isn’t added to your Media Library.")
+    assert asked[0]["action"] == "Quit Anyway"
+
+
+def test_quitting_with_only_failed_library_uploads_asks_nothing(monkeypatch):
+    import main_window as mw_module
+    from nostr.blossom.store import AddedUpload
+    monkeypatch.setattr(mw_module, "confirm_destructive",
+                        lambda *a, **kw: pytest.fail("asked"))
+    host = _quitting_host([AddedUpload(name="Old.png", mime="image/png", state="failed")])
+    assert MainWindow._resolve_unsaved_before_closing(host) is True
+
+
+def _saving_host(window_open=False):
+    from types import SimpleNamespace
+    shown = []
+    host = SimpleNamespace(
+        _media_window_open=lambda: window_open,
+        _media_saver=SimpleNamespace(current=""),
+        status=SimpleNamespace(showMessage=lambda text, ms=0: shown.append((text, ms)),
+                               currentMessage=lambda: shown[-1][0] if shown else ""),
+        _media_save_said="",
+    )
+    for name in ("_on_media_save_started", "_on_media_save_finished", "_say_media_save_running",
+                 "_media_save_announced"):
+        setattr(host, name, getattr(MainWindow, name).__get__(host))
+    return host, shown
+
+
+def test_a_save_that_outlives_its_library_window_is_said_in_the_window():
+    """Closing the library doesn't stop a Save As, as in the Finder: the
+    status bar says it is saving, and how it went, until the next message."""
+    host, shown = _saving_host()
+    host._media_saver.current = "/Users/me/Movies/Talk.mp4"
+    host._say_media_save_running()                       # the library closed
+    host._on_media_save_finished("/Users/me/Movies/Talk.mp4", "")
+    host._on_media_save_started("/Users/me/Movies/Scan.pdf")
+    host._on_media_save_finished("/Users/me/Movies/Scan.pdf", "missing")
+    assert shown == [
+        ("Saving “Talk.mp4”…", 0),
+        ("Saved: /Users/me/Movies/Talk.mp4", 0),
+        ("Saving “Scan.pdf”…", 0),
+        ("“Scan.pdf” isn’t on your media servers anymore, so it couldn’t be saved.", 0),
+    ]
+
+
+def test_an_open_library_window_says_how_its_saves_go_itself():
+    host, shown = _saving_host(window_open=True)
+    host._media_saver.current = "/Users/me/Movies/Talk.mp4"
+    host._say_media_save_running()
+    host._on_media_save_started("/Users/me/Movies/Talk.mp4")
+    host._on_media_save_finished("/Users/me/Movies/Talk.mp4", "network")
+    assert shown == []
+
+
+def test_the_library_windows_share_the_windows_saver():
+    source = inspect.getsource(MainWindow)
+    assert source.count("saver=self._media_saver,") == 2
+    init = textwrap.dedent(inspect.getsource(MainWindow.__init__))
+    assert "self._media_saver.started.connect(self._on_media_save_started)" in init
+    assert "self._media_saver.finished.connect(self._on_media_save_finished)" in init
+    assert "self._media_saver.batch_finished.connect(self._on_media_saves_finished)" in init
+    assert "self._message_tip = _MessageTip(self.status)" in init
+
+
+def test_quitting_stops_a_save_and_its_part_file_goes(monkeypatch):
+    from PySide6.QtGui import QCloseEvent
+    from tests.test_quit_sends_sources import closing_host
+    order = []
+    MainWindow.closeEvent(closing_host(monkeypatch, order), QCloseEvent())
+    assert "saves stopped" in order
+
+
+@pytest.mark.parametrize("states, title, message", [
+    (["finishing"], "“Holiday.png” is still uploading.",
+     "Quitting now stops copying it to your other media servers. It’s already in your Media "
+     "Library."),
+    (["finishing", "finishing"], "2 files are still uploading.",
+     "Quitting now stops copying them to your other media servers. They’re already in your "
+     "Media Library."),
+    (["finishing", "sending"], "2 files are still uploading.",
+     "Quitting now stops the upload, and the file isn’t added to your Media Library."),
+])
+def test_quitting_while_a_library_file_is_only_being_copied_says_it_is_in_the_library(
+        monkeypatch, states, title, message):
+    """Once its first server has it, the file is in the library: quitting
+    stops only its copies to the other servers."""
+    import main_window as mw_module
+    from nostr.blossom.store import AddedUpload
+    asked = []
+    monkeypatch.setattr(mw_module, "confirm_destructive",
+                        lambda parent, **kw: asked.append(kw) or False)
+    names = ["Holiday.png", "Talk.mp4"]
+    host = _quitting_host([AddedUpload(name=names[i], mime="image/png", state=state)
+                           for i, state in enumerate(states)])
+    assert MainWindow._resolve_unsaved_before_closing(host) is False
+    assert (asked[0]["title"], asked[0]["message"]) == (title, message)
+
+
+@pytest.mark.parametrize("states, saves, title, message", [
+    ([], ["/out/Talk.mp4"], "A file is still being saved.",
+     "Quitting now stops the download, and the file isn’t saved."),
+    ([], ["/out/Talk.mp4", "/out/Scan.pdf"], "2 files are still being saved.",
+     "Quitting now stops the downloads, and the files aren’t saved."),
+    (["sending"], ["/out/Talk.mp4"], "2 files are still uploading or being saved.",
+     "Quitting now stops the upload, and the file isn’t added to your Media Library. "
+     "Quitting also stops saving “Talk.mp4”."),
+    (["sending"], ["/out/Talk.mp4", "/out/Scan.pdf"],
+     "3 files are still uploading or being saved.",
+     "Quitting now stops the upload, and the file isn’t added to your Media Library. "
+     "Quitting also stops saving 2 files."),
+])
+def test_quitting_while_a_save_runs_asks_first(monkeypatch, states, saves, title, message):
+    """Quitting would throw away a download the person asked for, as
+    Safari asks before quitting with downloads: in the one question that
+    asks about uploads, with Cancel the default."""
+    import main_window as mw_module
+    from nostr.blossom.store import AddedUpload
+    asked = []
+    monkeypatch.setattr(mw_module, "confirm_destructive",
+                        lambda parent, **kw: asked.append(kw) or False)
+    host = _quitting_host([AddedUpload(name="Holiday.png", mime="image/png", state=state)
+                           for state in states], saves)
+    assert MainWindow._resolve_unsaved_before_closing(host) is False
+    assert (asked[0]["title"], asked[0]["message"], asked[0]["action"]) == (
+        title, message, "Quit Anyway")
+
+
+def test_quitting_with_unsaved_changes_and_a_save_running_says_both_in_one_question():
+    host = _quitting_host([], ["/out/Talk.mp4"])
+    assert host._save_question_words(host._uploading(), quitting=True,
+                                     saving=host._media_saves()) == (
+        "A file is still being saved. Quitting now stops the download, and the file isn’t "
+        "saved. Your changes will be lost if you don’t save them.")
+
+
+def test_closing_a_document_while_a_save_runs_asks_nothing(monkeypatch):
+    """The save goes on: only quitting stops it."""
+    host = _quitting_host([], ["/out/Talk.mp4"])
+    assert host._may_leave_uploads([], quitting=False) is True
+
+
+def _status_host():
+    """A host with a real status bar, and a library window that opens
+    and closes."""
+    from types import SimpleNamespace
+    from PySide6.QtWidgets import QApplication, QStatusBar
+    QApplication.instance() or QApplication([])
+    host = SimpleNamespace(window_open=False, _media_saver=SimpleNamespace(current=""),
+                           status=QStatusBar(), _media_save_said="")
+    host._media_window_open = lambda: host.window_open
+    for name in ("_on_media_save_started", "_on_media_save_finished", "_say_media_save_running",
+                 "_media_save_announced"):
+        setattr(host, name, getattr(MainWindow, name).__get__(host))
+    return host
+
+
+@pytest.mark.parametrize("why, said", [
+    ("", "Saved: /out/Big.mp4"),
+    ("missing", "“Big.mp4” isn’t on your media servers anymore, so it couldn’t be saved."),
+    ("cancelled", ""),
+])
+def test_the_status_bar_says_how_a_save_it_announced_ended_whoever_is_open(why, said):
+    """It said "Saving…" when the library closed; the library was opened
+    again and the save ended there. The status bar doesn't go on saying
+    it is saving."""
+    host = _status_host()
+    host._media_saver.current = "/out/Big.mp4"
+    host._say_media_save_running()                     # the library closed
+    assert host.status.currentMessage() == "Saving “Big.mp4”…"
+    host.window_open = True                            # and was opened again
+    host._on_media_save_finished("/out/Big.mp4", why)
+    assert host.status.currentMessage() == said
+
+
+def test_an_open_library_leaves_another_status_message_alone():
+    host = _status_host()
+    host.status.showMessage("Saved: /Users/me/Essay.md")
+    host.window_open = True
+    host._on_media_save_started("/out/Big.mp4")
+    host._on_media_save_finished("/out/Big.mp4", "")
+    assert host.status.currentMessage() == "Saved: /Users/me/Essay.md"

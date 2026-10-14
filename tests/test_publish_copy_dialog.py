@@ -53,7 +53,6 @@ from nostr.ui.publish_copy_dialog import (
     WORKING,
     PickResolution,
     PublishCopyDialog,
-    _storage_line,
     resolution_from,
     resolve_pick,
 )
@@ -201,62 +200,41 @@ def build(tmp_path, blobs, *, fetcher=None, uploader=None, ledger=None):
     )
 
 
-def rows(dialog) -> list:
-    return [dialog._list.item(i).text() for i in range(dialog._list.count())]
-
-
 # --------------------------------------------------------------------- #
-# What the user is told before anything moves                            #
+# What the person is asked before anything moves                         #
 # --------------------------------------------------------------------- #
 
-def test_the_four_promises_are_all_made(tmp_path):
-    world = build(tmp_path, [private()])
-    text = world.dialog._promises.text()
-    assert "public copy" in text and "anyone" in text.lower()
-    assert "not changed" in text and "stays private" in text
-    assert "Camera and location" in text and "removed" in text
-    assert "revoke" in text
+def test_the_question_names_the_image_and_says_who_will_see_it(tmp_path):
+    world = build(tmp_path, [private(name="beach.jpg")])
+    assert world.dialog._heading.text() == "Share “beach.jpg”?"
+    assert world.dialog._message.text() == (
+        "Anyone with the link will be able to see it. Camera and location "
+        "details are removed first.")
 
 
-def test_the_promises_are_shown_before_the_choice_and_not_during(tmp_path):
-    world = build(tmp_path, [private()], uploader=FakeUploader(auto=False))
+def test_an_image_with_no_name_is_this_image(tmp_path):
+    world = build(tmp_path, [private(name="")])
+    assert world.dialog._heading.text() == "Share this image?"
+
+
+def test_several_images_are_asked_about_together(tmp_path):
+    world = build(tmp_path, [private(), private(OTHER)])
+    assert world.dialog._heading.text() == "Share 2 images?"
+    assert "see them" in world.dialog._message.text()
+
+
+def test_the_question_is_shown_before_the_choice_and_not_during(tmp_path):
+    world = build(tmp_path, [private(name="beach.jpg")], uploader=FakeUploader(auto=False))
     assert world.dialog.state == EXPLAIN
-    assert world.dialog._promises.isVisibleTo(world.dialog)
+    assert world.dialog._message.isVisibleTo(world.dialog)
     world.dialog._on_create_clicked()
     assert world.dialog.state == WORKING
-    assert not world.dialog._promises.isVisibleTo(world.dialog)
-
-
-def test_the_storage_cost_is_stated(tmp_path):
-    world = build(tmp_path, [private(size=2 * 1024 * 1024)])
-    line = world.dialog._storage.text()
-    assert "2.0 MB" in line         # the units the Media Library uses
-    # A copy sits beside the original rather than replacing it, which is
-    # the part a quota makes expensive.
-    assert "original" in line
-
-
-def test_the_storage_line_adds_the_whole_set_up():
-    total = _storage_line([private(size=1024), private(OTHER, size=3 * 1024)])
-    assert "4 KB" in total
-    assert "copies" in total
+    assert not world.dialog._message.isVisibleTo(world.dialog)
+    assert world.dialog._heading.text() == "Sharing “beach.jpg”…"
 
 
 def test_the_action_button_says_what_it_does(tmp_path):
-    one = build(tmp_path, [private()])
-    assert one.dialog._create_btn.text() == "Create public copy"
-    many = build(tmp_path, [private(), private(OTHER)])
-    assert many.dialog._create_btn.text() == "Create 2 public copies"
-
-
-def test_each_file_is_listed_by_name_and_size(tmp_path):
-    world = build(tmp_path, [private(name="beach.jpg", size=4096)])
-    assert rows(world.dialog) == ["beach.jpg  ·  4 KB  ·  Waiting"]
-
-
-def test_a_file_with_no_name_is_listed_by_its_hash(tmp_path):
-    world = build(tmp_path, [private(name="")])
-    assert CIPHER_SHA[:8] in rows(world.dialog)[0]
+    assert build(tmp_path, [private()]).dialog._create_btn.text() == "Share"
 
 
 def test_a_file_that_already_has_a_copy_is_not_offered_again(tmp_path):
@@ -319,23 +297,12 @@ def test_the_bytes_uploaded_are_the_scrubbed_ones(tmp_path):
     assert hashlib.sha256(sent).hexdigest() == SCRUBBED_SHA
 
 
-def test_each_stage_reaches_the_row_it_belongs_to(tmp_path):
-    world = build(tmp_path, [private()], uploader=FakeUploader(auto=False))
-    world.dialog._on_create_clicked()
-    # Parked at the upload, so the row shows the stage it is actually at.
-    assert "Uploading the copy" in rows(world.dialog)[0]
-    world.uploader.finish()
-    assert "Public copy created" in rows(world.dialog)[0]
-
-
-def test_the_scrub_stage_names_what_it_removes(tmp_path):
+def test_the_scrub_runs_before_the_upload(tmp_path):
     seen = []
     world = build(tmp_path, [private()], uploader=FakeUploader(auto=False))
     world.maker.copy_progress.connect(lambda _s, stage: seen.append(stage))
     world.dialog._on_create_clicked()
-    assert CopyStage.PREPARING in seen
-    world.dialog._on_copy_progress(CIPHER_SHA, CopyStage.PREPARING)
-    assert "Removing camera and location data" in rows(world.dialog)[0]
+    assert seen.index(CopyStage.PREPARING) < seen.index(CopyStage.UPLOADING)
 
 
 def test_progress_is_determinate_and_counts_settled_copies(tmp_path):
@@ -346,7 +313,6 @@ def test_progress_is_determinate_and_counts_settled_copies(tmp_path):
     assert world.dialog._progress.isVisibleTo(world.dialog)
     world.uploader.finish()
     assert world.dialog._progress.value() == 1
-    assert "1 of 2" in world.dialog._status.text()
 
 
 # --------------------------------------------------------------------- #
@@ -360,8 +326,7 @@ def test_a_failure_stops_the_run_and_names_a_reason(tmp_path):
 
     assert world.dialog.state == FAILED
     assert world.dialog.publish_set.blobs is None
-    assert "Nothing was published" in world.dialog._status.text()
-    assert "could not be downloaded" in world.dialog._status.text()
+    assert "couldn’t be downloaded" in world.dialog._status.text()
     # Still open: reporting a partial set as done is the failure mode.
     assert world.dialog.result() != QDialog.Accepted
 
@@ -375,8 +340,8 @@ def test_the_copies_made_before_a_failure_are_named_not_hidden(tmp_path):
 
     assert len(world.dialog.publish_set.minted) == 1
     status = world.dialog._status.text()
-    assert "1 copy made before this" in status
-    assert "revoked" in status
+    assert "1 other image was shared already" in status
+    assert "Stop Sharing in the Media Library" in status
 
 
 def test_a_failed_run_offers_a_retry_and_not_a_second_create(tmp_path):
@@ -418,7 +383,7 @@ def test_a_failed_set_never_reports_a_public_address(tmp_path):
     resolution = resolution_from(world.dialog.publish_set)
     assert not resolution.ok
     assert resolution.url == ""
-    assert "could not be downloaded" in resolution.reason
+    assert "couldn’t be downloaded" in resolution.reason
 
 
 # --------------------------------------------------------------------- #
@@ -437,7 +402,7 @@ def test_cancelling_before_an_upload_leaves_nothing_behind(tmp_path):
     assert world.uploader.calls == []
     assert len(world.ledger) == 0
     assert world.dialog.publish_set.cancelled
-    assert "Nothing was uploaded" in world.dialog._status.text()
+    assert world.dialog._status.text() == "Cancelled. Nothing was shared."
 
 
 def test_a_copy_that_is_already_uploading_is_carried_through(tmp_path):
@@ -476,8 +441,8 @@ def test_a_copy_already_minted_is_named_when_the_rest_is_cancelled(tmp_path):
 
     status = world.dialog._status.text()
     assert "Cancelled" in status
-    assert "1 public copy had already been created" in status
-    assert "revoked" in status
+    assert "1 image was shared before that" in status
+    assert "Stop Sharing in the Media Library" in status
     assert len(world.ledger) == 1
     assert len(world.uploader.calls) == 1
 
@@ -712,10 +677,14 @@ def test_a_public_pick_still_inserts_the_way_it_always_did(gated):
     assert window.assets[0][1] == "alt words"
 
 
-def test_a_non_image_copy_falls_back_to_a_link(gated):
+def test_a_video_where_no_card_can_go_falls_back_to_a_link(gated):
+    """In a document that holds no audio or video card (plain text, or
+    with no Nostr account in use), a library video is its link; where a
+    card can go, it is the card (test_media_entry)."""
     window = gated(PickResolution(
         sha256="e" * 64, url=f"{CDN}/{'e' * 64}", mime="video/mp4", ok=True,
     ))
+    window._may_insert_audio_video = lambda editor: False
     window._insert_media_at_cursor(make_media("e" * 64), _Editor(), "")
     assert window.urls == [f"{CDN}/{'e' * 64}"]
     assert window.adopted == []
@@ -816,7 +785,7 @@ def test_a_dialog_with_nothing_pending_still_settles(tmp_path):
     ))
     world = build(tmp_path, [private()], ledger=ledger)
     assert world.dialog.pending == []
-    assert world.dialog._create_btn.text() == "Use the existing copies"
+    assert world.dialog._create_btn.text() == "Continue"
 
     world.dialog._on_create_clicked()
 
@@ -860,7 +829,7 @@ def test_an_unchecked_pick_is_refused_rather_than_passed_through():
     # ``ok`` still has nothing to embed.
     assert resolution.url == ""
     assert resolution.sha256 == ""
-    assert "not been checked" in resolution.reason
+    assert "couldn’t check yet whether this image is private" in resolution.reason
 
 
 def test_an_unchecked_pick_is_refused_even_with_a_maker_available(tmp_path):
@@ -997,7 +966,7 @@ def test_an_insert_while_the_signer_prompt_is_open_embeds_nothing(tmp_path):
     assert window.assets == []
     assert window.urls == []
     assert CIPHER_SHA not in str(window.adopted + window.assets + window.urls)
-    assert window.messages and "not been checked" in window.messages[0]
+    assert window.messages and "couldn’t check yet whether this image is private" in window.messages[0]
 
 
 def test_the_same_pick_is_gated_normally_once_the_signer_answers(tmp_path):
@@ -1152,4 +1121,31 @@ def test_an_unchecked_cover_pick_leaves_the_field_alone():
 
     assert cover.text == ""
     assert cover.thumb_hash == ""
-    assert "not been checked" in cover.errors[0]
+    assert "couldn’t check yet whether this image is private" in cover.errors[0]
+
+
+class _ReadLibrary(_UncheckedLibrary):
+    def vouches_for(self, sha):
+        return True
+
+
+@pytest.mark.parametrize("mime", ["video/mp4", "audio/mpeg", "image/heic", "application/pdf"])
+def test_a_private_file_whose_details_cannot_be_removed_is_not_offered(tmp_path, mime, monkeypatch):
+    """The question promises "camera and location details are removed
+    first"; for a kind of file that cannot be cleaned here it would be
+    untrue, so it is not asked: the file is refused, saying why."""
+    import nostr.ui.publish_copy_dialog as module
+    asked = []
+    monkeypatch.setattr(module, "PublishCopyDialog",
+                        lambda **kw: asked.append(kw) or pytest.fail("asked"))
+    blob = private(mime=mime, name="clip")
+    media = make_media(blob.sha256, servers=(SERVER,), mime="application/octet-stream")
+    maker = PublicCopyMaker(ledger=PublicLedger(path=tmp_path / "public.json"),
+                            fetcher=FakeFetcher({}), uploader=FakeUploader())
+    resolution = resolve_pick(media, visibility=MediaVisibility(library=_ReadLibrary([blob])),
+                              maker=maker)
+    assert not resolution.ok and not resolution.cancelled
+    assert resolution.reason == (
+        "MyEditor can’t share this kind of private file yet, because it can’t remove "
+        "its camera and location details.")
+    assert asked == []

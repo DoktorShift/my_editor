@@ -14,13 +14,14 @@ import sys
 import threading
 import time
 from dataclasses import dataclass
+from types import SimpleNamespace
 from typing import List, Optional, Tuple
 
 from send2trash import send2trash
 import shiboken6
 from PySide6.QtCore import (
-    QBuffer, QByteArray, QEvent, QIODevice, QObject, Qt, QLocale, QMarginsF, QTimer, QUrl,
-    QFileSystemWatcher,
+    QBuffer, QByteArray, QDateTime, QEvent, QIODevice, QObject, Qt, QLocale, QMarginsF, QTimer,
+    QUrl, QFileSystemWatcher,
 )
 from PySide6.QtNetwork import QLocalServer
 from PySide6.QtGui import (
@@ -33,7 +34,7 @@ from PySide6.QtWidgets import (
     QApplication, QMainWindow, QFileDialog, QInputDialog, QLineEdit, QMenu, QWidget,
     QVBoxLayout, QPlainTextEdit, QTextEdit, QTabWidget, QToolButton, QHBoxLayout, QStatusBar,
     QPushButton, QTabBar, QLabel, QDialog, QSplitter,
-    QProgressDialog
+    QProgressDialog, QToolTip
 )
 
 from constants import (
@@ -162,9 +163,10 @@ from nostr.ui.reference_popover import ReferencePopover
 from nostr.ui.article_details_panel import ArticleDetailsPanel, DEFAULT_WIDTH as ARTICLE_DETAILS_WIDTH
 from nostr import refs
 from nostr.blossom.errors import friendly_message
+from nostr.blossom.names import MediaNames
 from nostr.blossom.hashes import hash_from_url
 from nostr.imports.workers import run_for_size
-from nostr.media_server_list import publish_server_list
+from nostr.media_server_list import publish_server_list, server_list_tags
 from nostr.outbox import writer as outbox_writer
 from nostr.profile_editing import ProfileEditing
 from nostr.relay import NOT_CHOSEN
@@ -235,6 +237,8 @@ from nostr.membership_controller import MembershipController
 from nostr.key_vault import KeyVault
 from nostr.account_controller import AccountController
 from nostr.ui.media_library_dialog import MediaLibraryDialog, format_size
+from nostr.ui.media_saver import MediaSaver, save_failure, saves_failure
+from nostr.ui.media_servers_dialog import MediaServersDialog
 from nostr.ui.publish_article_dialog import PublishArticleDialog
 from nostr.ui.publish_copy_dialog import resolve_pick
 from nostr.ui.publish_note_dialog import PublishNoteDialog
@@ -328,6 +332,37 @@ def _field_signals(field) -> list:
     if not isinstance(field, QLineEdit):
         signals += [field.undoAvailable, field.redoAvailable]
     return signals
+
+class _MessageTip(QObject):
+    """A tooltip for one status bar message: shown over the message alone
+    (not the word count or a button beside it), and gone with it."""
+
+    def __init__(self, bar) -> None:
+        super().__init__(bar)
+        self._bar = bar
+        self._message = self._tip = ""
+        bar.installEventFilter(self)
+        bar.messageChanged.connect(self._changed)
+
+    def set(self, message: str, tip: str) -> None:
+        """``tip`` for ``message``, which the bar shows now."""
+        self._message, self._tip = message, tip
+
+    def _changed(self, message: str) -> None:
+        if message != self._message:
+            self._message = self._tip = ""
+
+    def eventFilter(self, obj, event) -> bool:
+        if event.type() != QEvent.Type.ToolTip or not self._tip:
+            return False
+        beside = [child.geometry().left() for child in self._bar.findChildren(
+                      QWidget, options=Qt.FindChildOption.FindDirectChildrenOnly)
+                  if child.isVisible() and child.width() > 0]
+        if event.pos().x() < min(beside, default=self._bar.width()):
+            QToolTip.showText(event.globalPos(), self._tip, self._bar)
+            return True
+        return False
+
 
 class _WidthWatcher(QObject):
     """Calls ``changed()`` when a widget's width changes (a tab's Split
@@ -433,12 +468,33 @@ class MainWindow(QMainWindow):
         for widget in (self._backup_problem, self._backup_retry):
             widget.setVisible(False)
             self.status.addPermanentWidget(widget)
+        # Files added in the Media Library that didn't upload once its
+        # window was closed (name -> reason): counted here, as a backup
+        # problem is, until the library, which shows each with Retry, is
+        # opened.
+        self._library_failures: dict = {}
+        self._library_problem = ElidedLabel()
+        self._library_problem.setObjectName("LibraryProblem")
+        self._library_open = QToolButton()
+        self._library_open.setObjectName("LibraryOpen")
+        self._library_open.setText(_("Open Media Library"))
+        self._library_open.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._library_open.clicked.connect(lambda: self._on_nostr_media_library())
+        for widget in (self._library_problem, self._library_open):
+            widget.setVisible(False)
+            self.status.addPermanentWidget(widget)
         # How long the document is, quietly: words and reading time, or
         # the words of the selection while there is one.
         self._words_label = QLabel()
         self._words_label.setObjectName("WordCount")
         self._words_label.setContentsMargins(0, 0, 12, 0)
         self.status.addPermanentWidget(self._words_label)
+        # A message keeps its room in a narrow window: the word count gives
+        # way first, then the library failure line shortens, and steps
+        # aside while not even a few letters of it fit.
+        self.status.messageChanged.connect(lambda _message: self._fit_status_bar())
+        _WidthWatcher(self.status, self._fit_status_bar)
+        _WidthWatcher(self._words_label, self._fit_status_bar)
         self._word_count_timer = QTimer(self)
         self._word_count_timer.setSingleShot(True)
         self._word_count_timer.setInterval(300)
@@ -603,6 +659,20 @@ class MainWindow(QMainWindow):
         # cache on the way out, so an upload never has to be downloaded
         # back to be shown.
         self._media_library_dialog = None
+        # The Insert Image picker while it is open (it is modal).
+        self._media_picker = None
+        # Save As from either: it goes on when the window that asked
+        # closes, and is said in the status bar then.
+        self._media_saver = MediaSaver(self._media_image_loader, parent=self)
+        # What this bar last said about a save ("Saving “x”…" to be followed
+        # by its end), and the message its tooltip of reasons belongs to.
+        self._media_save_said = ""
+        self._message_tip = _MessageTip(self.status)
+        self._media_saver.batch_finished.connect(self._on_media_saves_finished)
+        self._media_saver.started.connect(self._on_media_save_started)
+        self._media_saver.finished.connect(self._on_media_save_finished)
+        # The Media Servers sheet while it is open (it is modal).
+        self._media_servers_sheet = None
         # Association membership, which grants a relay and a media server.
         # Resolved in the background; until it answers the account simply
         # has no benefits, which is the same state as not being a member.
@@ -628,6 +698,7 @@ class MainWindow(QMainWindow):
             blob_cache=self._media_image_loader,
             entitled_servers=self._entitled_blossom_servers,
             server_quota=self._entitled_quota,
+            names=MediaNames(),
             parent=self,
         )
         # An account that was already signed in when the app opened never
@@ -663,6 +734,9 @@ class MainWindow(QMainWindow):
         # percent), shown on its card in the text.
         self._media_progress: dict = {}
         self._media_store.upload_progress.connect(self._on_media_upload_progress)
+        # A file added in the Media Library is the store's job, not the
+        # window's: a failure after that window closed is said here.
+        self._media_store.upload_failed.connect(self._on_library_upload_failed)
 
         # Private media. The ledger is the record of everything this app
         # has deliberately made public and is the only way to revoke any
@@ -932,6 +1006,7 @@ class MainWindow(QMainWindow):
         muted = DARK_MUTED_FG if self.is_dark_theme else LIGHT_MUTED_FG
         self._words_label.setStyleSheet(f"color: {muted}; font-size: 12px;")
         self._show_backup_status()
+        self._show_library_failures()
         for picker in (self._mention_picker, getattr(self, "_coauthor_picker", None)):
             if picker is not None:
                 picker.set_dark(self.is_dark_theme)
@@ -3036,14 +3111,17 @@ class MainWindow(QMainWindow):
         """Save, discard or keep unsaved documents. True means close."""
         editors = [ed for i in range(self.tabs.count())
                    if (ed := self._editor_from_widget(self.tabs.widget(i))) is not None]
-        uploading = self._uploading(*editors)
+        # Quitting stops every upload, the documents' and the Media
+        # Library's alike, and every Save As still downloading.
+        uploading = self._uploading(*editors) + self._library_uploads()
+        saving = self._media_saves()
         unsaved = [i for i in range(self.tabs.count())
                    if (ed := self._editor_from_widget(self.tabs.widget(i)))
                    and ed.document().isModified()]
         if not unsaved:
-            # Nothing to save: audio or video still uploading is the question.
-            return self._may_leave_uploads(uploading, quitting=True)
-        words = self._save_question_words(uploading, quitting=True)
+            # Nothing to save: what is still uploading or saving is the question.
+            return self._may_leave_uploads(uploading, quitting=True, saving=saving)
+        words = self._save_question_words(uploading, quitting=True, saving=saving)
         if len(unsaved) == 1:
             ed = self._editor_from_widget(self.tabs.widget(unsaved[0]))
             name = os.path.basename(ed._file_path) if getattr(ed, "_file_path", None) else _("Untitled")
@@ -3114,6 +3192,11 @@ class MainWindow(QMainWindow):
         image_paths = []
         for url in urls:
             if not url.isLocalFile():
+                # A tile dragged out of the Media Library: its address,
+                # inserted as Insert Image inserts it.
+                media = self._library_file_at(url.toString())
+                if media is not None and self.current_editor() is not None:
+                    self._insert_media_at_cursor(media, self.current_editor())
                 continue
             # A URL's path has forward slashes, also on Windows.
             path = file_paths.normalize(url.toLocalFile())
@@ -3135,6 +3218,12 @@ class MainWindow(QMainWindow):
             bar = self._bar_from_widget(self.tabs.currentWidget())
             if bar:
                 bar.show_unsupported(", ".join(unsupported))
+
+    def _library_file_at(self, url: str):
+        """The Media Library's file at this address, or None."""
+        sha = hash_from_url(url)
+        store = getattr(self, "_media_store", None)
+        return store.files.get(sha) if sha and store is not None else None
 
     def _handle_dropped_images(self, paths, step: str = N_("Drag")):
         """Images were dropped on the window: adopt and insert them now, as
@@ -3192,7 +3281,8 @@ class MainWindow(QMainWindow):
             title=ngettext("Upload {count} image to your media servers?",
                            "Upload {count} images to your media servers?",
                            count).format(count=count),
-            message=_("They're already in your document and stay there either way."),
+            message=_("Anyone with the link can view them. They’re already in your "
+                      "document and stay there either way."),
             buttons=(Button(_("Keep Local"), False, CANCEL), Button(_("Upload"), True, DEFAULT)))
         if not upload:
             return
@@ -6088,7 +6178,9 @@ class MainWindow(QMainWindow):
         if not closing_for_update and not self._resolve_unsaved_before_closing():
             event.ignore()
             return
-        # Quitting from here: nothing still on its way goes into a document.
+        # Quitting from here: a Save As still running stops, and its part
+        # file goes; nothing still on its way goes into a document.
+        self._media_saver.cancel()
         for i in range(self.tabs.count()):
             self._drop_media_reads(self._editor_from_widget(self.tabs.widget(i)))
         if hasattr(self, "_knit_runner"):
@@ -6388,14 +6480,10 @@ class MainWindow(QMainWindow):
         than its host: the members' server is the association's."""
         return self._membership.server_label(origin)
 
-    def _on_media_servers_adopted(self, servers: list) -> None:
+    def _on_media_servers_adopted(self, _servers: list) -> None:
         """Nothing was configured here, so the servers the account
-        publishes became its upload servers. Said once, where it shows."""
-        hosts = ", ".join(url_safety.host_of(s) or s for s in servers)
-        self.status.showMessage(
-            _("Media uploads go to the media servers your Nostr account lists: "
-              "{hosts}").format(
-                hosts=hosts), 8000)
+        publishes became its upload servers: a background change, shown
+        in Media Servers and nowhere else."""
         if self._visible_media_library() is not None:
             self._media_store.refetch_if_targets_changed()
 
@@ -6409,32 +6497,42 @@ class MainWindow(QMainWindow):
         return self._server_list.suggestions
 
     def _on_media_server_suggestions(self, _servers: list) -> None:
-        dialog = self._visible_media_library()
-        if dialog is not None:
-            dialog.set_server_suggestions(self._media_server_suggestions())
+        sheet = self._media_servers_sheet
+        if sheet is not None and shiboken6.isValid(sheet):
+            sheet.offer(self._media_server_suggestions())
 
-    def _use_suggested_media_servers(self, servers: list) -> None:
-        """The person chose to upload to the servers their profile lists,
-        besides the ones configured here. Their files there are listed
-        from now on too."""
-        settings = self._media_store.settings
-        for server in servers:
-            settings.add_server(server)
-        self._media_store.refetch_if_targets_changed()
-        dialog = self._visible_media_library()
-        if dialog is not None:
-            dialog.set_server_suggestions(self._media_server_suggestions())
+    def _open_media_servers(self) -> None:
+        """Media Servers…, from the Media Library: which servers keep the
+        person's files, in which order, and sharing that list. A sheet on
+        the library window."""
+        parent = self._visible_media_library() or self
+        sheet = MediaServersDialog(
+            settings=self._media_store.settings,
+            entitled=self._entitled_blossom_servers(),
+            suggestions=self._media_server_suggestions(),
+            server_label=self._media_server_label,
+            is_dark=self.is_dark_theme, parent=parent)
+        sheet.changed.connect(self._media_store.refetch_if_targets_changed)
+        sheet.share_requested.connect(lambda s=sheet: self._share_media_server_list(s))
+        sheet.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+        sheet.destroyed.connect(lambda _obj=None: setattr(self, "_media_servers_sheet", None))
+        self._media_servers_sheet = sheet
+        # A sheet on the library window, as Draft Relays is on this one.
+        sheet.open()
 
-    def _share_media_server_list(self) -> None:
+    def _share_media_server_list(self, parent=None) -> None:
         """Publish the servers uploads go to as the account's media server
         list (kind 10063), after asking: it replaces the list other apps
-        read now, if the account published one."""
+        read now, if the account published one. The servers named are the
+        ones the list will hold (a plain-http one, or more than ten, is
+        left out of it)."""
         active = self._profile_store.default()
         if active is None:
             return
         servers = [url_safety.origin_of(s) or s for s in self._media_store.target_servers()]
-        hosts = ", ".join(url_safety.host_of(s) or s for s in servers)
-        parent = self._visible_media_library() or self
+        hosts = ", ".join(url_safety.host_of(tag[1]) or tag[1]
+                          for tag in server_list_tags(servers, None))
+        parent = parent or self._visible_media_library() or self
         choice = ask(parent, title=_("Tell Other Apps Where Your Media Is?"),
                      message=_("Other Nostr apps then look on {hosts} for your pictures, "
                                "in this order. This replaces the list they use now, if "
@@ -6502,6 +6600,51 @@ class MainWindow(QMainWindow):
     def _forget_media_library(self, dialog) -> None:
         if self._media_library_dialog is dialog:
             self._media_library_dialog = None
+
+    def _media_window_open(self) -> bool:
+        """Whether a Media Library window (the library or the picker) is
+        open, to say how a Save As goes itself."""
+        return self._visible_media_library() is not None or self._media_picker is not None
+
+    def _say_media_save_running(self) -> None:
+        """A library window closed: a Save As it started goes on, said here."""
+        if self._media_saver.current:
+            self._on_media_save_started(self._media_saver.current)
+
+    def _on_media_save_started(self, target: str) -> None:
+        if not self._media_window_open():
+            self._media_save_said = _("Saving “{name}”…").format(name=os.path.basename(target))
+            self.status.showMessage(self._media_save_said, 0)
+
+    def _on_media_save_finished(self, target: str, why: str) -> None:
+        """How a Save As went, when no library window is open to say it,
+        or when this bar still says it is saving (a library window opened
+        meanwhile): kept until the next message, as a saved document's
+        is."""
+        announced = self._media_save_announced()
+        self._media_save_said = ""
+        if why == "cancelled":
+            if announced:
+                self.status.clearMessage()
+            return
+        if announced or not self._media_window_open():
+            self._media_save_said = (save_failure(why, target) if why
+                                     else _("Saved: {path}").format(path=target))
+            self.status.showMessage(self._media_save_said, 0)
+
+    def _on_media_saves_finished(self, total: int, failures: list) -> None:
+        """A Save to Folder ended without every file: said at its end, where
+        its saves were said, with every reason in the tooltip."""
+        if not failures or not (self._media_save_announced() or not self._media_window_open()):
+            return
+        self._media_save_said, tip = saves_failure(total, failures)
+        self.status.showMessage(self._media_save_said, 0)
+        self._message_tip.set(self._media_save_said, tip)
+
+    def _media_save_announced(self) -> bool:
+        """Whether the status bar still shows what it last said about a save."""
+        return bool(self._media_save_said) and \
+            self.status.currentMessage() == self._media_save_said
 
     def _open_membership_window(self) -> None:
         """Nostr > EINUNDZWANZIG Membership."""
@@ -7019,9 +7162,16 @@ class MainWindow(QMainWindow):
         if asset is None:
             self._say_cannot_add(name)
             return
+        self._insert_media_card(ed, at, asset)
+        self._asset_manager.request_upload(asset.sha256)
+
+    def _insert_media_card(self, ed, at, asset) -> None:
+        """Audio or video ``asset`` as an object of ``ed``'s text: its card,
+        in a paragraph of its own at ``at``. The one way it goes in, from
+        Insert Audio or Video and from the Media Library alike."""
         image = QTextImageFormat()
         image.setName(asset.key)
-        image.setProperty(QTextImageFormat.ImageAltText, name)
+        image.setProperty(QTextImageFormat.ImageAltText, asset.alt)
         image.setWidth(media_card.WIDTH)
         image.setHeight(media_card.HEIGHT)
         ed.document().addResource(QTextDocument.ImageResource, QUrl(asset.key),
@@ -7033,7 +7183,6 @@ class MainWindow(QMainWindow):
             rich_text.insert_own_paragraph(cursor, image=image)
         if caret_there:
             ed.setTextCursor(cursor)
-        self._asset_manager.request_upload(asset.sha256)
 
     def _uploading(self, *editors) -> list:
         """The audio and video in ``editors`` still on its way to the media
@@ -7042,36 +7191,96 @@ class MainWindow(QMainWindow):
                 if asset.upload_state in (AssetState.QUEUED, AssetState.SIGNING,
                                           AssetState.UPLOADING)]
 
-    @staticmethod
-    def _still_uploading(uploading: list) -> str:
-        return ngettext("“{name}” is still uploading.", "{count} files are still uploading.",
-                        len(uploading)).format(name=uploading[0].alt, count=len(uploading))
+    def _library_uploads(self) -> list:
+        """Files added in the Media Library still on their way, as the
+        quit question names them (a failed one is not stopped by quitting:
+        nothing is moving)."""
+        return [SimpleNamespace(alt=added.name, library=True,
+                                finishing=added.state == "finishing")
+                for added in self._media_store.added_uploads() if added.state != "failed"]
+
+    def _media_saves(self) -> list:
+        """The Save As downloads quitting would stop: the one running and
+        the ones waiting, by the path each is saved to."""
+        return self._media_saver.pending()
 
     @staticmethod
-    def _what_leaving_does(*, quitting: bool) -> str:
-        """What closing (or quitting) does to audio and video still uploading."""
+    def _still_uploading(uploading: list, saving: list = ()) -> str:
+        if not saving:
+            return ngettext("“{name}” is still uploading.", "{count} files are still uploading.",
+                            len(uploading)).format(name=uploading[0].alt, count=len(uploading))
+        if not uploading:
+            return ngettext("A file is still being saved.", "{count} files are still being saved.",
+                            len(saving)).format(count=len(saving))
+        count = len(uploading) + len(saving)
+        return ngettext("{count} file is still uploading or being saved.",
+                        "{count} files are still uploading or being saved.",
+                        count).format(count=count)
+
+    @staticmethod
+    def _what_leaving_does(uploading: list = (), *, quitting: bool, saving: list = ()) -> str:
+        """What closing (or quitting) does to the uploads still running
+        (audio and video in a document, files added to the Media Library)
+        and, quitting, to the Save As downloads. A library file its first
+        server has is in the library already: quitting stops only its
+        copies to the other servers. Closing a document leaves a save
+        running."""
+        if quitting and saving:
+            if not uploading:
+                return ngettext("Quitting now stops the download, and the file isn’t saved.",
+                                "Quitting now stops the downloads, and the files aren’t saved.",
+                                len(saving))
+            return " ".join((
+                MainWindow._what_leaving_does(uploading, quitting=True),
+                ngettext("Quitting also stops saving “{name}”.",
+                         "Quitting also stops saving {count} files.",
+                         len(saving)).format(name=os.path.basename(saving[0]),
+                                             count=len(saving))))
+        copying = [u for u in uploading if getattr(u, "finishing", False)]
+        if quitting and copying and len(copying) == len(uploading):
+            return ngettext(
+                "Quitting now stops copying it to your other media servers. It’s already in "
+                "your Media Library.",
+                "Quitting now stops copying them to your other media servers. They’re already "
+                "in your Media Library.", len(copying))
+        uploading = [u for u in uploading if not getattr(u, "finishing", False)]
+        library = sum(1 for u in uploading if getattr(u, "library", False))
+        if quitting and library == len(uploading) and library:
+            return ngettext(
+                "Quitting now stops the upload, and the file isn’t added to your Media Library.",
+                "Quitting now stops the uploads, and the files aren’t added to your Media "
+                "Library.", library)
+        if quitting and library:
+            return _("Quitting now stops every upload: the documents won’t hold their files, "
+                     "and your Media Library won’t get its new ones.")
         if quitting:
             return _("Quitting now stops the upload, and the document won’t hold the file.")
         return _("If you close the document now, the upload goes on to your media library, "
                  "but the document doesn’t keep it.")
 
-    def _may_leave_uploads(self, uploading: list, *, quitting: bool) -> bool:
+    def _may_leave_uploads(self, uploading: list, *, quitting: bool,
+                           saving: list = ()) -> bool:
         """With nothing unsaved, closing or quitting while audio or video
-        uploads asks this alone (Cancel is the default). True to go on."""
-        if not uploading:
+        uploads (or, quitting, while a Save As downloads) asks this alone
+        (Cancel is the default). True to go on."""
+        saving = saving if quitting else []
+        if not uploading and not saving:
             return True
         return confirm_destructive(
-            self, title=self._still_uploading(uploading),
-            message=self._what_leaving_does(quitting=quitting),
+            self, title=self._still_uploading(uploading, saving),
+            message=self._what_leaving_does(uploading, quitting=quitting, saving=saving),
             action=_("Quit Anyway") if quitting else _("Close Anyway"))
 
-    def _save_question_words(self, uploading: list, *, quitting: bool) -> str:
-        """The save question's words: with audio or video still uploading,
-        what leaving does to it first, so it is one question, not two."""
-        if not uploading:
+    def _save_question_words(self, uploading: list, *, quitting: bool,
+                             saving: list = ()) -> str:
+        """The save question's words: with audio or video still uploading
+        (or, quitting, a Save As downloading), what leaving does to it
+        first, so it is one question, not two."""
+        saving = saving if quitting else []
+        if not uploading and not saving:
             return ""
-        return " ".join((self._still_uploading(uploading),
-                         self._what_leaving_does(quitting=quitting),
+        return " ".join((self._still_uploading(uploading, saving),
+                         self._what_leaving_does(uploading, quitting=quitting, saving=saving),
                          _("Your changes will be lost if you don’t save them.")))
 
     def _media_name(self, url: str) -> Optional[str]:
@@ -7145,6 +7354,80 @@ class MainWindow(QMainWindow):
                 if media is not None and media.sha256 not in shown:
                     shown.add(media.sha256)
                     self._refresh_asset_in_documents(media.sha256)
+
+    def _on_library_upload_failed(self, name: str, reason: str) -> None:
+        """A file added in the Media Library did not upload while no
+        library window is open: counted in the status bar until the
+        library is opened. The next library window shows it with Retry."""
+        if self._media_store.can_retry(name) and self._visible_media_library() is None:
+            self._library_failures[name] = reason
+            self._show_library_failures()
+
+    def _clear_library_failures(self) -> None:
+        """The library is open, and shows each failure itself."""
+        self._library_failures.clear()
+        self._show_library_failures()
+
+    def _show_library_failures(self) -> None:
+        failures = self._library_failures
+        text = ngettext("“{name}” wasn’t added to your Media Library.",
+                        "{count} files weren’t added to your Media Library.",
+                        len(failures)).format(name=next(iter(failures), ""),
+                                              count=len(failures)) if failures else ""
+        self._library_problem.setText(text)
+        self._library_problem.setToolTip("\n".join(
+            _("“{name}” wasn’t added to your Media Library. {reason}").format(
+                name=name, reason=reason) for name, reason in failures.items()))
+        self._library_problem.setStyleSheet(
+            f"color: {theme.error_text_color(self.is_dark_theme)}; padding-right: 4px;")
+        link = theme.dialog_link_color(self.is_dark_theme)
+        self._library_open.setStyleSheet(
+            f"#LibraryOpen {{ color: {link}; border: none; background: transparent; "
+            f"padding: 0 4px; }} #LibraryOpen:hover {{ text-decoration: underline; }}")
+        self._library_open.setAccessibleDescription(text)
+        self._library_problem.setVisible(bool(text))
+        self._library_open.setVisible(bool(text))
+        self._fit_status_bar()
+
+    def _fit_status_bar(self) -> None:
+        """A message in the status bar keeps its room in a narrow window.
+        What says least steps aside first, while it doesn't fit beside
+        the message and what matters more: the word count, then the
+        caret's line; then the library failure line shortens, and where
+        not even a few letters of it fit, it steps aside (Open Media
+        Library too) until the message goes. Without a message, each
+        takes all it needs."""
+        label = self._library_problem
+        no_limit = 16777215                              # Qt's QWIDGETSIZE_MAX
+        for widget in (self._words_label, self._line_label, label, self._library_open):
+            widget.setMaximumWidth(no_limit)
+        message = self.status.currentMessage()
+        if not message:
+            return
+        spacing = self.status.layout().spacing()
+
+        def width_of(widget) -> int:
+            return widget.sizeHint().width() + spacing if widget.isVisible() else 0
+
+        needed = self.status.fontMetrics().horizontalAdvance(message) + 40   # its margins
+        room = (self.status.width() - needed
+                - sum(width_of(w) for w in (self._backup_problem, self._backup_retry,
+                                            self._library_open)))
+        # The failure line at its full width, then the caret's line, then
+        # the word count: each stays while it fits beside those before it.
+        kept = width_of(label)
+        for widget in (self._line_label, self._words_label):
+            if room - kept >= width_of(widget):
+                kept += width_of(widget)
+            else:
+                widget.setMaximumWidth(0)
+                kept += spacing
+        if label.isVisible():
+            fits = room - (kept - width_of(label))
+            if fits < label.minimumSizeHint().width():
+                fits = 0
+                self._library_open.setMaximumWidth(0)
+            label.setMaximumWidth(fits)
 
     def _on_media_upload_progress(self, name: str, sent: int, total: int) -> None:
         sha = parse_asset_key(name)
@@ -7319,16 +7602,17 @@ class MainWindow(QMainWindow):
             is_dark=self.is_dark_theme,
             pick_mode=False,
             visibility=self._media_visibility,
-            server_label=self._media_server_label,
+            saver=self._media_saver,
             parent=self,
         )
         dialog.bind_private_library(self._private_library)
-        dialog.server_suggestions_accepted.connect(self._use_suggested_media_servers)
-        dialog.share_server_list_requested.connect(self._share_media_server_list)
-        dialog.set_server_suggestions(self._media_server_suggestions())
+        dialog.servers_requested.connect(self._open_media_servers)
+        self._clear_library_failures()
         # The dialog deletes itself on close; forget it then, so nothing
         # later asks a deleted object whether it is visible.
         dialog.destroyed.connect(lambda _obj=None, d=dialog: self._forget_media_library(d))
+        # A Save As it started goes on: said here from now on.
+        dialog.destroyed.connect(lambda _obj=None: self._say_media_save_running())
         self._media_library_dialog = dialog
         dialog.show()
 
@@ -7352,20 +7636,22 @@ class MainWindow(QMainWindow):
             is_dark=self.is_dark_theme,
             pick_mode=True,
             visibility=self._media_visibility,
-            server_label=self._media_server_label,
+            saver=self._media_saver,
             parent=self,
         )
         dialog.bind_private_library(self._private_library)
-        dialog.server_suggestions_accepted.connect(self._use_suggested_media_servers)
-        dialog.share_server_list_requested.connect(self._share_media_server_list)
-        dialog.set_server_suggestions(self._media_server_suggestions())
         # Pre-select images in the picker - videos / audio can't be
         # inserted as inline document objects.
         dialog._filter_combo.setCurrentIndex(1)
         dialog.file_picked.connect(
             lambda media, alt, e=ed: self._insert_media_at_cursor(media, e, alt)
         )
-        dialog.exec()
+        self._media_picker = dialog
+        try:
+            dialog.exec()
+        finally:
+            self._media_picker = None
+        self._say_media_save_running()
 
     def _insert_media_at_cursor(self, media: MediaFile, editor, alt_text: str = "") -> None:
         """Insert a library pick at the editor's cursor, immediately.
@@ -7393,6 +7679,19 @@ class MainWindow(QMainWindow):
                 self.status.showMessage(picked.reason, 8000)
             return
 
+        if media_files.kind_of(picked.mime) is not None \
+                and self._may_insert_audio_video(editor):
+            # Audio or video already on the servers: the same card as
+            # Insert Audio or Video makes, through the same record, with
+            # nothing downloaded or sent again. Its card names its own
+            # step of Undo (_insert_media_card).
+            asset = self._asset_manager.adopt_library_file(
+                sha256=picked.sha256, remote_url=picked.url, mime=picked.mime,
+                size=picked.size, alt=alt_text or self._library_name(media))
+            if asset is not None:
+                self._insert_media_card(editor, QTextCursor(editor.textCursor()), asset)
+                return
+
         # One step of Undo, called what was asked for.
         with editor.undo_step(N_("Image")):
             if not (picked.mime or "").startswith("image/"):
@@ -7411,6 +7710,15 @@ class MainWindow(QMainWindow):
                 return
             self._insert_asset(editor, asset, alt=alt_text or "image")
 
+    def _library_name(self, media) -> str:
+        """The name a library file goes by: the one it was added with, a
+        private file's own, else the day it was added."""
+        name = self._media_store.name_of(media.hash) or self._media_visibility.name_of(media.hash)
+        uploaded = int(getattr(media, "uploaded_at_ms", 0) or 0)
+        if name or not uploaded:
+            return name
+        return i18n.format_day(QDateTime.fromMSecsSinceEpoch(uploaded), short_month=True)
+
     def _insert_url_as_text(self, editor, url: str) -> None:
         """Fallback for media that cannot be an inline image."""
         if not url_safety.is_safe_media_url(url):
@@ -7419,7 +7727,6 @@ class MainWindow(QMainWindow):
         cursor = editor.textCursor()
         cursor.insertText(url)
         editor.setTextCursor(cursor)
-        self.status.showMessage(_("Inserted URL only (non-image): {url}").format(url=url), 5000)
 
     def _insert_asset(self, editor, asset, *, alt: str) -> None:
         """Put one asset into the document. Local only, cannot fail.
@@ -7448,7 +7755,6 @@ class MainWindow(QMainWindow):
         cursor = editor.textCursor()
         cursor.insertImage(fmt)
         editor.setTextCursor(cursor)
-        self.status.showMessage(_("Inserted image · alt: {alt}").format(alt=alt), 5000)
 
     def _refresh_asset_in_documents(self, sha: str) -> None:
         """Repaint every open document that shows this asset.
@@ -7525,18 +7831,13 @@ class MainWindow(QMainWindow):
         intent gesture, so the outcome of an accidental one has to be
         that nothing was published.
         """
-        # Every server the upload goes to, the members' server included.
-        hosts = ", ".join(
-            url_safety.host_of(s) or s for s in self._media_store.target_servers()
-        )
-        # A paste is a quick, low-intent gesture, so Keep Local is the default.
-        if hosts:
-            title = _("Upload this image to {hosts}?").format(hosts=hosts)
-        else:
-            title = _("Upload this image to your media servers?")
+        # What the person decides is who can see it, which the message
+        # says; the servers are their own, listed in Media Servers. A
+        # paste is a quick, low-intent gesture, so Keep Local is the
+        # default.
         upload, remember = ask_with_checkbox(
             self,
-            title=title,
+            title=_("Upload this image to your media servers?"),
             message=_("Anyone with the link can view it. The image is already in "
                       "your document and stays there either way."),
             buttons=(Button(_("Upload"), True, NORMAL), Button(_("Keep Local"), False, DEFAULT)),
