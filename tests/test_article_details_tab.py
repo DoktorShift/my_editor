@@ -62,6 +62,9 @@ def window_with_draft(tags=DRAFT_TAGS):
     stand_in._set_article_details = lambda ed, d: MainWindow._set_article_details(
         stand_in, ed, d)
     stand_in.current_editor = lambda: None
+    # The tabs whose article changed, announced to all that show it.
+    stand_in.changed = []
+    stand_in._on_article_changed = stand_in.changed.append
     return stand_in
 
 
@@ -81,6 +84,7 @@ def test_details_set_in_the_tab_win_over_the_drafts():
     window._set_article_details(ed, OWN)
     assert window._article_details_of(ed) == OWN
     assert ed.document().isModified()
+    assert window.changed == [ed]
 
 
 def test_setting_what_the_tab_has_changes_nothing():
@@ -88,6 +92,7 @@ def test_setting_what_the_tab_has_changes_nothing():
     window._set_article_details(ed, window._article_details_of(ed))
     assert tab_details.set_in_tab(ed) is None
     assert not ed.document().isModified()
+    assert window.changed == []
 
 
 def test_saving_the_draft_again_takes_the_tabs_title_and_details():

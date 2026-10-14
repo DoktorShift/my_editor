@@ -1381,19 +1381,23 @@ class MainWindow(QMainWindow):
             ed._file_path = path
             self._update_tab_title()
 
-    def _update_tab_title(self):
-        ed = self.current_editor()
-        if not ed:
+    def _update_tab_title(self, ed=None):
+        """Name the tab of ``ed`` (the one in front when not given), and the
+        window when it is in front."""
+        current = self.current_editor()
+        ed = ed or current
+        index = self._editor_widget_index(ed) if ed is not None else -1
+        if index < 0:
             return
-        index = self.tabs.currentIndex()
         self.tabs.setTabText(index, self._compose_tab_title(ed))
         # Where the file is, for whoever wonders: on the tab, where it does
         # not take room from the text.
         self.tabs.setTabToolTip(index, getattr(ed, "_file_path", None) or "")
         # A screen reader announces the text area by its document's name.
         ed.setAccessibleName(self._document_name(ed))
-        self._update_window_title()
-        self._update_status_bar()
+        if ed is current:
+            self._update_window_title()
+            self._update_status_bar()
 
     def _compose_tab_title(self, ed) -> str:
         """Compute the display title for a tab.
@@ -1430,6 +1434,10 @@ class MainWindow(QMainWindow):
             return recovered
         if path:
             return os.path.basename(path)
+        # Without a file, an article is named by its title as it is typed.
+        own = tab_details.details_of(ed)
+        if own is not None and own.title:
+            return own.title
         if binding and binding.title:
             return binding.title
         published = getattr(ed, "_published_article", None)
@@ -9050,6 +9058,16 @@ class MainWindow(QMainWindow):
             return
         tab_details.hold(ed, details)
         ed.document().setModified(True)
+        self._on_article_changed(ed)
+
+    def _on_article_changed(self, ed) -> None:
+        """The article in ``ed`` changed: everything that shows it follows at
+        once (Apple's guidelines for inspectors: "automatically updating"),
+        the preview, the tab's name and Article Details."""
+        pane = getattr(ed, "_preview_pane", None)
+        if pane is not None:
+            pane.schedule()
+        self._update_tab_title(ed)
         if ed is self.current_editor():
             self._fill_article_details_panel()
 
