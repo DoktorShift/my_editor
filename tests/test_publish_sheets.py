@@ -946,3 +946,23 @@ def test_the_app_calls_its_publish_windows_sheets():
     named = [str(path.relative_to(root)) for path in files
              if "publish dialog" in path.read_text(encoding="utf-8").lower()]
     assert named == []
+
+
+@pytest.mark.parametrize("from_file", [False, True])
+def test_the_alert_claims_nothing_of_the_relays_that_may_be_untrue(
+        tmp_path, captured, monkeypatch, from_file):
+    """Review round 4: the alert said "None of the relays you publish to
+    answered", but nobody can tell also when they answered and no index
+    did, or when an answer could not be checked. It says what holds in
+    every such case."""
+    from nostr.publisher import UNKNOWN, FirstPublication
+    alerts = []
+    monkeypatch.setattr(article_module, "ask", lambda *a, **k: alerts.append(k) or "cancel")
+    asked = []
+    sheet = (file_article(tmp_path, asked) if from_file else article(
+        tmp_path, default_slug="my-post", published_at_lookup=lambda a, s, done: asked.append(
+            (a, s, (), done))))
+    sheet._on_publish()
+    asked[-1][3](FirstPublication(UNKNOWN))
+    message = alerts[0]["message"]
+    assert message.startswith("The relays gave no clear answer.") and "answered" not in message

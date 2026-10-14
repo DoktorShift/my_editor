@@ -8702,7 +8702,7 @@ msgid "Checking whether this article was published before…"
 msgstr ""
 
 #: nostr/ui/publish_article_dialog.py:849
-msgid "None of the relays you publish to answered. If the article went out before, publishing it as new gives it today's date, and readers see it as a new article."
+msgid "The relays gave no clear answer. If the article went out before, publishing it as new gives it today's date, and readers see it as a new article."
 msgstr ""
 
 #: nostr/ui/publish_article_dialog.py:855
@@ -8715,7 +8715,7 @@ msgstr ""
 
 #: nostr/ui/publish_article_dialog.py:841
 #, python-brace-format
-msgid "None of the relays you publish to answered. Earlier versions of MyEditor published this file under its own name, “{name}”, so the article may be out already under that name. Publishing it under another name makes a second article."
+msgid "The relays gave no clear answer. Earlier versions of MyEditor published this file under its own name, “{name}”, so the article may be out already under that name. Publishing it under another name makes a second article."
 msgstr ""
 
 #: nostr/ui/publish_article_dialog.py:852

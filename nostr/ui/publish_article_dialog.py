@@ -838,7 +838,7 @@ class PublishArticleDialog(QDialog):
         would be written in one form, another name for a Mac's file), and
         the made one."""
         if file_names:
-            message = _("None of the relays you publish to answered. Earlier versions of "
+            message = _("The relays gave no clear answer. Earlier versions of "
                         "MyEditor published this file under its own name, “{name}”, so the "
                         "article may be out already under that name. Publishing it under "
                         "another name makes a second article.").format(name=file_names[0])
@@ -846,7 +846,7 @@ class PublishArticleDialog(QDialog):
                               NORMAL),
                        Button(_("Publish as “{name}”").format(name=slug), "new", NORMAL))
         else:
-            message = _("None of the relays you publish to answered. If the article went "
+            message = _("The relays gave no clear answer. If the article went "
                         "out before, publishing it as new gives it today's date, and "
                         "readers see it as a new article.")
             choices = (Button(_("Publish as New"), "new", NORMAL),)

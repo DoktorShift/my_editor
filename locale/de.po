@@ -8723,8 +8723,8 @@ msgid "Checking whether this article was published before…"
 msgstr "Prüfe, ob dieser Artikel schon veröffentlicht wurde …"
 
 #: nostr/ui/publish_article_dialog.py:849
-msgid "None of the relays you publish to answered. If the article went out before, publishing it as new gives it today's date, and readers see it as a new article."
-msgstr "Keines der Relays, auf denen du veröffentlichst, hat geantwortet. Wenn der Artikel schon einmal erschienen ist, bekommt er als neu veröffentlicht das heutige Datum, und Leser sehen ihn als neuen Artikel."
+msgid "The relays gave no clear answer. If the article went out before, publishing it as new gives it today's date, and readers see it as a new article."
+msgstr "Die Relays haben keine eindeutige Antwort gegeben. Wenn der Artikel schon einmal erschienen ist, bekommt er als neu veröffentlicht das heutige Datum, und Leser sehen ihn als neuen Artikel."
 
 #: nostr/ui/publish_article_dialog.py:855
 msgid "Couldn't check whether this article was published before"
@@ -8736,8 +8736,8 @@ msgstr "Der Artikel wurde nicht veröffentlicht: Kein Relay hat ihn angenommen. 
 
 #: nostr/ui/publish_article_dialog.py:841
 #, python-brace-format
-msgid "None of the relays you publish to answered. Earlier versions of MyEditor published this file under its own name, “{name}”, so the article may be out already under that name. Publishing it under another name makes a second article."
-msgstr "Keines der Relays, auf denen du veröffentlichst, hat geantwortet. Frühere Versionen von MyEditor haben diese Datei unter ihrem eigenen Namen veröffentlicht, „{name}“, daher ist der Artikel vielleicht schon unter diesem Namen erschienen. Unter einem anderen Namen veröffentlicht, entsteht ein zweiter Artikel."
+msgid "The relays gave no clear answer. Earlier versions of MyEditor published this file under its own name, “{name}”, so the article may be out already under that name. Publishing it under another name makes a second article."
+msgstr "Die Relays haben keine eindeutige Antwort gegeben. Frühere Versionen von MyEditor haben diese Datei unter ihrem eigenen Namen veröffentlicht, „{name}“, daher ist der Artikel vielleicht schon unter diesem Namen erschienen. Unter einem anderen Namen veröffentlicht, entsteht ein zweiter Artikel."
 
 #: nostr/ui/publish_article_dialog.py:852
 msgid "Publish as New"
