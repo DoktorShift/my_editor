@@ -14,7 +14,9 @@ three tags. Words typed and not yet a tag count as tags, and leaving the
 field makes them one.
 
 × removes its tag; Backspace with nothing typed removes the last one,
-and a screen reader hears which. Each tag is named by itself and each ×
+and a screen reader hears which. A tag's context menu copies it and
+removes it, as Apple's guidelines suggest for tokens ("Add value with a
+context menu"). Each tag is named by itself and each ×
 "Remove <tag>"; Tab reaches the × buttons left to right, then the field.
 
 Colours come from the theme (constants.py), light and dark.
@@ -25,7 +27,10 @@ from __future__ import annotations
 from typing import Iterable, List, Optional, Tuple
 
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QLineEdit, QToolButton, QWidget
+from PySide6.QtGui import QGuiApplication
+from PySide6.QtWidgets import (
+    QFrame, QHBoxLayout, QLabel, QLineEdit, QMenu, QToolButton, QWidget,
+)
 
 import announce
 from constants import (
@@ -93,6 +98,17 @@ class _Chip(QFrame):
         self.remove.setCursor(Qt.CursorShape.PointingHandCursor)
         self.remove.clicked.connect(lambda: field.remove(tag))
         row.addWidget(self.remove)
+
+    def menu(self) -> QMenu:
+        """Copy the tag, and Remove it while the field can be changed."""
+        menu = QMenu(self)
+        menu.addAction(_("Copy"), lambda: QGuiApplication.clipboard().setText("#" + self.tag))
+        if self.remove.isVisible():
+            menu.addAction(_("Remove"), self.remove.click)
+        return menu
+
+    def contextMenuEvent(self, event) -> None:  # noqa: N802, Qt's name
+        self.menu().exec(event.globalPos())
 
 
 class TagField(QFrame):

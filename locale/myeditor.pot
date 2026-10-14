@@ -284,6 +284,7 @@ msgstr ""
 #: update_dialog.py:194
 #: update_dialog.py:202
 #: nostr/ui/account_windows.py:216
+#: nostr/ui/tag_field.py:105
 msgid "Copy"
 msgstr ""
 
@@ -6205,6 +6206,7 @@ msgstr ""
 #: nostr/ui/media_library_dialog.py:682
 #: nostr/ui/media_servers_dialog.py:229
 #: nostr/ui/media_servers_dialog.py:402
+#: nostr/ui/tag_field.py:107
 msgid "Remove"
 msgstr ""
 
@@ -6277,7 +6279,7 @@ msgstr ""
 
 #: nostr/ui/authors_section.py:78
 #: nostr/ui/publish_sheet.py:241
-#: nostr/ui/tag_field.py:90
+#: nostr/ui/tag_field.py:95
 #, python-brace-format
 msgid "Remove {name}"
 msgstr ""
@@ -9569,11 +9571,11 @@ msgstr ""
 msgid "Summary (optional)"
 msgstr ""
 
-#: nostr/ui/tag_field.py:115
+#: nostr/ui/tag_field.py:131
 msgid "Add a hashtag"
 msgstr ""
 
-#: nostr/ui/tag_field.py:196
+#: nostr/ui/tag_field.py:212
 #, python-brace-format
 msgid "Removed {name}"
 msgstr ""
