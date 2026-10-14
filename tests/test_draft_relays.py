@@ -1091,3 +1091,14 @@ def test_asking_again_lets_the_accounts_relays_ask_for_a_sign_in_again():
     drafts._entitled = ["wss://members.example"]
     drafts.ask_again()
     assert relays.forgotten and {U1, U2, "wss://members.example"} <= set(relays.forgotten[-1])
+
+
+def test_the_usual_relays_are_where_drafts_go_without_a_list_of_their_own():
+    """Asked for the sheet, which shows them while no draft relays are
+    chosen: the account's own relays, even when it has a list of draft
+    relays (they are where drafts would go without one)."""
+    drafts, _relays, _directory, _client = moving(LIST_ON_MINE)
+    answers = []
+    drafts.usual_relays(answers.append)
+    settle()
+    assert len(answers) == 1 and set(answers[0]) == {U1, U2}

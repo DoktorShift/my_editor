@@ -57,6 +57,9 @@ class Lists(QObject):
     def read(self, on_done):
         on_done([])
 
+    def usual_relays(self, on_done):
+        on_done([])
+
     def ask_again(self):
         pass
 

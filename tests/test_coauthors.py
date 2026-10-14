@@ -302,7 +302,10 @@ def test_a_profile_no_relay_answered_is_asked_again_with_backoff():
     while not answers and time.monotonic() < deadline:
         QCoreApplication.processEvents()
     assert answers == [True] and len(asked) == 3
-    assert asked[2] - asked[1] >= asked[1] - asked[0] >= 0.015          # longer each time
+    # Longer each time: the second wait at least the longest one, the first
+    # at least the first one. Lower bounds only: a busy machine can stretch
+    # a wait (the first one past the second), never shorten it.
+    assert asked[1] - asked[0] >= 0.015 and asked[2] - asked[1] >= 0.030
 
     asked.clear()
     never = []
