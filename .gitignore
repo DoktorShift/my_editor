@@ -22,3 +22,5 @@ dist/
 # Local builds of the install guide (packaging/site/build_site.py)
 _site/
 packaging/icons/icon.iconset/
+# Local screenshots taken while working on the UI
+WorkPictures/
