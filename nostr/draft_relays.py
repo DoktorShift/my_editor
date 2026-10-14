@@ -777,6 +777,12 @@ class PrivateDraftRelays(QObject):
         self._query(self._pool, relays, kind=KIND_PRIVATE_RELAYS, author=author,
                     on_done=found, parent=self)
 
+    def usual_relays(self, on_done: Callable[[List[str]], None]) -> None:
+        """``on_done(relays)``: where drafts are saved while no draft relays
+        are chosen (the account's own relays), asked as a save asks."""
+        ask_draft_relays(self._directory, self._profile, on_done,
+                         entitled=self._entitled, chosen=[])
+
     def drafts_left_behind(self) -> List[str]:
         """Relays no longer among the draft relays that may still hold
         drafts, read until each answers (RelayDirectory.leave_drafts_behind)."""

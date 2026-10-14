@@ -15,6 +15,9 @@ title bar), opened from the Drafts panel's action menu:
     ┌──────────────────────────────────────┐
     │ wss://relay.example                  │
     └──────────────────────────────────────┘
+    (While none are chosen: "Drafts are kept on your usual relays:", and
+    the list shows those, dimmed and not selectable, as macOS shows the
+    DNS servers it got by itself; adding a relay takes their place.)
                                    [Remove]
     Add a relay: [ wss://            ] [Add]
 
@@ -32,7 +35,8 @@ only what it has just read: a list changed on another device in the
 meantime is not written over; the sheet reads it again and says so.
 Adding checks the address (``wss://``, or ``ws://`` on this computer).
 Use My Usual Relays empties the list, the way Restore Defaults resets a
-settings sheet; nothing changes before Save.
+settings sheet, and the usual relays show again; nothing changes before
+Save.
 
 Save moves the drafts to where they go next ("Moving 12 drafts…", with
 progress), reads them back from the relays chosen (a relay that takes
@@ -70,6 +74,7 @@ from __future__ import annotations
 
 from typing import List, Optional, Sequence
 
+import shiboken6
 from PySide6.QtCore import QEvent, Qt, Signal
 from PySide6.QtWidgets import (
     QAbstractItemView, QHBoxLayout, QLabel, QLineEdit, QListWidget, QListWidgetItem, QPushButton,
@@ -97,6 +102,9 @@ EDITING = "editing"
 SAVING = "saving"
 SAVED = "saved"              # saved, with a note on drafts left behind
 
+# Marks a usual relay shown in the list while no draft relays are chosen.
+_USUAL = Qt.ItemDataRole.UserRole + 1
+
 
 class DraftRelaysSheet(AssistantWindow):
     """Choose the relays drafts are kept on (see the module's text)."""
@@ -122,6 +130,7 @@ class DraftRelaysSheet(AssistantWindow):
         # it changes, so a second relay going quiet adds to it.
         self._left_unread: Optional[List[str]] = None
         self._unread: List[str] = []
+        self._usual_asked = 0         # answers to an older question are dropped
         self._build()
         self._read_list()
 
@@ -132,8 +141,12 @@ class DraftRelaysSheet(AssistantWindow):
         return self._state
 
     def chosen(self) -> List[str]:
-        """The relays in the list now."""
-        return [self._list.item(row).text() for row in range(self._list.count())]
+        """The relays chosen in the list now (not the usual ones it shows
+        while there are none)."""
+        return [item.text() for item in self._rows() if not item.data(_USUAL)]
+
+    def _rows(self) -> List[QListWidgetItem]:
+        return [self._list.item(row) for row in range(self._list.count())]
 
     def _build(self) -> None:
         widget, column = page(10)
@@ -148,7 +161,9 @@ class DraftRelaysSheet(AssistantWindow):
         self._list = QListWidget()
         self._list.setAccessibleName(_("Draft relays"))
         self._list.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
-        self._list.setMinimumHeight(self._list.fontMetrics().height() * 5 + 12)
+        # Five rows high, as a list in a settings sheet is: room for the
+        # usual relays and a few more, the sheet compact however tall.
+        self._list.setFixedHeight((self._list.fontMetrics().height() + 6) * 5 + 8)
         self._list.itemSelectionChanged.connect(self._update)
         self._list.installEventFilter(self)
         column.addWidget(self._list)
@@ -260,9 +275,10 @@ class DraftRelaysSheet(AssistantWindow):
         self._list.addItems(self._read)
         self._show_relays_left_behind()
         self._set_state(EDITING, error=then_say)
+        self._show_usual_relays()
         # The list to work on when there is one, otherwise the field to
         # start one.
-        (self._list if self._list.count() else self._field).setFocus()
+        (self._list if self.chosen() else self._field).setFocus()
 
     # -- editing ---------------------------------------------------------------
 
@@ -281,11 +297,12 @@ class DraftRelaysSheet(AssistantWindow):
         if address in self.chosen():
             self._say(_("That relay is already in the list."))
             return
-        if self._list.count() >= defaults.PRIVATE_CAP:
+        if len(self.chosen()) >= defaults.PRIVATE_CAP:
             self._say(ngettext("Drafts can be kept on at most {count} relay.",
                                "Drafts can be kept on at most {count} relays.",
                                defaults.PRIVATE_CAP).format(count=defaults.PRIVATE_CAP))
             return
+        self._hide_usual_relays()
         self._list.addItem(address)
         self._list.setCurrentRow(self._list.count() - 1)
         self._field.clear()
@@ -298,12 +315,46 @@ class DraftRelaysSheet(AssistantWindow):
         self._list.takeItem(row)
         if self._list.count():
             self._list.setCurrentRow(min(row, self._list.count() - 1))
+        self._show_usual_relays()
         self._update()
 
     def _use_usual_relays(self) -> None:
         """Like Restore Defaults: the form changes, Save makes it so."""
         self._list.clear()
+        self._show_usual_relays()
         self._update()
+
+    # -- the usual relays ------------------------------------------------------
+
+    def _show_usual_relays(self) -> None:
+        """While no draft relays are chosen, the list shows where drafts go
+        then: the account's usual relays, dimmed and not selectable, until
+        one is added (as macOS shows the DNS servers it got by itself)."""
+        if self.chosen():
+            return
+        self._usual_asked += 1
+        asked = self._usual_asked
+        self._relays.usual_relays(lambda relays: self._on_usual_relays(asked, relays))
+
+    def _on_usual_relays(self, asked: int, relays: List[str]) -> None:
+        # The answer may come after the sheet closed, or after a relay was
+        # chosen or the question asked again.
+        if not shiboken6.isValid(self._list) or asked != self._usual_asked or self.chosen():
+            return
+        self._hide_usual_relays()
+        for relay in relays:
+            item = QListWidgetItem(relay)
+            item.setData(_USUAL, True)
+            item.setFlags(Qt.ItemFlag.NoItemFlags)
+            item.setData(Qt.ItemDataRole.AccessibleTextRole,
+                         _("{relay}, a usual relay").format(relay=relay))
+            self._list.addItem(item)
+        self._update()
+
+    def _hide_usual_relays(self) -> None:
+        for row in reversed(range(self._list.count())):
+            if self._list.item(row).data(_USUAL):
+                self._list.takeItem(row)
 
     # -- relays left behind ----------------------------------------------------
 
@@ -528,14 +579,7 @@ class DraftRelaysSheet(AssistantWindow):
         known = self._state in (EDITING, SAVING)
         # The setting as it is, or, once the form differs from it, as it
         # will be after Save (not as if it were so already).
-        if self._changed():
-            self._summary.setText(_("Drafts will be saved only on these relays:")
-                                  if self._list.count()
-                                  else _("Drafts will be kept on your usual relays."))
-        else:
-            self._summary.setText(_("Drafts are saved only on these relays:")
-                                  if self._list.count()
-                                  else _("Drafts are kept on your usual relays."))
+        self._summary.setText(self._summary_text())
         self._summary.setVisible(known)
         self._list.setEnabled(editing)
         self._field.setEnabled(editing)
@@ -549,6 +593,19 @@ class DraftRelaysSheet(AssistantWindow):
             self._field.setAccessibleDescription("")
         self._update_buttons()
 
+    def _summary_text(self) -> str:
+        """Where drafts go: as the setting is, or, once the form differs from
+        it, as it will be after Save. Ends with a colon when the list under
+        it shows the relays."""
+        if self.chosen():
+            return (_("Drafts will be saved only on these relays:") if self._changed()
+                    else _("Drafts are saved only on these relays:"))
+        if self._list.count():
+            return (_("Drafts will be kept on your usual relays:") if self._changed()
+                    else _("Drafts are kept on your usual relays:"))
+        return (_("Drafts will be kept on your usual relays.") if self._changed()
+                else _("Drafts are kept on your usual relays."))
+
     def _buttons(self) -> list:
         """``(key, label, placement, handler, enabled)`` for the state."""
         if self._state == READ_FAILED:
@@ -561,7 +618,7 @@ class DraftRelaysSheet(AssistantWindow):
             leading = ("anyway", _("Save Anyway"), LEADING, self._save_anyway, True)
         else:
             leading = ("usual", _("Use My Usual Relays"), LEADING, self._use_usual_relays,
-                       editing and self._list.count() > 0)
+                       editing and bool(self.chosen()))
         return [leading,
                 ("cancel", _("Cancel"), NORMAL, self.reject, self._can_cancel()),
                 ("save", _("Save"), DEFAULT, self._save, editing and self._changed())]

@@ -101,6 +101,12 @@ def stylesheet(is_dark: bool) -> str:
         background: {field}; border: 1px solid {border}; border-radius: 5px; padding: 4px 6px;
     }}
     QLineEdit:focus, QPlainTextEdit:focus {{ border-color: {accent}; }}
+    QListWidget {{
+        background: {field}; border: 1px solid {border}; border-radius: 5px; padding: 2px;
+    }}
+    QListWidget:focus {{ border-color: {accent}; }}
+    QListWidget::item {{ padding: 3px 4px; }}
+    QListWidget::item:disabled {{ color: {muted}; }}
     QPushButton:disabled {{ color: {muted}; }}
     QPushButton:default:disabled {{ background: {field}; color: {muted}; border-color: {border}; }}
     QPushButton#link {{

@@ -73,9 +73,11 @@ class Lists(QObject):
 
     left_behind_changed = Signal()
 
-    def __init__(self, relays=(), *, readable=True, answer=SAVED, failure=UNREACHABLE):
+    def __init__(self, relays=(), *, readable=True, answer=SAVED, failure=UNREACHABLE,
+                 usual=("wss://usual-1.example", "wss://usual-2.example")):
         super().__init__()
         self.relays = list(relays)
+        self.usual = list(usual)
         self.readable = readable
         self.failure = failure
         self.answer = answer
@@ -102,6 +104,9 @@ class Lists(QObject):
         self.cancelled += 1
         self._pending = None
         return True
+
+    def usual_relays(self, on_done):
+        on_done(list(self.usual))
 
     def read(self, on_done):
         self.last_failure = None if self.readable else self.failure
@@ -156,10 +161,50 @@ def test_it_reads_first_and_edits_what_it_read():
     assert unnamed_controls(sheet) == []
 
 
-def test_an_account_without_a_list_uses_its_usual_relays():
+def shown(sheet):
+    """Each row of the list: its address, and whether it can be selected
+    (a usual relay is shown, not chosen: it can't)."""
+    rows = [sheet._list.item(row) for row in range(sheet._list.count())]
+    return [(item.text(), bool(item.flags() & Qt.ItemFlag.ItemIsSelectable)) for item in rows]
+
+
+USUAL = [("wss://usual-1.example", False), ("wss://usual-2.example", False)]
+
+
+def test_an_account_without_a_list_shows_its_usual_relays():
+    """As macOS shows the DNS servers it got by itself: dimmed, in the list
+    where chosen ones would be, until one is added."""
     sheet, _saved = open_sheet(Lists([]))
+    assert sheet._summary.text() == "Drafts are kept on your usual relays:"
+    assert shown(sheet) == USUAL and sheet.chosen() == []
+    assert not sheet.buttons["usual"].isEnabled() and not sheet._remove.isEnabled()
+    assert sheet._field.hasFocus() or not sheet.isActiveWindow()
+
+
+def test_adding_a_relay_takes_the_place_of_the_usual_ones():
+    sheet, _saved = open_sheet(Lists([]))
+    add(sheet, "wss://mine.example")
+    assert shown(sheet) == [("wss://mine.example", True)]
+    assert sheet.chosen() == ["wss://mine.example"]
+    assert sheet._summary.text() == "Drafts will be saved only on these relays:"
+    assert sheet.buttons["usual"].isEnabled() and sheet.buttons["save"].isEnabled()
+
+
+def test_the_usual_relays_come_back_when_none_is_chosen():
+    sheet, _saved = open_sheet(Lists(["wss://mine.example"]))
+    sheet._list.setCurrentRow(0)
+    sheet._remove.click()
+    assert shown(sheet) == USUAL and sheet.chosen() == []
+    assert sheet._summary.text() == "Drafts will be kept on your usual relays:"
+    sheet2, _saved2 = open_sheet(Lists(["wss://mine.example"]))
+    sheet2.buttons["usual"].click()
+    assert shown(sheet2) == USUAL and sheet2.chosen() == []
+
+
+def test_usual_relays_not_known_yet_leave_the_list_empty_and_say_so_plainly():
+    sheet, _saved = open_sheet(Lists([], usual=()))
+    assert shown(sheet) == [] and sheet.chosen() == []
     assert sheet._summary.text() == "Drafts are kept on your usual relays."
-    assert not sheet.buttons["usual"].isEnabled()
 
 
 def test_the_focus_starts_on_the_list_or_on_the_field():
@@ -238,7 +283,7 @@ def test_use_my_usual_relays_empties_the_form_and_save_makes_it_so():
     sheet, saved = open_sheet(lists)
     sheet.buttons["usual"].click()
     assert sheet.chosen() == [] and sheet._summary.text() == (
-        "Drafts will be kept on your usual relays.")      # once saved, not yet
+        "Drafts will be kept on your usual relays:")      # once saved, not yet
     assert lists.saves == []                              # nothing changes before Save
     sheet.buttons["save"].click()
     assert lists.saves == [([], [])] and saved == [[]] and not sheet.isVisible()
@@ -296,7 +341,7 @@ def test_after_a_failed_save_the_summary_does_not_state_the_form_as_the_setting(
     sheet.buttons["usual"].click()
     sheet.buttons["save"].click()
     assert sheet._error.text().endswith("won’t be shown any more.")
-    assert sheet._summary.text() == "Drafts will be kept on your usual relays."
+    assert sheet._summary.text() == "Drafts will be kept on your usual relays:"
     add(sheet, MINE)                                      # back to the setting as read
     assert sheet._summary.text() == "Drafts are saved only on these relays:"
 
@@ -563,3 +608,24 @@ def test_a_button_that_dims_itself_hands_the_focus_to_save(monkeypatch, mac):
     finally:
         sheet._generation += 1
         sheet.reject()
+
+
+def test_the_list_follows_the_apps_appearance_and_keeps_its_height():
+    """Dark in the app's dark appearance whatever the system's (it took the
+    system's colors), and five rows high however tall the sheet grows, as
+    a list in a settings sheet is."""
+    from PySide6.QtGui import QColor
+    from constants import DARK_MENU_BG
+    sheet = DraftRelaysSheet(Lists([]), is_dark=True)
+    sheet.resize(560, 560)
+    sheet.show()
+    settle()
+    height = sheet._list.height()
+    image = sheet._list.viewport().grab().toImage()
+    corner = image.pixelColor(image.width() - 8, image.height() - 8)
+    expected = QColor(DARK_MENU_BG)
+    assert all(abs(a - b) <= 4 for a, b in zip(corner.getRgb()[:3], expected.getRgb()[:3]))
+    sheet.resize(560, 900)
+    settle()
+    assert sheet._list.height() == height
+    sheet.close()

@@ -86,26 +86,26 @@ msgid "Purple"
 msgstr "Lila"
 
 #: editor.py:117
-#: editor.py:575
+#: editor.py:580
 msgid "Paragraph Style"
 msgstr "Absatzstil"
 
 #: editor.py:117
 #: editor.py:118
-#: editor.py:1301
+#: editor.py:1306
 msgid "List"
 msgstr "Liste"
 
 #: editor.py:118
-#: editor.py:1638
+#: editor.py:1643
 #: main_window.py:1967
 msgid "Quote"
 msgstr "Zitat"
 
 #: editor.py:118
-#: editor.py:1088
-#: editor.py:1293
-#: editor.py:1580
+#: editor.py:1093
+#: editor.py:1298
+#: editor.py:1585
 #: main_window.py:1943
 msgid "Checklist"
 msgstr "Checkliste"
@@ -146,110 +146,110 @@ msgid "Decrease Indent"
 msgstr "Einzug verkleinern"
 
 #: editor.py:238
-#: editor.py:2394
-#: editor.py:1694
-#: editor.py:2381
+#: editor.py:2399
+#: editor.py:1699
+#: editor.py:2386
 #: main_window.py:1854
 msgid "Paste"
 msgstr "Einsetzen"
 
-#: editor.py:520
+#: editor.py:525
 #: main_window.py:2511
 msgid "Color"
 msgstr "Farbe"
 
-#: editor.py:592
+#: editor.py:597
 #: main_window.py:1903
 msgid "Clear Formatting"
 msgstr "Formatierung entfernen"
 
-#: editor.py:824
+#: editor.py:829
 msgid "Correction"
 msgstr "Korrektur"
 
-#: editor.py:1116
+#: editor.py:1121
 #: nostr/ui/mention_picker.py:236
 msgid "Mention"
 msgstr "Erwähnung"
 
-#: editor.py:1460
+#: editor.py:1465
 msgid "Note or Article"
 msgstr "Notiz oder Artikel"
 
-#: editor.py:1489
+#: editor.py:1494
 msgid "Link"
 msgstr "Link"
 
-#: editor.py:1503
+#: editor.py:1508
 #: link_popover.py:94
 #: main_window.py:5570
 msgid "Remove Link"
 msgstr "Link entfernen"
 
-#: editor.py:1594
+#: editor.py:1599
 #: main_window.py:2007
 msgid "Footnote"
 msgstr "Fußnote"
 
-#: editor.py:1646
-#: editor.py:1868
+#: editor.py:1651
+#: editor.py:1873
 #: main_window.py:1980
 msgid "Divider"
 msgstr "Trennlinie"
 
-#: editor.py:2150
+#: editor.py:2155
 #: main_window.py:2521
 msgid "Table"
 msgstr "Tabelle"
 
-#: editor.py:2171
+#: editor.py:2176
 #: main_window.py:2030
 msgid "Add Row Above"
 msgstr "Zeile oberhalb hinzufügen"
 
-#: editor.py:2171
+#: editor.py:2176
 #: main_window.py:2030
 msgid "Add Row Below"
 msgstr "Zeile unterhalb hinzufügen"
 
-#: editor.py:2172
+#: editor.py:2177
 #: main_window.py:2031
 msgid "Add Column Before"
 msgstr "Spalte davor hinzufügen"
 
-#: editor.py:2173
+#: editor.py:2178
 #: main_window.py:2032
 msgid "Add Column After"
 msgstr "Spalte danach hinzufügen"
 
-#: editor.py:2174
+#: editor.py:2179
 #: main_window.py:2033
 msgid "Delete Row"
 msgstr "Zeile löschen"
 
-#: editor.py:2174
+#: editor.py:2179
 #: main_window.py:2033
 msgid "Delete Column"
 msgstr "Spalte löschen"
 
-#: editor.py:2175
+#: editor.py:2180
 #: main_window.py:2034
 msgid "Delete Table"
 msgstr "Tabelle löschen"
 
-#: editor.py:2300
-#: editor.py:1867
+#: editor.py:2305
+#: editor.py:1872
 #: main_window.py:1987
 msgid "Code Block"
 msgstr "Codeblock"
 
-#: editor.py:2308
+#: editor.py:2313
 #: main_window.py:2516
 msgid "Code Language"
 msgstr "Code-Sprache"
 
-#: editor.py:2384
-#: editor.py:1692
+#: editor.py:2389
+#: editor.py:1697
 #: main_window.py:1850
 msgid "Cut"
 msgstr "Ausschneiden"
@@ -264,22 +264,22 @@ msgstr[1] "{count} Bilder konnten nicht mit dem Text eingesetzt werden. Kopiere 
 msgid "Document"
 msgstr "Dokument"
 
-#: editor.py:1097
-#: editor.py:1082
+#: editor.py:1102
+#: editor.py:1087
 msgid "checked"
 msgstr "abgehakt"
 
-#: editor.py:1097
-#: editor.py:1084
+#: editor.py:1102
+#: editor.py:1089
 msgid "not checked"
 msgstr "nicht abgehakt"
 
-#: editor.py:1212
+#: editor.py:1217
 #, python-brace-format
 msgid "{title}, {position} of {count}"
 msgstr "{title}, {position} von {count}"
 
-#: editor.py:1693
+#: editor.py:1698
 #: main_window.py:1852
 #: update_dialog.py:194
 #: update_dialog.py:202
@@ -287,50 +287,50 @@ msgstr "{title}, {position} von {count}"
 msgid "Copy"
 msgstr "Kopieren"
 
-#: editor.py:2382
+#: editor.py:2387
 #: main_window.py:3232
 #: main_window.py:3321
 msgid "Drag"
 msgstr "Ziehen"
 
-#: editor.py:368
-#: editor.py:1962
-#: editor.py:1893
+#: editor.py:373
+#: editor.py:1967
+#: editor.py:1898
 msgid "Typing"
 msgstr "Tippen"
 
-#: editor.py:1229
+#: editor.py:1234
 #, python-brace-format
 msgid "{title} applied"
 msgstr "{title} angewendet"
 
-#: editor.py:1624
+#: editor.py:1629
 msgid "Command-click to open"
 msgstr "Zum Öffnen bei gedrückter Befehlstaste klicken"
 
-#: editor.py:1625
+#: editor.py:1630
 msgid "Ctrl+click to open"
 msgstr "Zum Öffnen bei gedrückter Strg-Taste klicken"
 
-#: editor.py:1072
+#: editor.py:1077
 #, python-brace-format
 msgid "Row {row} of {rows}, column {column}"
 msgstr "Zeile {row} von {rows}, Spalte {column}"
 
-#: editor.py:1217
+#: editor.py:1222
 #, python-brace-format
 msgid "Insert menu. {choice}"
 msgstr "Menü „Einfügen“. {choice}"
 
-#: editor.py:1629
+#: editor.py:1634
 msgid "Command-click to go to the note"
 msgstr "Zur Fußnote bei gedrückter Befehlstaste klicken"
 
-#: editor.py:1630
+#: editor.py:1635
 msgid "Ctrl+click to go to the note"
 msgstr "Zur Fußnote bei gedrückter Strg-Taste klicken"
 
-#: editor.py:1075
+#: editor.py:1080
 #, python-brace-format
 msgid "{place}, {header}"
 msgstr "{place}, {header}"
@@ -527,7 +527,7 @@ msgstr "Neuer Tab"
 #: main_window.py:464
 #: update_dialog.py:287
 #: nostr/ui/account_windows.py:764
-#: nostr/ui/draft_relays_sheet.py:556
+#: nostr/ui/draft_relays_sheet.py:613
 #: nostr/ui/drafts_panel.py:1154
 #: nostr/ui/imports_activity.py:288
 #: nostr/ui/imports_window.py:1186
@@ -898,7 +898,7 @@ msgstr "Öffnen …"
 
 #: main_window.py:1804
 #: main_window.py:301
-#: nostr/ui/draft_relays_sheet.py:567
+#: nostr/ui/draft_relays_sheet.py:624
 #: nostr/ui/profile_window.py:285
 #: nostr/ui/save_destination_dialog.py:226
 #: nostr/ui/save_destination_dialog.py:307
@@ -3556,7 +3556,7 @@ msgstr "Versionshinweise"
 #: nostr/ui/account_windows.py:788
 #: nostr/ui/account_windows.py:849
 #: nostr/ui/account_windows.py:1099
-#: nostr/ui/draft_relays_sheet.py:558
+#: nostr/ui/draft_relays_sheet.py:615
 #: nostr/ui/image_review_dialog.py:125
 msgid "Done"
 msgstr "Fertig"
@@ -6021,7 +6021,7 @@ msgstr "Zaps werden so geteilt, wie es eine andere App festgelegt hat."
 
 #: nostr/ui/article_details_panel.py:501
 #: nostr/ui/cover_field.py:169
-#: nostr/ui/draft_relays_sheet.py:158
+#: nostr/ui/draft_relays_sheet.py:173
 #: nostr/ui/media_library_dialog.py:660
 #: nostr/ui/media_servers_dialog.py:229
 #: nostr/ui/media_servers_dialog.py:402
@@ -6063,26 +6063,26 @@ msgid_plural "{names} can’t receive zaps: their profiles have no lightning add
 msgstr[0] "{names} kann keine Zaps empfangen: Im Profil steht keine Lightning-Adresse. Diese Person erhält keinen Anteil."
 msgstr[1] "{names} können keine Zaps empfangen: Bei ihnen steht keine Lightning-Adresse im Profil. Sie erhalten keinen Anteil."
 
-#: nostr/ui/assistant.py:149
+#: nostr/ui/assistant.py:155
 msgid "Working"
 msgstr "In Arbeit"
 
-#: nostr/ui/assistant.py:364
+#: nostr/ui/assistant.py:370
 #, python-brace-format
 msgid "Step {number}, not started"
 msgstr "Schritt {number}, nicht begonnen"
 
-#: nostr/ui/assistant.py:365
+#: nostr/ui/assistant.py:371
 #, python-brace-format
 msgid "Step {number}, in progress"
 msgstr "Schritt {number}, läuft"
 
-#: nostr/ui/assistant.py:366
+#: nostr/ui/assistant.py:372
 #, python-brace-format
 msgid "Step {number}, done"
 msgstr "Schritt {number}, erledigt"
 
-#: nostr/ui/assistant.py:367
+#: nostr/ui/assistant.py:373
 #, python-brace-format
 msgid "Step {number}, failed"
 msgstr "Schritt {number}, fehlgeschlagen"
@@ -6306,186 +6306,199 @@ msgstr "Meine behalten"
 msgid "Dismiss and let the next save from this tab win."
 msgstr "Schließen. Beim nächsten Speichern aus diesem Tab gilt deine Version."
 
-#: nostr/ui/draft_relays_sheet.py:492
+#: nostr/ui/draft_relays_sheet.py:543
 msgid "Couldn’t save the change. Try again."
 msgstr "Die Änderung konnte nicht gespeichert werden. Versuche es erneut."
 
-#: nostr/ui/draft_relays_sheet.py:108
-#: nostr/ui/draft_relays_sheet.py:140
+#: nostr/ui/draft_relays_sheet.py:116
+#: nostr/ui/draft_relays_sheet.py:153
 msgid "Draft Relays"
 msgstr "Relays für Entwürfe"
 
-#: nostr/ui/draft_relays_sheet.py:149
+#: nostr/ui/draft_relays_sheet.py:162
 msgid "Draft relays"
 msgstr "Relays für Entwürfe"
 
-#: nostr/ui/draft_relays_sheet.py:166
+#: nostr/ui/draft_relays_sheet.py:181
 msgid "Add a relay:"
 msgstr "Relay hinzufügen:"
 
-#: nostr/ui/draft_relays_sheet.py:172
+#: nostr/ui/draft_relays_sheet.py:187
 #: nostr/ui/imports_window.py:345
 msgid "Add"
 msgstr "Hinzufügen"
 
-#: nostr/ui/draft_relays_sheet.py:195
+#: nostr/ui/draft_relays_sheet.py:210
 msgid "Relays still looked at for drafts"
 msgstr "Relays, auf denen noch nach Entwürfen gesucht wird"
 
-#: nostr/ui/draft_relays_sheet.py:207
+#: nostr/ui/draft_relays_sheet.py:222
 msgid "Stop Looking…"
 msgstr "Nicht mehr suchen …"
 
-#: nostr/ui/draft_relays_sheet.py:473
+#: nostr/ui/draft_relays_sheet.py:524
 msgid "The relays your drafts would move to turned some of them down, so nothing was changed. Choose other relays, then try again."
 msgstr "Die Relays, auf die deine Entwürfe umziehen sollten, haben einige davon abgelehnt, daher wurde nichts geändert. Wähle andere Relays und versuche es dann erneut."
 
-#: nostr/ui/draft_relays_sheet.py:476
+#: nostr/ui/draft_relays_sheet.py:527
 msgid "Some drafts couldn’t be moved, so nothing was changed. Check your internet connection, then try again."
 msgstr "Einige Entwürfe konnten nicht umziehen, daher wurde nichts geändert. Prüfe deine Internetverbindung und versuche es dann erneut."
 
-#: nostr/ui/draft_relays_sheet.py:479
+#: nostr/ui/draft_relays_sheet.py:530
 msgid "Couldn’t read the current setting, so nothing was changed. Check your internet connection, then try again."
 msgstr "Die aktuelle Einstellung konnte nicht gelesen werden, daher wurde nichts geändert. Prüfe deine Internetverbindung und versuche es dann erneut."
 
-#: nostr/ui/draft_relays_sheet.py:483
+#: nostr/ui/draft_relays_sheet.py:534
 msgid "The current setting is dated ahead of this computer’s clock, so nothing was changed. Check the date and time on this computer, then try again."
 msgstr "Die aktuelle Einstellung ist später datiert, als die Uhr dieses Computers zeigt, daher wurde nichts geändert. Prüfe Datum und Uhrzeit dieses Computers und versuche es dann erneut."
 
-#: nostr/ui/draft_relays_sheet.py:487
+#: nostr/ui/draft_relays_sheet.py:538
 msgid "Too few relays took the change. Check your internet connection, then try again."
 msgstr "Zu wenige Relays haben die Änderung angenommen. Prüfe deine Internetverbindung und versuche es dann erneut."
 
-#: nostr/ui/draft_relays_sheet.py:490
+#: nostr/ui/draft_relays_sheet.py:541
 msgid "Your signer app didn’t approve the change. Try again, and approve it when your signer app asks."
 msgstr "Deine Signer-App hat die Änderung nicht bestätigt. Versuche es erneut und bestätige sie, wenn deine Signer-App fragt."
 
-#: nostr/ui/draft_relays_sheet.py:142
+#: nostr/ui/draft_relays_sheet.py:606
+msgid "Drafts will be kept on your usual relays."
+msgstr "Entwürfe liegen dann auf deinen üblichen Relays."
+
+#: nostr/ui/draft_relays_sheet.py:607
+msgid "Drafts are kept on your usual relays."
+msgstr "Entwürfe liegen auf deinen üblichen Relays."
+
+#: nostr/ui/draft_relays_sheet.py:155
 msgid "Drafts are encrypted wherever they are kept. With relays chosen here, drafts are saved only there. When you change this, your drafts move with it. Apps that don’t read this setting won’t see the drafts saved there."
 msgstr "Entwürfe sind verschlüsselt, wo immer sie liegen. Mit hier gewählten Relays werden Entwürfe nur dort gespeichert. Wenn du das änderst, ziehen deine Entwürfe mit um. Apps, die diese Einstellung nicht lesen, sehen die dort gespeicherten Entwürfe nicht."
 
-#: nostr/ui/draft_relays_sheet.py:188
+#: nostr/ui/draft_relays_sheet.py:203
 msgid "Still looking for drafts on:"
 msgstr "Noch auf der Suche nach Entwürfen auf:"
 
-#: nostr/ui/draft_relays_sheet.py:190
+#: nostr/ui/draft_relays_sheet.py:205
 msgid "These relays are no longer in the setting, but may still hold drafts saved there before it changed. MyEditor moves them to where drafts are kept now once each relay answers."
 msgstr "Diese Relays gehören nicht mehr zur Einstellung, können aber noch Entwürfe enthalten, die dort vor der Änderung gespeichert wurden. MyEditor verschiebt sie dorthin, wo Entwürfe jetzt liegen, sobald das jeweilige Relay antwortet."
 
-#: nostr/ui/draft_relays_sheet.py:229
+#: nostr/ui/draft_relays_sheet.py:244
 msgid "The setting is saved."
 msgstr "Die Einstellung ist gespeichert."
 
-#: nostr/ui/draft_relays_sheet.py:242
+#: nostr/ui/draft_relays_sheet.py:257
 msgid "Reading where your drafts are kept…"
 msgstr "Es wird gelesen, wo deine Entwürfe liegen …"
 
-#: nostr/ui/draft_relays_sheet.py:250
+#: nostr/ui/draft_relays_sheet.py:265
 msgid "Couldn’t decrypt where your drafts are kept. Make sure your signer app is running, then try again."
 msgstr "Es konnte nicht entschlüsselt werden, wo deine Entwürfe liegen. Prüfe, ob deine Signer-App läuft, und versuche es dann erneut."
 
-#: nostr/ui/draft_relays_sheet.py:253
+#: nostr/ui/draft_relays_sheet.py:268
 msgid "Couldn’t read where your drafts are kept. Check your internet connection, then try again."
 msgstr "Es konnte nicht gelesen werden, wo deine Entwürfe liegen. Prüfe deine Internetverbindung und versuche es dann erneut."
 
-#: nostr/ui/draft_relays_sheet.py:279
+#: nostr/ui/draft_relays_sheet.py:295
 msgid "Enter a relay’s address. It starts with wss://."
 msgstr "Gib die Adresse eines Relays ein. Sie beginnt mit wss://."
 
-#: nostr/ui/draft_relays_sheet.py:282
+#: nostr/ui/draft_relays_sheet.py:298
 msgid "That relay is already in the list."
 msgstr "Dieses Relay steht schon in der Liste."
 
-#: nostr/ui/draft_relays_sheet.py:337
+#: nostr/ui/draft_relays_sheet.py:388
 msgid "Stop looking for drafts on this relay?"
 msgstr "Nicht mehr nach Entwürfen auf diesem Relay suchen?"
 
-#: nostr/ui/draft_relays_sheet.py:340
+#: nostr/ui/draft_relays_sheet.py:391
 msgid "Stop Looking"
 msgstr "Nicht mehr suchen"
 
-#: nostr/ui/draft_relays_sheet.py:366
-#: nostr/ui/draft_relays_sheet.py:390
+#: nostr/ui/draft_relays_sheet.py:417
+#: nostr/ui/draft_relays_sheet.py:441
 msgid "Reading your drafts…"
 msgstr "Deine Entwürfe werden gelesen …"
 
-#: nostr/ui/draft_relays_sheet.py:561
+#: nostr/ui/draft_relays_sheet.py:601
+msgid "Drafts will be saved only on these relays:"
+msgstr "Entwürfe werden dann nur auf diesen Relays gespeichert:"
+
+#: nostr/ui/draft_relays_sheet.py:602
+msgid "Drafts are saved only on these relays:"
+msgstr "Entwürfe werden nur auf diesen Relays gespeichert:"
+
+#: nostr/ui/draft_relays_sheet.py:604
+msgid "Drafts will be kept on your usual relays:"
+msgstr "Entwürfe liegen dann auf deinen üblichen Relays:"
+
+#: nostr/ui/draft_relays_sheet.py:605
+msgid "Drafts are kept on your usual relays:"
+msgstr "Entwürfe liegen auf deinen üblichen Relays:"
+
+#: nostr/ui/draft_relays_sheet.py:618
 msgid "Save Anyway"
 msgstr "Trotzdem speichern"
 
-#: nostr/ui/draft_relays_sheet.py:563
+#: nostr/ui/draft_relays_sheet.py:620
 msgid "Use My Usual Relays"
 msgstr "Meine üblichen Relays verwenden"
 
-#: nostr/ui/draft_relays_sheet.py:385
+#: nostr/ui/draft_relays_sheet.py:436
 msgid "Moving your drafts…"
 msgstr "Deine Entwürfe ziehen um …"
 
-#: nostr/ui/draft_relays_sheet.py:410
+#: nostr/ui/draft_relays_sheet.py:461
 msgid "The setting was changed on another device while this was open, so nothing was changed here. This is the setting as it is now."
 msgstr "Die Einstellung wurde auf einem anderen Gerät geändert, während dies hier offen war, daher wurde hier nichts geändert. So ist die Einstellung jetzt."
 
-#: nostr/ui/draft_relays_sheet.py:425
+#: nostr/ui/draft_relays_sheet.py:476
 #, python-brace-format
 msgid "Drafts saved during the change may still be only on {relays}, which didn’t answer. MyEditor keeps looking for them there and moves them once it answers."
 msgid_plural "Drafts saved during the change may still be only on {relays}, which didn’t answer. MyEditor keeps looking for them there and moves them once they answer."
 msgstr[0] "Entwürfe, die während der Änderung gespeichert wurden, liegen vielleicht noch nur auf {relays}, das nicht geantwortet hat. MyEditor sucht dort weiter nach ihnen und verschiebt sie, sobald es antwortet."
 msgstr[1] "Entwürfe, die während der Änderung gespeichert wurden, liegen vielleicht noch nur auf {relays}, die nicht geantwortet haben. MyEditor sucht dort weiter nach ihnen und verschiebt sie, sobald sie antworten."
 
-#: nostr/ui/draft_relays_sheet.py:444
+#: nostr/ui/draft_relays_sheet.py:495
 #, python-brace-format
 msgid "Couldn’t read the drafts on {relays}, so nothing was changed. Check your internet connection, then try again. If that relay is gone for good, choose Save Anyway: the drafts kept only there won’t be shown any more."
 msgid_plural "Couldn’t read the drafts on {relays}, so nothing was changed. Check your internet connection, then try again. If those relays are gone for good, choose Save Anyway: the drafts kept only there won’t be shown any more."
 msgstr[0] "Die Entwürfe auf {relays} konnten nicht gelesen werden, daher wurde nichts geändert. Prüfe deine Internetverbindung und versuche es dann erneut. Wenn es dieses Relay nicht mehr gibt, wähle „Trotzdem speichern“: Die Entwürfe, die nur dort liegen, werden dann nicht mehr angezeigt."
 msgstr[1] "Die Entwürfe auf {relays} konnten nicht gelesen werden, daher wurde nichts geändert. Prüfe deine Internetverbindung und versuche es dann erneut. Wenn es diese Relays nicht mehr gibt, wähle „Trotzdem speichern“: Die Entwürfe, die nur dort liegen, werden dann nicht mehr angezeigt."
 
-#: nostr/ui/draft_relays_sheet.py:453
+#: nostr/ui/draft_relays_sheet.py:504
 #, python-brace-format
 msgid "{relays} sends only its newest drafts, whichever part MyEditor asks for, so the older ones there can’t be moved, and nothing was changed. If you can do without the drafts kept only there, choose Save Anyway: they won’t be shown any more."
 msgid_plural "{relays} send only their newest drafts, whichever part MyEditor asks for, so the older ones there can’t be moved, and nothing was changed. If you can do without the drafts kept only there, choose Save Anyway: they won’t be shown any more."
 msgstr[0] "{relays} schickt nur seine neuesten Entwürfe, egal, welchen Teil MyEditor anfragt. Die älteren dort lassen sich daher nicht verschieben, und es wurde nichts geändert. Wenn du auf die Entwürfe verzichten kannst, die nur dort liegen, wähle „Trotzdem speichern“: Sie werden dann nicht mehr angezeigt."
 msgstr[1] "{relays} schicken nur ihre neuesten Entwürfe, egal, welchen Teil MyEditor anfragt. Die älteren dort lassen sich daher nicht verschieben, und es wurde nichts geändert. Wenn du auf die Entwürfe verzichten kannst, die nur dort liegen, wähle „Trotzdem speichern“: Sie werden dann nicht mehr angezeigt."
 
-#: nostr/ui/draft_relays_sheet.py:464
+#: nostr/ui/draft_relays_sheet.py:515
 #, python-brace-format
 msgid "{relays} didn’t give your drafts back when MyEditor asked, so nothing was changed. If your signer app asked you to approve signing in to it, approve that, then try again. Otherwise choose another relay."
 msgid_plural "{relays} didn’t give your drafts back when MyEditor asked, so nothing was changed. If your signer app asked you to approve signing in to them, approve that, then try again. Otherwise choose other relays."
 msgstr[0] "{relays} hat deine Entwürfe auf Nachfrage nicht zurückgegeben, daher wurde nichts geändert. Wenn deine Signer-App gefragt hat, ob du dich bei diesem Relay anmelden willst, bestätige das und versuche es dann erneut. Sonst wähle ein anderes Relay."
 msgstr[1] "{relays} haben deine Entwürfe auf Nachfrage nicht zurückgegeben, daher wurde nichts geändert. Wenn deine Signer-App gefragt hat, ob du dich bei diesen Relays anmelden willst, bestätige das und versuche es dann erneut. Sonst wähle andere Relays."
 
-#: nostr/ui/draft_relays_sheet.py:532
-msgid "Drafts will be saved only on these relays:"
-msgstr "Entwürfe werden dann nur auf diesen Relays gespeichert:"
-
-#: nostr/ui/draft_relays_sheet.py:534
-msgid "Drafts will be kept on your usual relays."
-msgstr "Entwürfe liegen dann auf deinen üblichen Relays."
-
-#: nostr/ui/draft_relays_sheet.py:536
-msgid "Drafts are saved only on these relays:"
-msgstr "Entwürfe werden nur auf diesen Relays gespeichert:"
-
-#: nostr/ui/draft_relays_sheet.py:538
-msgid "Drafts are kept on your usual relays."
-msgstr "Entwürfe liegen auf deinen üblichen Relays."
-
-#: nostr/ui/draft_relays_sheet.py:285
+#: nostr/ui/draft_relays_sheet.py:301
 #, python-brace-format
 msgid "Drafts can be kept on at most {count} relay."
 msgid_plural "Drafts can be kept on at most {count} relays."
 msgstr[0] "Entwürfe können auf höchstens {count} Relay liegen."
 msgstr[1] "Entwürfe können auf höchstens {count} Relays liegen."
 
-#: nostr/ui/draft_relays_sheet.py:338
+#: nostr/ui/draft_relays_sheet.py:350
+#, python-brace-format
+msgid "{relay}, a usual relay"
+msgstr "{relay}, ein übliches Relay"
+
+#: nostr/ui/draft_relays_sheet.py:389
 #, python-brace-format
 msgid "Drafts kept only on {relay} won’t be shown any more."
 msgstr "Entwürfe, die nur auf {relay} liegen, werden dann nicht mehr angezeigt."
 
-#: nostr/ui/draft_relays_sheet.py:391
+#: nostr/ui/draft_relays_sheet.py:442
 msgid "Saving. Approve the request in your signer app if it asks…"
 msgstr "Wird gespeichert. Bestätige die Anfrage in deiner Signer-App, wenn sie fragt …"
 
-#: nostr/ui/draft_relays_sheet.py:384
+#: nostr/ui/draft_relays_sheet.py:435
 #, python-brace-format
 msgid "Moving {count} draft…"
 msgid_plural "Moving {count} drafts…"
