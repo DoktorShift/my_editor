@@ -172,6 +172,7 @@ from nostr.profile_editing import ProfileEditing
 from nostr.relay import NOT_CHOSEN
 from nostr.relay_auth import DECLINED, AccountSignIn
 from nostr.state import NostrState
+from nostr.ui.cover_field import MediaServices
 from nostr.ui.profile_window import ProfileWindow
 from nostr.blossom import BLOSSOM_MAX_FILE_SIZE
 from nostr.blossom.plan import get_effective_max_file
@@ -6429,9 +6430,15 @@ class MainWindow(QMainWindow):
         editing = ProfileEditing(profile=active, pool=self._relay_pool,
                                  session_pool=self._session_pool,
                                  directory=self._relay_directory, parent=self)
+        media = (MediaServices(store=self._media_store, visibility=self._media_visibility,
+                               copy_maker=self._copy_maker,
+                               private_library=self._private_library,
+                               profile=self._profile_store.default, saver=self._media_saver)
+                 if self._media_store is not None else None)
         window = ProfileWindow(read=editing.read, save=editing.save,
-                               signs_locally=active.is_local, is_dark=self.is_dark_theme,
-                               parent=self)
+                               signs_locally=active.is_local, media=media,
+                               load_image=self._profile_image_loader(active.user_pubkey),
+                               is_dark=self.is_dark_theme, parent=self)
         # Closing the window ends what is still running for it.
         editing.setParent(window)
         window.setWindowFlag(Qt.Window, True)
@@ -6444,6 +6451,14 @@ class MainWindow(QMainWindow):
 
         window.saved.connect(saved)
         window.show()
+
+    def _profile_image_loader(self, pubkey: str):
+        """Edit Profile's card loads its pictures as avatars are loaded (the
+        same checks and cache), each address under a key of its own."""
+        def load(kind: str, url: str, on_done) -> None:
+            key = f"{pubkey}-{kind}-{hashlib.sha256(url.encode('utf-8')).hexdigest()[:12]}"
+            self._avatar_loader.fetch(key, url, on_done)
+        return load
 
     def _on_nostr_connect(self):
         dialog = ConnectDialog(

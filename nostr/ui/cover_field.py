@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import os
 import uuid
+from dataclasses import dataclass
 from typing import Callable, Optional
 
 from PySide6.QtCore import QSize, Qt, Signal
@@ -55,6 +56,43 @@ from .publish_copy_dialog import resolve_pick
 from .thumbnail_loader import ThumbnailLoader
 
 THUMB = QSize(144, 84)
+
+
+@dataclass(frozen=True)
+class MediaServices:
+    """What choosing a picture from the Media Library needs: the account's
+    media servers, and what tells a private file from a public one and
+    makes a public copy of it."""
+    store: MediaStore
+    visibility: Optional[MediaVisibility] = None
+    copy_maker: Optional[PublicCopyMaker] = None
+    private_library: Optional[PrivateLibrary] = None
+    profile: Callable[[], Optional[Profile]] = lambda: None
+    saver: Optional[MediaSaver] = None
+
+
+def choose_picture(services: MediaServices, *, title: str, is_dark: bool, parent: QWidget,
+                   on_picked: Callable[[MediaFile], None]) -> None:
+    """The Media Library's picker, showing pictures, without the
+    alternative text row: ``on_picked(media)`` for the file chosen (its
+    Add… uploads one first). A private one is the caller's to resolve
+    (publish_copy_dialog.resolve_pick)."""
+    # Reading the private library is what lets the picker tell a private
+    # file from a public one; it starts here, when someone goes looking for
+    # a picture, not on the way into the window.
+    if services.private_library is not None:
+        services.private_library.bind_profile(services.profile())
+    picker = MediaLibraryDialog(store=services.store, is_dark=is_dark,
+                                pick_mode=True, pick_alt_text=False,
+                                visibility=services.visibility or MediaVisibility(),
+                                saver=services.saver, parent=parent)
+    if services.private_library is not None:
+        picker.bind_private_library(services.private_library)
+    picker.setWindowTitle(title)
+    # Pictures only: audio and video can't be one.
+    picker._filter_combo.setCurrentIndex(1)
+    picker.file_picked.connect(on_picked)
+    picker.exec()
 
 
 class _Well(QLabel):
@@ -281,26 +319,16 @@ class CoverImageField(QWidget):
     # -- choosing a picture -------------------------------------------------
 
     def choose(self) -> None:
-        """The Media Library's picker, showing pictures, without the
-        alternative text row (a cover has none on Nostr)."""
+        """The Media Library's picker for a cover (choose_picture; a cover
+        has no alternative text on Nostr)."""
         if self._media_store is None:
             return
-        # Reading the private library is what lets the picker tell a
-        # private file from a public one; it starts here, when someone
-        # goes looking for a picture, not on the way into the window.
-        if self._private_library is not None:
-            self._private_library.bind_profile(self._profile())
-        picker = MediaLibraryDialog(store=self._media_store, is_dark=self._is_dark,
-                                    pick_mode=True, pick_alt_text=False,
-                                    visibility=self._media_visibility, saver=self._saver,
-                                    parent=self)
-        if self._private_library is not None:
-            picker.bind_private_library(self._private_library)
-        picker.setWindowTitle(_("Choose Cover Image"))
-        # Pictures only: audio and video can't be a cover.
-        picker._filter_combo.setCurrentIndex(1)
-        picker.file_picked.connect(self.picked)
-        picker.exec()
+        services = MediaServices(
+            store=self._media_store, visibility=self._media_visibility,
+            copy_maker=self._copy_maker, private_library=self._private_library,
+            profile=self._profile, saver=self._saver)
+        choose_picture(services, title=_("Choose Cover Image"), is_dark=self._is_dark,
+                       parent=self, on_picked=self.picked)
 
     def picked(self, media: MediaFile, _alt: str = "") -> None:
         """``media`` chosen: its public address, or nothing and why."""

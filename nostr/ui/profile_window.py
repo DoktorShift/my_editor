@@ -18,9 +18,18 @@ Saving sends only the fields that were changed, and the writer
 keeps every field this window does not show (banner colors, bots' flags,
 anything another app added).
 
+The form opens with the profile as others will see it (profile_card.py):
+the banner, the picture, the name and the address, following the fields as
+they change. The fields come in three groups, as people think of them:
+who they are (name, username, about: under the card, untitled), how they
+look (picture and banner,
+each chosen from the Media Library with Choose…, which also uploads, or
+given by its address), and where else to find and pay them.
+
 The window does no network work itself: ``read`` and ``save`` are handed
-in (nostr/profile_editing.py has the real ones), which is also what lets
-the tests drive it.
+in (nostr/profile_editing.py has the real ones), and so are ``media`` (the
+Media Library's services, for Choose…) and ``load_image`` (which fetches
+the card's pictures), which is also what lets the tests drive it.
 """
 
 from __future__ import annotations
@@ -31,8 +40,12 @@ import weakref
 from dataclasses import dataclass
 from typing import Callable, Dict, List, Optional
 
-from PySide6.QtCore import Qt, Signal
-from PySide6.QtWidgets import QFormLayout, QLabel, QLineEdit, QPlainTextEdit, QVBoxLayout, QWidget
+from PySide6.QtCore import Qt, QTimer, Signal
+from PySide6.QtGui import QPixmap
+from PySide6.QtWidgets import (
+    QFormLayout, QHBoxLayout, QLabel, QLineEdit, QPlainTextEdit, QPushButton, QVBoxLayout,
+    QWidget,
+)
 
 import announce
 from i18n import N_, _, ngettext
@@ -42,6 +55,9 @@ from nostr.outbox.writer import UNCHANGED, UNKNOWN_BASE, WRITTEN
 from nostr.ui.assistant import (
     DEFAULT, NORMAL, AssistantWindow, busy_bar, page, text_label,
 )
+from nostr.ui.cover_field import MediaServices, choose_picture
+from nostr.ui.profile_card import ProfileCard
+from nostr.ui.publish_copy_dialog import resolve_pick
 
 READING = "reading"
 FORM = "form"
@@ -51,6 +67,12 @@ PROBLEM = "problem"
 # read(on_done(Lookup)) and save(changes, on_done(WriteOutcome)).
 ReadFn = Callable[[Callable[[object], None]], None]
 SaveFn = Callable[[Dict[str, str], Callable[[object], None]], None]
+# load_image(kind, url, on_done(QPixmap or None)): "picture" or "banner".
+ImageFn = Callable[[str, str, Callable[[Optional[QPixmap]], None]], None]
+
+# How long the card waits after an address changes before it loads the
+# picture, so typing one does not load each half-typed address.
+IMAGE_DELAY_MS = 600
 
 
 @dataclass(frozen=True)
@@ -75,6 +97,18 @@ FIELDS = (
     Field("lud16", N_("Lightning address:"), N_("you@wallet.example"), kind="lightning"),
     Field("nip05", N_("Nostr address:"), N_("you@example.com"), kind="address"),
 )
+
+_IMAGE_FIELD = next(field for field in FIELDS if field.kind == "image")
+
+# The groups the fields come in after the first (name, username, about,
+# which the card above introduces), each titled before its first field.
+SECTIONS = {
+    "picture": N_("Pictures"),
+    "website": N_("Links and Payments"),
+}
+
+# What Choose… beside a picture field is called, and its picker's title.
+CHOOSE_TITLES = {"picture": N_("Choose Picture"), "banner": N_("Choose Banner")}
 
 # Older apps wrote the display name under this key; it is shown when the
 # newer one is missing.
@@ -146,10 +180,18 @@ class ProfileWindow(AssistantWindow):
     saved = Signal()        # the changed profile reached the relays
 
     def __init__(self, *, read: ReadFn, save: SaveFn, signs_locally: bool = False,
+                 media: Optional[MediaServices] = None,
+                 load_image: Optional[ImageFn] = None,
                  is_dark: bool = True, parent=None) -> None:
         super().__init__(_("Edit Profile"), is_dark=is_dark, parent=parent)
         self._read = read
         self._save = save
+        self._media = media
+        self._load_image = load_image
+        self._is_dark = is_dark
+        # The address each picture of the card was last asked for: an answer
+        # for another one (typed over since) is dropped.
+        self._shown_images: Dict[str, str] = {"picture": "", "banner": ""}
         self._signs_locally = signs_locally
         self._loaded: Dict[str, str] = {}
         # Parts the window doesn't show that hold a secret key: left out.
@@ -158,6 +200,11 @@ class ProfileWindow(AssistantWindow):
         self._closed = False
         self._edits: Dict[str, QWidget] = {}
         self._errors: Dict[str, QLabel] = {}
+        self._choose: Dict[str, QPushButton] = {}
+        self._image_timer = QTimer(self)
+        self._image_timer.setSingleShot(True)
+        self._image_timer.setInterval(IMAGE_DELAY_MS)
+        self._image_timer.timeout.connect(self._load_card_images)
         self._build_reading()
         self._build_form()
         self._build_saving()
@@ -209,6 +256,8 @@ class ProfileWindow(AssistantWindow):
         col.addWidget(text_label(_("Your Profile"), "title"))
         self._form_note = text_label("", "muted")
         col.addWidget(self._form_note)
+        self.card = ProfileCard(is_dark=self._is_dark)
+        col.addWidget(self.card)
         form = QFormLayout()
         form.setSpacing(8)
         # Labels right-aligned beside their fields, as in every form here.
@@ -225,6 +274,10 @@ class ProfileWindow(AssistantWindow):
                 alive._on_edited()
 
         for field in FIELDS:
+            if field.key in SECTIONS:
+                heading = text_label(_(SECTIONS[field.key]), "item_title")
+                heading.setContentsMargins(0, 4, 0, 0)
+                form.addRow(heading)
             if field.kind == "about":
                 edit = QPlainTextEdit()
                 edit.setFixedHeight(84)
@@ -239,7 +292,10 @@ class ProfileWindow(AssistantWindow):
             stack = QVBoxLayout(holder)
             stack.setContentsMargins(0, 0, 0, 0)
             stack.setSpacing(2)
-            stack.addWidget(edit)
+            if field.kind == "image" and self._media is not None:
+                stack.addLayout(self._with_choose(field.key, edit))
+            else:
+                stack.addWidget(edit)
             stack.addWidget(error)
             form.addRow(_(field.label), holder)
             self._edits[field.key] = edit
@@ -247,6 +303,70 @@ class ProfileWindow(AssistantWindow):
         col.addLayout(form)
         col.addStretch(1)
         self.add_page(FORM, body)
+
+    def _with_choose(self, key: str, edit: QWidget) -> QHBoxLayout:
+        """The address beside Choose…, which opens the Media Library to pick
+        a picture or upload one."""
+        row = QHBoxLayout()
+        row.setContentsMargins(0, 0, 0, 0)
+        row.setSpacing(8)
+        row.addWidget(edit, 1)
+        button = QPushButton(_("Choose…"))
+        button.setAccessibleName(_(CHOOSE_TITLES[key]))
+        button.setToolTip(_("Choose a picture from your Media Library, or upload one."))
+        button.setAutoDefault(False)
+        button.clicked.connect(lambda _checked=False, k=key: self._choose_picture(k))
+        row.addWidget(button)
+        self._choose[key] = button
+        return row
+
+    def _choose_picture(self, key: str) -> None:
+        choose_picture(self._media, title=_(CHOOSE_TITLES[key]), is_dark=self._is_dark,
+                       parent=self, on_picked=lambda media, k=key: self._picked(k, media))
+
+    def _picked(self, key: str, media) -> None:
+        """A picture chosen for ``key``: its public address, or why not, said
+        under the field (a private one gets a public copy first, or stays)."""
+        resolved = resolve_pick(media, visibility=self._media.visibility,
+                                maker=self._media.copy_maker, is_dark=self._is_dark,
+                                parent=self)
+        if not resolved.ok:
+            if resolved.reason:
+                announce.field_problem(self._edits[key], self._errors[key], resolved.reason)
+            return
+        edit = self._edits[key]
+        edit.setText(resolved.url)
+        edit.setCursorPosition(0)
+
+    def _update_card(self) -> None:
+        """The card as the fields read now; its pictures shortly after an
+        address stops changing."""
+        name = self._value("display_name") or self._value("name")
+        username = self._value("name")
+        detail = self._value("nip05") or (f"@{username}" if username else "")
+        self.card.set_text(name, detail)
+        if any(self._value(kind) != shown for kind, shown in self._shown_images.items()):
+            self._image_timer.start()
+
+    def _load_card_images(self) -> None:
+        for kind, shown in self._shown_images.items():
+            url = self._value(kind)
+            if url == shown:
+                continue
+            self._shown_images[kind] = url
+            setter = self.card.set_picture if kind == "picture" else self.card.set_banner
+            if not url or self._load_image is None or field_problem(_IMAGE_FIELD, url):
+                setter(None)
+                continue
+            window = weakref.ref(self)
+
+            def landed(pixmap, kind=kind, url=url) -> None:
+                alive = window()
+                if alive is not None and not alive._closed and alive._shown_images[kind] == url:
+                    (alive.card.set_picture if kind == "picture"
+                     else alive.card.set_banner)(pixmap)
+
+            self._load_image(kind, url, landed)
 
     def _value(self, key: str) -> str:
         edit = self._edits[key]
@@ -261,6 +381,10 @@ class ProfileWindow(AssistantWindow):
                 edit.setPlainText(self._loaded.get(field.key, ""))
             else:
                 edit.setText(self._loaded.get(field.key, ""))
+            if isinstance(edit, QLineEdit):
+                # A long address shows where it lives, not its last letters.
+                edit.setCursorPosition(0)
+                edit.setToolTip(edit.text())
             edit.blockSignals(False)
             self._errors[field.key].hide()
         if self._removing:
@@ -308,6 +432,7 @@ class ProfileWindow(AssistantWindow):
         button = self.buttons.get("save")
         if button is not None:
             button.setEnabled(bool(self.changes()) and not problems)
+        self._update_card()
 
     # -- saving --------------------------------------------------------------
 
@@ -378,4 +503,5 @@ class ProfileWindow(AssistantWindow):
     def done(self, result: int) -> None:
         # An answer that arrives after the window closed is dropped.
         self._closed = True
+        self._image_timer.stop()
         super().done(result)
