@@ -266,8 +266,13 @@ class HtmlEditor(QTextEdit):
         self.setFont(code_font())
         # Room beside the text for the box painted behind a code block
         # (text_look). A margin of the layout only: neither HTML nor
-        # Markdown keeps it.
-        self.document().setDocumentMargin(text_look.CODE_PAD_X + 4)
+        # Markdown keeps it, and Qt records it as an edit, so it is set
+        # with nothing to undo and the new document left unchanged.
+        doc = self.document()
+        doc.setUndoRedoEnabled(False)
+        doc.setDocumentMargin(text_look.CODE_PAD_X + 4)
+        doc.setUndoRedoEnabled(True)
+        doc.setModified(False)
         # Characters per line when writing; None for code (full width).
         self._writing_measure_chars = None
         self._highlights = {layer: [] for layer in self.HIGHLIGHT_LAYERS}

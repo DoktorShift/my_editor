@@ -7,10 +7,27 @@ import os
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
+import pytest  # noqa: E402
+from PySide6.QtCore import QCoreApplication, QEvent  # noqa: E402
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
 import editor  # noqa: E402
 import settings  # noqa: E402
+
+
+# Every window a test makes, closed and freed when it ends: a shown window
+# left behind would be painted, and freed, during a later test.
+_made: list = []
+
+
+@pytest.fixture(autouse=True)
+def _close_windows():
+    yield
+    while _made:
+        widget = _made.pop()
+        widget.close()
+        widget.deleteLater()
+    QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
 
 
 def _app():
@@ -20,6 +37,7 @@ def _app():
 def test_each_cursor_style_draws_as_named():
     _app()
     ed = editor.HtmlEditor()
+    _made.append(ed)
     ed.show()
     ed.setFocus()
     QApplication.processEvents()
@@ -35,6 +53,7 @@ def test_each_cursor_style_draws_as_named():
 def test_the_font_never_changes_the_chosen_cursor():
     _app()
     ed = editor.HtmlEditor()
+    _made.append(ed)
     ed.set_caret_style("thick")
     ed.set_writing_font(True)
     assert ed.cursorWidth() == 4
@@ -48,6 +67,7 @@ def test_the_font_never_changes_the_chosen_cursor():
 def test_an_unknown_style_is_medium():
     _app()
     ed = editor.HtmlEditor()
+    _made.append(ed)
     ed.set_caret_style("enormous")
     assert ed.caret_style() == "medium" and ed.cursorWidth() == 2
 

@@ -8,7 +8,8 @@ import os
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtCore import QPoint  # noqa: E402
+import pytest  # noqa: E402
+from PySide6.QtCore import QCoreApplication, QEvent  # noqa: E402
 from PySide6.QtGui import QColor, QTextCursor, QTextFormat  # noqa: E402
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
@@ -18,6 +19,21 @@ import text_look  # noqa: E402
 from nostr.preview import NostrPreview, body_document, palette  # noqa: E402
 
 
+# Every window a test makes, closed and freed when it ends: a shown window
+# left behind would be painted, and freed, during a later test.
+_made: list = []
+
+
+@pytest.fixture(autouse=True)
+def _close_windows():
+    yield
+    while _made:
+        widget = _made.pop()
+        widget.close()
+        widget.deleteLater()
+    QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+
+
 def _app():
     return QApplication.instance() or QApplication([])
 
@@ -25,6 +41,7 @@ def _app():
 def _preview(markdown: str, dark: bool = False) -> NostrPreview:
     _app()
     view = NostrPreview(dark=dark)
+    _made.append(view)
     view.resize(700, 500)
     view.show_markdown(markdown)
     view.show()
@@ -106,6 +123,7 @@ def test_the_editor_pads_its_code_box_as_the_preview_does(tmp_path):
     _app()
     from editor import HtmlEditor
     ed = HtmlEditor()
+    _made.append(ed)
     ed.resize(700, 400)
     ed.set_writing_font(True)
     ed.document().setMarkdown("Before.\n\n```\nfirst line\nsecond line\n```\n\nAfter.\n")
@@ -140,3 +158,15 @@ def test_a_table_after_a_code_block_reads_like_any_other_in_the_editor():
         cursor.setPosition(cell.firstPosition() + 1)
         assert cursor.charFormat().fontWeight() >= QFont.Weight.DemiBold
     assert markdown_writer.document_to_markdown(doc) == source
+
+
+def test_the_editors_text_margin_is_no_edit():
+    """The margin around the text is set when the editor is made: nothing
+    to undo, and a new document has no changes to save."""
+    _app()
+    from editor import HtmlEditor
+    ed = HtmlEditor()
+    _made.append(ed)
+    assert ed.document().documentMargin() == text_look.CODE_PAD_X + 4
+    assert ed.document().availableUndoSteps() == 0
+    assert not ed.document().isModified()
