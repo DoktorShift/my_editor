@@ -304,6 +304,8 @@ def test_initial_library_layout_loads_video_and_pdf_thumbnails_without_interacti
     world = build(tmp_path, monkeypatch, FakeStore([video, document]))
     assert wait_for(lambda: len(world.dialog._thumbs) == 2)
     assert world.loader.downloads == []
+    page = world.dialog._thumbs[document.hash]
+    assert page.height() > page.width()  # the full portrait page stays in proportion
 
 
 def test_scrolling_requests_new_video_thumbnails_without_manual_loading(tmp_path, monkeypatch):
@@ -384,6 +386,20 @@ def test_player_does_not_autoplay_and_releases_private_buffer():
         assert player._buffer is None and player.player.source().isEmpty()
         assert player.picture.pixmap is None and not player.video.videoSink().videoFrame().isValid()
     finally:
+        player.deleteLater()
+
+
+def test_timeline_arrow_keys_seek_a_visible_distance():
+    player = MediaPlayer()
+    try:
+        player.set_source(PreviewSource(data=VIDEO.read_bytes()), "video/mp4")
+        assert wait_for(player.play_button.isEnabled)
+        QTest.keyClick(player.seek, Qt.Key.Key_Right)
+        assert wait_for(lambda: player.player.position() >= 1000)
+        QTest.keyClick(player.seek, Qt.Key.Key_Left)
+        assert wait_for(lambda: player.player.position() == 0)
+    finally:
+        player.clear()
         player.deleteLater()
 
 

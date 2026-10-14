@@ -286,7 +286,15 @@ class TileDelegate(QStyledItemDelegate):
             side = min(source.width(), source.height())
             source = QRectF(source.center().x() - side / 2, source.center().y() - side / 2,
                             side, side)
-            painter.drawPixmap(QRectF(thumb), tile.pixmap, source)
+            if tile.kind == "file":
+                source = QRectF(tile.pixmap.rect())
+                size = tile.pixmap.size().scaled(thumb.size(), Qt.AspectRatioMode.KeepAspectRatio)
+                target = QRect(thumb)
+                target.setSize(size)
+                target.moveCenter(thumb.center())
+                painter.drawPixmap(QRectF(target), tile.pixmap, source)
+            else:
+                painter.drawPixmap(QRectF(thumb), tile.pixmap, source)
         elif tile.state == FILE and (tile.kind != "image" or tile.no_picture):
             glyph = media_files.file_glyph(tile.mime)
             side = 44

@@ -9,7 +9,7 @@ play sound or persist decrypted pixels to disk.
 
 from collections import deque
 
-from PySide6.QtCore import QBuffer, QIODevice, QObject, QSize, QTimer, QUrl, Signal
+from PySide6.QtCore import QBuffer, QIODevice, QObject, QSize, Qt, QTimer, QUrl, Signal
 from PySide6.QtGui import QPixmap
 from PySide6.QtMultimedia import QMediaPlayer, QVideoSink
 from PySide6.QtPdf import QPdfDocument
@@ -116,7 +116,9 @@ class MediaThumbnails(QObject):
     def _render_pdf(self, generation):
         if generation != self._generation or self._document is None:
             return
-        image = self._document.render(0, QSize(320, 320))
+        size = self._document.pagePointSize(0).toSize()
+        size.scale(QSize(320, 320), Qt.AspectRatioMode.KeepAspectRatio)
+        image = self._document.render(0, size)
         self._finish(None if image.isNull() else QPixmap.fromImage(image))
 
     def _skip(self, *_args):

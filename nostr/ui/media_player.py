@@ -56,6 +56,8 @@ class MediaPlayer(QWidget):
         self.seek = QSlider(Qt.Orientation.Horizontal)
         self.seek.setAccessibleName(_("Playback position"))
         self.seek.setRange(0, 0)
+        self.seek.setSingleStep(5000)
+        self.seek.setPageStep(30000)
         self.seek.sliderPressed.connect(self._begin_seek)
         self.seek.sliderReleased.connect(self._end_seek)
         self.seek.sliderMoved.connect(self.player.setPosition)

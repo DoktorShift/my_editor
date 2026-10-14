@@ -626,11 +626,13 @@ class MediaLibraryDialog(QDialog):
             return
         ratio = self.devicePixelRatioF()
         side = int(THUMB * ratio)
-        scaled = pix.scaled(QSize(side, side), Qt.AspectRatioMode.KeepAspectRatioByExpanding,
+        tile = self._model.tile(sha)
+        aspect = (Qt.AspectRatioMode.KeepAspectRatio if tile is not None and tile.kind == "file"
+                  else Qt.AspectRatioMode.KeepAspectRatioByExpanding)
+        scaled = pix.scaled(QSize(side, side), aspect,
                             Qt.TransformationMode.SmoothTransformation)
         scaled.setDevicePixelRatio(ratio)
         self._thumbs[sha] = scaled
-        tile = self._model.tile(sha)
         if tile is not None:
             tile.pixmap = scaled
             self._model.changed(sha)
