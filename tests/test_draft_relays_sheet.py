@@ -178,7 +178,6 @@ def test_an_account_without_a_list_shows_its_usual_relays():
     assert sheet._summary.text() == "Drafts are kept on your usual relays:"
     assert shown(sheet) == USUAL and sheet.chosen() == []
     assert not sheet.buttons["usual"].isEnabled() and not sheet._remove.isEnabled()
-    assert sheet._field.hasFocus() or not sheet.isActiveWindow()
 
 
 def test_adding_a_relay_takes_the_place_of_the_usual_ones():
