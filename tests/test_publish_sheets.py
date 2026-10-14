@@ -842,10 +842,15 @@ def test_the_field_being_typed_in_is_always_in_view(tmp_path, make):
 
 
 def test_the_app_calls_its_publish_windows_sheets():
-    """Review round 2: a few places still spoke of a publish dialog."""
+    """Review round 2: a few places still spoke of a publish dialog. The
+    app's own code and its documentation are read, nothing else (review
+    round 3: a virtual environment or a build folder in the checkout)."""
     import pathlib
     root = pathlib.Path(__file__).resolve().parent.parent
-    named = [str(path.relative_to(root)) for path in root.rglob("*.py")
-             if not {".venv", "tests", "site", ".claude"} & set(path.relative_to(root).parts)
-             and "publish dialog" in path.read_text(encoding="utf-8").lower()]
+    files = [*root.glob("*.py"), *(root / "nostr").rglob("*.py"),
+             *(root / "spelling").rglob("*.py"), *root.glob("*.md"),
+             *(root / "docs").rglob("*.md")]
+    assert len(files) > 100
+    named = [str(path.relative_to(root)) for path in files
+             if "publish dialog" in path.read_text(encoding="utf-8").lower()]
     assert named == []
