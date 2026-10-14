@@ -159,12 +159,14 @@ def test_an_account_without_a_name_is_shown_by_its_public_key():
 
 def test_the_drafts_panel_goes_when_no_account_is_in_use():
     from main_window import MainWindow
-    hidden = []
-    win = SimpleNamespace(_hide_drafts_panel=lambda: hidden.append(True))
+    hidden, toggles = [], []
+    win = SimpleNamespace(_hide_drafts_panel=lambda: hidden.append(True),
+                          _show_pane_toggles=toggles.append)
     MainWindow._on_nostr_in_use_changed(win, True)
-    assert hidden == []
+    assert hidden == [] and toggles == [True]
+    # The panel and its toolbar toggles go together.
     MainWindow._on_nostr_in_use_changed(win, False)
-    assert hidden == [True]
+    assert hidden == [True] and toggles == [True, False]
 
 
 def test_publishing_is_said_in_words_without_an_event_id():
