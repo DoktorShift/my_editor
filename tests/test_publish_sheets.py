@@ -333,7 +333,7 @@ class _Store(QObject):
     upload_progress = Signal(str, int, int)
     files: dict = {}
 
-    def upload_bytes(self, body, *, name, mime_type="application/octet-stream"):
+    def upload_bytes(self, body, *, name, mime_type="application/octet-stream", shown_as=""):
         self.uploaded = name
 
 
