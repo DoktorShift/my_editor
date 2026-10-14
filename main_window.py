@@ -2750,6 +2750,7 @@ class MainWindow(QMainWindow):
         self._article_details_panel = ArticleDetailsPanel(
             media_store=self._media_store, media_visibility=self._media_visibility,
             copy_maker=self._copy_maker, private_library=self._private_library,
+            media_saver=self._media_saver,
             profile=self._profile_store.default, pick_person=self._pick_coauthor,
             name_of=self._person_name, can_receive_zaps=self._ask_can_receive_zaps,
             relay_hint=self._relay_directory.relay_hint, is_dark=self.is_dark_theme)
@@ -7518,6 +7519,7 @@ class MainWindow(QMainWindow):
             media_visibility=self._media_visibility,
             copy_maker=self._copy_maker,
             private_library=self._private_library,
+            media_saver=self._media_saver,
             default_title=title,
             default_slug=default_slug,
             file_name=file_name,

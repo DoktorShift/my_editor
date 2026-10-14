@@ -50,6 +50,7 @@ from ..media.publish_copy import PublicCopyMaker
 from ..media.scrub import ScrubError, scrub_for_publication
 from ..profiles import Profile
 from .media_library_dialog import MediaLibraryDialog
+from .media_saver import MediaSaver
 from .publish_copy_dialog import resolve_pick
 from .thumbnail_loader import ThumbnailLoader
 
@@ -109,10 +110,15 @@ class CoverImageField(QWidget):
                  copy_maker: Optional[PublicCopyMaker] = None,
                  private_library: Optional[PrivateLibrary] = None,
                  profile: Callable[[], Optional[Profile]] = lambda: None,
+                 saver: Optional[MediaSaver] = None,
                  is_dark: bool = False, stacked: bool = False,
                  parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
         self._media_store = media_store
+        # The window's Save As (MediaSaver): one started in the picker goes
+        # on when the picker, or the sheet it opened from, closes. None:
+        # the picker's own, which goes with it.
+        self._saver = saver
         self._media_visibility = media_visibility or MediaVisibility()
         self._copy_maker = copy_maker
         self._private_library = private_library
@@ -286,7 +292,8 @@ class CoverImageField(QWidget):
             self._private_library.bind_profile(self._profile())
         picker = MediaLibraryDialog(store=self._media_store, is_dark=self._is_dark,
                                     pick_mode=True, pick_alt_text=False,
-                                    visibility=self._media_visibility, parent=self)
+                                    visibility=self._media_visibility, saver=self._saver,
+                                    parent=self)
         if self._private_library is not None:
             picker.bind_private_library(self._private_library)
         picker.setWindowTitle(_("Choose Cover Image"))

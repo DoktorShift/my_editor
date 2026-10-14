@@ -46,6 +46,7 @@ from ..blossom.store import MediaStore
 from ..media.media_visibility import MediaVisibility
 from ..media.private_library import PrivateLibrary
 from ..media.publish_copy import PublicCopyMaker
+from .media_saver import MediaSaver
 from ..profiles import Profile
 from ..publisher import link_name, slugify
 from .coauthors import Coauthors
@@ -93,6 +94,7 @@ class ArticleDetailsPanel(QFrame):
                  media_visibility: Optional[MediaVisibility] = None,
                  copy_maker: Optional[PublicCopyMaker] = None,
                  private_library: Optional[PrivateLibrary] = None,
+                 media_saver: Optional[MediaSaver] = None,
                  profile: Callable[[], Optional[Profile]] = lambda: None,
                  pick_person: Optional[Callable[[QWidget, Callable], None]] = None,
                  name_of: Callable[[str], str] = lambda pubkey: pubkey,
@@ -134,7 +136,7 @@ class ArticleDetailsPanel(QFrame):
         outer.addWidget(self._pages, 1)
 
         self._form = self._build_form(media_store, media_visibility, copy_maker,
-                                      private_library, profile)
+                                      private_library, profile, media_saver)
         self._pages.addWidget(self._form)
         self._no_article = QLabel()
         self._no_article.setObjectName("article_details_note")
@@ -165,7 +167,7 @@ class ArticleDetailsPanel(QFrame):
         return header
 
     def _build_form(self, media_store, media_visibility, copy_maker, private_library,
-                    profile) -> QWidget:
+                    profile, media_saver=None) -> QWidget:
         scroll = QScrollArea()
         scroll.setObjectName("article_details_scroll")
         scroll.setWidgetResizable(True)
@@ -203,7 +205,7 @@ class ArticleDetailsPanel(QFrame):
         self.cover = CoverImageField(
             media_store=media_store, media_visibility=media_visibility,
             copy_maker=copy_maker, private_library=private_library, profile=profile,
-            is_dark=self._is_dark, stacked=True)
+            saver=media_saver, is_dark=self._is_dark, stacked=True)
         self.cover.problem.connect(self._say_cover_problem)
         self.cover.landed_for.connect(self.cover_uploaded)
         form.addSpacing(6)

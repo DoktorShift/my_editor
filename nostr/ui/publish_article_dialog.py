@@ -76,6 +76,7 @@ from ..known_people import KnownPeople
 from ..media.media_visibility import MediaVisibility
 from ..media.private_library import PrivateLibrary
 from ..media.publish_copy import PublicCopyMaker
+from .media_saver import MediaSaver
 from ..nip05_check import Nip05Check
 from ..outbox import RelayDirectory, relays_from
 from ..preview import reading_minutes
@@ -257,6 +258,7 @@ class PublishArticleDialog(QDialog):
         media_visibility: Optional[MediaVisibility] = None,
         copy_maker: Optional[PublicCopyMaker] = None,
         private_library: Optional[PrivateLibrary] = None,
+        media_saver: Optional[MediaSaver] = None,
         default_title: str = "",
         default_slug: str = "",
         file_name: str = "",
@@ -298,6 +300,8 @@ class PublishArticleDialog(QDialog):
         # is read on the way into the sheet (its signer prompts belong to
         # the moment someone goes looking for a picture).
         self._private_library = private_library
+        # The window's Save As, for the cover picker (CoverImageField).
+        self._media_saver = media_saver
         self._is_dark = is_dark
         self._job: Optional[PublishJob] = None
         self._signed_event_id: Optional[str] = None
@@ -456,7 +460,7 @@ class PublishArticleDialog(QDialog):
         self._cover = CoverImageField(
             media_store=self._media_store, media_visibility=self._media_visibility,
             copy_maker=self._copy_maker, private_library=self._private_library,
-            profile=self._account.profile, is_dark=self._is_dark)
+            profile=self._account.profile, saver=self._media_saver, is_dark=self._is_dark)
         self._cover.picture_changed.connect(self._refresh_card)
         # A cover on its way up is waited for: published now, it would be
         # missing.

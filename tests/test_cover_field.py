@@ -309,3 +309,52 @@ def test_the_media_library_never_names_a_cover_upload_by_its_job(field, tmp_path
     assert tiles(world) == []
     assert job not in world.dialog._status.text()
     world.dialog.close()
+
+
+def test_a_save_as_from_the_cover_picker_goes_on_when_the_picker_closes(tmp_path,
+                                                                         monkeypatch):
+    """Merge note (media-ux round 3, L1): the cover's picker saved with a
+    Save As of its own, which went with the picker, or the sheet it opened
+    from, when either closed. The window's saver (MainWindow._media_saver,
+    which outlives both) is handed to it, through Publish as Article and
+    Article Details alike."""
+    import inspect
+    from PySide6.QtCore import QObject
+    from main_window import MainWindow
+    from nostr.article_details import ArticleDetails
+    from nostr.ui.article_details_panel import ArticleDetailsPanel
+    from nostr.ui.media_saver import MediaSaver
+    from tests.test_article_details import _dialog
+    window = QObject()
+    saver = MediaSaver(None, parent=window)
+    handed = []
+
+    class Picker:
+        def __init__(self, **kwargs):
+            handed.append(kwargs.get("saver"))
+            self._filter_combo = type("Combo", (), {"setCurrentIndex": lambda *_a: None})()
+            self.file_picked = type("Signal", (), {"connect": lambda *_a: None})()
+
+        def setWindowTitle(self, _title):
+            pass
+
+        def exec(self):
+            return 0
+
+    monkeypatch.setattr(cover_field, "ThumbnailLoader", FakeLoader)
+    monkeypatch.setattr(cover_field, "MediaLibraryDialog", Picker)
+    made = cover_field.CoverImageField(media_store=FakeStore(), saver=saver)
+    made.choose()
+    panel = ArticleDetailsPanel(media_store=FakeStore(), media_saver=saver)
+    panel.cover.choose()
+    sheet = _dialog(tmp_path, ArticleDetails(title="T"), media_store=FakeStore(),
+                    media_saver=saver)
+    sheet._cover.choose()
+    assert handed == [saver, saver, saver]
+    # Without one, the picker keeps its own, as the Media Library does.
+    cover_field.CoverImageField(media_store=FakeStore()).choose()
+    assert handed[-1] is None
+    # And the window hands its own to both.
+    assert inspect.getsource(MainWindow).count("media_saver=self._media_saver") == 2
+    sheet.close()
+    panel.close()

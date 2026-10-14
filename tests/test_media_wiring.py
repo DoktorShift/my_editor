@@ -463,7 +463,10 @@ def test_an_open_library_window_says_how_its_saves_go_itself():
 
 def test_the_library_windows_share_the_windows_saver():
     source = inspect.getsource(MainWindow)
-    assert source.count("saver=self._media_saver,") == 2
+    # The library and the Insert Image picker; the cover pickers of
+    # Article Details and Publish as Article get it as media_saver.
+    assert source.count("saver=self._media_saver,") == 4
+    assert source.count("media_saver=self._media_saver,") == 2
     init = textwrap.dedent(inspect.getsource(MainWindow.__init__))
     assert "self._media_saver.started.connect(self._on_media_save_started)" in init
     assert "self._media_saver.finished.connect(self._on_media_save_finished)" in init
