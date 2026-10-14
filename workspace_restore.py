@@ -219,8 +219,14 @@ def resume_tab(window, tab: TabState, *, draft_type):
     if record is not None:
         load_backup_content(ed, record, modified=tab.modified)
         ed._backup.take_over(record["_backup_file"])
-    restore_identity(ed, tab.draft, tab.article, tab.article_author, tab.details,
-                     tab.front_matter, record.get("newline") if record is not None else None,
+    # Its front matter and details as they were come back with unsaved
+    # changes only (its backup). Else the file read just now has them, as
+    # another app may have left them while MyEditor was closed.
+    from_file = bool(tab.path) and record is None
+    restore_identity(ed, tab.draft, tab.article, tab.article_author,
+                     None if from_file else tab.details,
+                     None if from_file else tab.front_matter,
+                     record.get("newline") if record is not None else None,
                      draft_type=draft_type)
     index = _tab_index(window, ed)
     if index >= 0:

@@ -120,6 +120,56 @@ def test_a_restored_tab_writes_only_the_details_changed_in_it(tmp_path):
         assert r["title " + case] == typed.replace("FM Title", "Changed Title"), case
 
 
+RESUME_SCRIPT = r"""
+import json, os, sys
+sys.path.insert(0, sys.argv[1])
+os.environ["QT_QPA_PLATFORM"] = "offscreen"
+from PySide6.QtGui import QTextCursor
+from PySide6.QtWidgets import QApplication
+app = QApplication(sys.argv[:1])
+import main_window, workspace_restore
+
+path, before, after = sys.argv[2:5]
+w = main_window.MainWindow()
+w.show()
+r = {}
+for case in ("unread", "read"):
+    open(path, "w", encoding="utf-8").write(before)
+    ed = w.open_path(path)
+    if case == "read":
+        w._article_details_of(ed)
+    tab = workspace_restore.capture_editor_tab(ed)     # unmodified: no backup
+    w.close_tab(w.tabs.currentIndex())
+    app.processEvents()
+    open(path, "w", encoding="utf-8").write(after)     # another app, MyEditor closed
+    ed = workspace_restore.resume_tab(w, tab, draft_type=main_window.DraftBinding)
+    r[case + " title"] = w._article_details_of(ed).title
+    c = ed.textCursor()
+    c.movePosition(QTextCursor.MoveOperation.End)
+    c.insertText(" typed")
+    w._save_to(path)
+    r[case] = open(path, encoding="utf-8").read()
+    ed.document().setModified(False)
+    w.close_tab(w.tabs.currentIndex())
+    app.processEvents()
+w.close()
+print("RESULT " + json.dumps(r))
+"""
+
+
+def test_a_tab_unmodified_at_a_restart_keeps_its_file_as_another_app_left_it(tmp_path):
+    """Round 11, H3: it came back with the front matter and details it had
+    at the restart, so its next save wrote back the title, hashtags and
+    summary another app had changed meanwhile, and it published the old
+    title. Only a tab with unsaved changes keeps what it had (its backup)."""
+    after = "---\ntitle: New Title\ntags: [a, b]\nsummary: Added outside\n---\n\nNew body.\n"
+    r = run_window_script(RESUME_SCRIPT, tmp_path, str(tmp_path / "post.md"),
+                          "---\ntitle: Old Title\ntags: [a]\n---\n\nOld body.\n", after)
+    for case in ("unread", "read"):
+        assert r[case + " title"] == "New Title", case
+        assert r[case] == after.replace("New body.", "New body. typed"), case
+
+
 def test_a_record_keeps_the_details_set_in_the_tab_and_none_only_read():
     ed = SimpleNamespace(_front_matter=front_matter.split(CAPS)[0])
     tab_details.hold(ed, None)                         # a file opened
