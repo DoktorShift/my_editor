@@ -11,9 +11,10 @@ What must hold:
   with Retry), however many other messages come and go; Open Media
   Library beside it does that. A failure while the library is open is
   said there, not here. It shortens in a narrow window instead of
-  widening it, and gives way to another message there: shortened, it
-  leaves the message its room, and takes it back when the message goes.
-  The word count and the caret's line step aside before it does.
+  widening it, and gives way to another message there: shortened, or
+  aside where not even a few letters of it fit, it leaves the message
+  its room, and takes it back when the message goes. The word count and
+  the caret's line step aside before it does.
 """
 
 from tests.app_process import run_window_script  # noqa: E402
@@ -79,19 +80,29 @@ w._update_word_count()
 app.processEvents()
 r["counted"] = w._words_label.text()
 r["widths"] = {}
-for width in (480, 560, 640):
+for width in (1, 480, 560, 640):                  # 1: as narrow as the window goes
+    w.status.clearMessage()
+    app.processEvents()
     w.resize(width, 600)
     w.status.showMessage(message, 0)
     app.processEvents()
     app.processEvents()
+    # Up to the first permanent widget shown, even one without width.
     left = min(x.geometry().left() for x in (w._library_problem, w._words_label,
                                               w._library_open, w._line_label)
-               if x.isVisible() and x.width() > 0)
-    r["widths"][width] = [left, w.status.fontMetrics().horizontalAdvance(message)]
+               if x.isVisible())
+    r["widths"][w.width()] = [left, w.status.fontMetrics().horizontalAdvance(message)]
 w.status.clearMessage()
 app.processEvents()
 app.processEvents()
 r["words_back"] = w._words_label.width() > 0
+w.resize(1, 600)
+w.status.showMessage(message, 0)
+app.processEvents()
+w.status.clearMessage()
+app.processEvents()
+app.processEvents()
+r["failure_back"] = [w._library_problem.width() > 0, w._library_open.width() > 0]
 editor.document().setModified(False)
 w.resize(1100, 700)
 app.processEvents()
@@ -130,5 +141,6 @@ def test_failures_after_the_library_closed_are_counted_and_stay_until_it_opens(t
     for width, (room, needed) in r["widths"].items():
         assert room >= needed + 8, f"the message is cut at {width} points"
     assert r["words_back"]
+    assert r["failure_back"] == [True, True]
     assert r["opened"] == [True]
     assert r["after_open"] == [False, "", False]

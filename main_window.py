@@ -485,7 +485,8 @@ class MainWindow(QMainWindow):
         self._words_label.setContentsMargins(0, 0, 12, 0)
         self.status.addPermanentWidget(self._words_label)
         # A message keeps its room in a narrow window: the word count gives
-        # way first, then the library failure line shortens.
+        # way first, then the library failure line shortens, and steps
+        # aside while not even a few letters of it fit.
         self.status.messageChanged.connect(lambda _message: self._fit_status_bar())
         _WidthWatcher(self.status, self._fit_status_bar)
         _WidthWatcher(self._words_label, self._fit_status_bar)
@@ -7122,11 +7123,13 @@ class MainWindow(QMainWindow):
         """A message in the status bar keeps its room in a narrow window.
         What says least steps aside first, while it doesn't fit beside
         the message and what matters more: the word count, then the
-        caret's line; then the library failure line shortens (a few
-        letters at least). Without a message, each takes all it needs."""
+        caret's line; then the library failure line shortens, and where
+        not even a few letters of it fit, it steps aside (Open Media
+        Library too) until the message goes. Without a message, each
+        takes all it needs."""
         label = self._library_problem
         no_limit = 16777215                              # Qt's QWIDGETSIZE_MAX
-        for widget in (self._words_label, self._line_label, label):
+        for widget in (self._words_label, self._line_label, label, self._library_open):
             widget.setMaximumWidth(no_limit)
         message = self.status.currentMessage()
         if not message:
@@ -7150,8 +7153,11 @@ class MainWindow(QMainWindow):
                 widget.setMaximumWidth(0)
                 kept += spacing
         if label.isVisible():
-            label.setMaximumWidth(max(label.minimumSizeHint().width(),
-                                      room - (kept - width_of(label))))
+            fits = room - (kept - width_of(label))
+            if fits < label.minimumSizeHint().width():
+                fits = 0
+                self._library_open.setMaximumWidth(0)
+            label.setMaximumWidth(fits)
 
     def _on_media_upload_progress(self, name: str, sent: int, total: int) -> None:
         sha = parse_asset_key(name)
