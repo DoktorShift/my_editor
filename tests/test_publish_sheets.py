@@ -597,12 +597,49 @@ def test_a_link_name_typed_by_hand_is_written_in_one_form(tmp_path, captured):
     panel.show_article(ArticleDetails(title="T"), fixed_identifier=False)
     panel.identifier_edit.setText(decomposed)
     assert panel.details().identifier == "école-été"
-    stash = StashKindDialog(default=StashKind.ARTICLE, suggested_slug=decomposed)
+    stash = StashKindDialog(default=StashKind.ARTICLE, suggested_slug="x")
+    stash._slug_edit.setText(decomposed)
+    stash._on_slug_edited(decomposed)
     stash._on_accept()
     assert stash.choice.identifier == "école-été"
 
 
 FIRST = 1_600_000_000
+
+
+def test_a_link_name_the_article_has_is_kept_letter_for_letter(tmp_path, captured):
+    """Review round 3, M1: a Mac writes file names decomposed ("u" and an
+    accent for "ü"), and 3.3 published a file's article under its name as
+    it was. Its link name was written in the composed form wherever it
+    was shown (the sheet, Article Details, the stash dialog) and
+    republished so: relays compare it letter for letter, so that was a
+    second article. A link name the article has already stays exactly as
+    it is; only one typed by hand is written in one form."""
+    import unicodedata
+    from nostr.ui.article_details_panel import ArticleDetailsPanel
+    from nostr.ui.stash_kind_dialog import StashKind, StashKindDialog
+    kept = unicodedata.normalize("NFD", "Grüße an alle")
+    assert kept != unicodedata.normalize("NFC", kept)
+    asked = []
+    sheet = article(tmp_path, default_title="T", default_slug=kept,
+                    details=ArticleDetails(identifier=kept, title="T"),
+                    published_at_lookup=lambda author, slug, done: asked.append(slug))
+    assert sheet._slug() == kept and sheet.details().identifier == kept
+    sheet._title_edit.setText("Another title")
+    sheet._on_publish()
+    assert asked == [kept]                               # asked as it is
+    sheet._publish(sheet._slug(), sheet._body, FIRST)
+    assert ["d", kept] in captured[0]["tags"]
+    panel = ArticleDetailsPanel()
+    panel.show_article(ArticleDetails(identifier=kept, title="T"), fixed_identifier=True)
+    assert panel.details().identifier == kept
+    panel.title_edit.setText("Another title")            # any field edited
+    assert panel.details().identifier == kept
+    panel.identifier_edit.setText(kept + "-2")           # typed: one form
+    assert panel.details().identifier == unicodedata.normalize("NFC", kept + "-2")
+    stash = StashKindDialog(default=StashKind.ARTICLE, suggested_slug=kept)
+    stash._on_accept()
+    assert stash.choice.identifier == kept
 
 
 @pytest.mark.parametrize("state, kept", [("found", True), ("unknown", True), ("never", False)])

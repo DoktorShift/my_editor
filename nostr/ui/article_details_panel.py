@@ -113,6 +113,8 @@ class ArticleDetailsPanel(QFrame):
         self.setMaximumWidth(MAX_WIDTH)
         self._is_dark = is_dark
         self._shown = ArticleDetails()
+        # The link name of the article shown, kept letter for letter.
+        self._kept_identifier = ""
         self._filling = False
         # The details the file writes in a way that is kept as written
         # (article_details.kept_in_file), and the line under each.
@@ -378,6 +380,7 @@ class ArticleDetailsPanel(QFrame):
         if self.hashtags.tags() != details.hashtags:
             self.hashtags.set_tags(details.hashtags)
         self._set_text(self.identifier_edit, details.identifier)
+        self._kept_identifier = details.identifier
         self._show_people(details)
 
     def show_no_article(self, reason: str) -> None:
@@ -503,7 +506,12 @@ class ArticleDetailsPanel(QFrame):
             summary=self.summary_edit.toPlainText().strip(),
             image=self.cover.text().strip(),
             hashtags=self.hashtags.tags(),
-            identifier=link_name(self.identifier_edit.text()))
+            identifier=self._identifier())
+
+    def _identifier(self) -> str:
+        """The link name in its field, as it is published: the article's
+        own exactly as it is, one typed in one form (link_name)."""
+        return link_name(self.identifier_edit.text(), self._kept_identifier)
 
     def _edited(self, *_args) -> None:
         self._check_identifier()
@@ -518,7 +526,7 @@ class ArticleDetailsPanel(QFrame):
 
     def _check_identifier(self) -> None:
         announce.field_problem(self.identifier_edit, self.identifier_problem,
-                               slug_problem(link_name(self.identifier_edit.text())) or "")
+                               slug_problem(self._identifier()) or "")
         if not self.identifier_problem.isHidden():
             self.advanced_toggle.setChecked(True)
 

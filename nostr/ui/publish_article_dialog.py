@@ -323,6 +323,8 @@ class PublishArticleDialog(QDialog):
             self._details.identifier or self._first_published
             or (first_publications is not None and default_slug
                 and first_publications.get(active_profile.user_pubkey, default_slug)))
+        # The link name it has already, kept letter for letter (link_name).
+        self._kept_slug = default_slug
         self._coauthor_picker: Optional[MentionPicker] = None
         # A file's article with no link name of its own: its file's name as
         # it is, which an older version published it under (version 3.3
@@ -622,8 +624,9 @@ class PublishArticleDialog(QDialog):
         self._refresh_publish_enabled()
 
     def _slug(self) -> str:
-        """The link name in the field, as it is published (link_name)."""
-        return link_name(self._slug_edit.text())
+        """The link name in the field, as it is published: one the article
+        has already exactly as it is, one typed in one form (link_name)."""
+        return link_name(self._slug_edit.text(), self._kept_slug)
 
     def _show_link(self, *_args) -> None:
         slug = self._slug()

@@ -309,6 +309,9 @@ class StashKindDialog(QDialog):
         # Tracks whether the user has touched the slug manually; until
         # they do, the slug mirrors slugify(title) in real time.
         self._slug_is_auto = not bool(suggested_slug)
+        # The link name the article has already, kept letter for letter
+        # (link_name).
+        self._kept_slug = suggested_slug
         self._choice: Optional[StashChoice] = None
 
         self._build_ui(
@@ -497,7 +500,7 @@ class StashKindDialog(QDialog):
             return
         # Articles need a non-empty slug to be addressable. Title is
         # nice-to-have but not strictly required by the protocol.
-        slug = link_name(self._slug_edit.text())
+        slug = link_name(self._slug_edit.text(), self._kept_slug)
         problem = slug_problem(slug) or ""
         said = self._slug_problem.text() if not self._slug_problem.isHidden() else ""
         announce.field_problem(self._slug_edit, self._slug_problem, problem)
@@ -517,7 +520,7 @@ class StashKindDialog(QDialog):
                 summary="",
             )
         else:
-            slug = link_name(self._slug_edit.text())
+            slug = link_name(self._slug_edit.text(), self._kept_slug)
             if not slug or slug_problem(slug):
                 # Defensive: the OK button shouldn't have been enabled.
                 return

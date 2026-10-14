@@ -605,10 +605,19 @@ def _is_entity(word: str) -> bool:
     return hrp in _SLUG_ENTITY_KINDS
 
 
-def link_name(typed: str) -> str:
-    """A link name as typed or pasted by hand, in the one form slugify
+def link_name(typed: str, kept: str = "") -> str:
+    """The link name a field holds, as it is published.
+
+    One the article has already (``kept``: its draft's, its published
+    version's, its file's), while the field still holds it, exactly as it
+    is: relays compare a d tag letter for letter, and the same word
+    written another way is another article (a Mac writes file names with
+    "u" and an accent for "ü", and 3.3 published files under their names
+    as they were). One typed or pasted by hand in the one form slugify
     writes too (NFC: "é" one character, as a title typed anywhere gives),
     so the same name is the same d tag wherever it was typed."""
+    if kept and typed == kept:
+        return kept
     return unicodedata.normalize("NFC", (typed or "").strip())
 
 
