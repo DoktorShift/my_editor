@@ -85,7 +85,8 @@ def test_each_document_gets_its_font(tmp_path):
     assert r["new_margin"] > 0                              # in a readable column
     assert r["txt"] is True and r["txt_margin"] == 0        # plain text: monospace, full width
     assert r["md_mono"] is True and r["remembered"] is True
-    assert r["caret_width"][0] > 0 and r["caret_width"][1] > 0   # writing: the thin caret
-    assert r["caret_width"][2] == 0 and r["md_mono_caret"] == 0   # monospace: the block
-    assert r["block_writing"] is False and r["block_text"] is True
+    # The text cursor is the one chosen in Settings (Medium unless changed),
+    # in writing and in code alike: the font does not change it.
+    assert r["caret_width"] == [2, 2, 2] and r["md_mono_caret"] == 2
+    assert r["block_writing"] is False and r["block_text"] is False
     assert r["md_back"] is False

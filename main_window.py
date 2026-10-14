@@ -76,7 +76,7 @@ from markdown_writer import (
     document_to, document_to_markdown, has_local_only_formatting, holds_faithfully,
     image_markdown, read_markdown,
 )
-from editor import HtmlEditor
+from editor import CARET_STYLES, DEFAULT_CARET_STYLE, HtmlEditor
 import link_url
 import paste
 import rich_text
@@ -1310,6 +1310,7 @@ class MainWindow(QMainWindow):
         # Mentions read back from Markdown get their names (rich_text.link_references).
         ed._mention_label = self._mention_label
         ed.set_markdown_shortcuts_check(lambda: self.markdown_shortcuts)
+        ed.set_caret_style(self.caret_style)
         ed.set_slash_items(self._slash_items)
         ed.set_link_opener(self._open_link)
         ed.set_nostr_check(lambda: self.nostr_state.active)
@@ -2217,6 +2218,8 @@ class MainWindow(QMainWindow):
             self._view_group.addAction(action)
         # Writing in the monospace font, for those who prefer it (Q-K).
         self.monospace_writing = bool(load_settings().get("monospace_writing", False))
+        style = load_settings().get("caret_style", DEFAULT_CARET_STYLE)
+        self.caret_style = style if style in CARET_STYLES else DEFAULT_CARET_STYLE
         self.act_monospace_writing = add(
             Command("view.monospace_writing", _("Use Monospace Font for Writing"), VIEW,
                     checkable=True, keywords=(_("font"), _("typewriter"))),
@@ -4716,6 +4719,8 @@ class MainWindow(QMainWindow):
                 nostr_in_use=lambda: self.nostr_state.active,
                 format_bar=lambda: self.format_bar_on_selection,
                 choose_format_bar=self._set_format_bar_on_selection,
+                caret_style=lambda: self.caret_style,
+                choose_caret_style=self._set_caret_style,
                 is_dark=self.is_dark_theme, parent=self)
             window.setAttribute(Qt.WA_DeleteOnClose, True)
             window.destroyed.connect(lambda _obj=None: setattr(self, "_settings_window", None))
@@ -5367,6 +5372,13 @@ class MainWindow(QMainWindow):
             ed = self._editor_from_widget(self.tabs.widget(i))
             if ed is not None:
                 self._update_editor_font(ed)
+
+    def _set_caret_style(self, style: str) -> None:
+        """Settings > Text cursor, remembered, in every open document."""
+        self.caret_style = style if style in CARET_STYLES else DEFAULT_CARET_STYLE
+        save_setting("caret_style", self.caret_style)
+        for ed in self._all_editors():
+            ed.set_caret_style(self.caret_style)
 
     def _set_toolbar_shown(self, shown: bool) -> None:
         """View > Show Toolbar, remembered."""

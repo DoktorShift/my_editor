@@ -11,7 +11,7 @@ changed at all once given.
 
 The window holds only what is chosen once and kept: the appearance, the
 language, the writing font, whether the format bar shows over a selection,
-and, while a Nostr account is in use, what happens to a pasted image. Every command stays in its menu: the window
+how the text cursor looks, and, while a Nostr account is in use, what happens to a pasted image. Every command stays in its menu: the window
 shows the menu commands' state and chooses through them (or through what
 they call), so the two never disagree, and it holds no feature logic of its
 own.
@@ -46,8 +46,16 @@ from i18n import _
 PASTE_CHOICES = ("ask", "always", "never")
 
 
+# The text cursors offered, as the setting stores them (editor.CARET_STYLES).
+CARET_CHOICES = ("thin", "medium", "thick", "block")
+
 # How wide the explanations under the choices are.
 _HELP_WIDTH = 320
+
+
+def _caret_titles() -> Dict[str, str]:
+    return {"thin": _("Thin"), "medium": _("Medium"), "thick": _("Thick"),
+            "block": _("Block")}
 
 
 def _paste_titles() -> Dict[str, str]:
@@ -63,8 +71,10 @@ class SettingsWindow(QDialog):
     ``choose_language(code)`` remembers one; ``monospace`` is View > Use
     Monospace Font for Writing; ``format_bar()`` and
     ``choose_format_bar(on)`` read and store whether the format bar shows
-    over a selection; ``paste_choice()`` and ``choose_paste(value)`` read
-    and store the pasted-image setting, offered while ``nostr_in_use()``.
+    over a selection; ``caret_style()`` and ``choose_caret_style(value)``
+    read and store the text cursor (CARET_CHOICES); ``paste_choice()`` and
+    ``choose_paste(value)`` read and store the pasted-image setting,
+    offered while ``nostr_in_use()``.
     """
 
     def __init__(self, *, appearance: Dict[str, QAction],
@@ -76,6 +86,8 @@ class SettingsWindow(QDialog):
                  nostr_in_use: Callable[[], bool],
                  format_bar: Callable[[], bool],
                  choose_format_bar: Callable[[bool], None],
+                 caret_style: Callable[[], str] = lambda: "medium",
+                 choose_caret_style: Callable[[str], None] = lambda value: None,
                  is_dark: bool = True, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
         self.setWindowTitle(_("Settings"))
@@ -144,6 +156,23 @@ class SettingsWindow(QDialog):
         writing_column.addWidget(self.monospace)
         writing_column.addWidget(self.format_bar)
         form.addRow(self._label(_("Writing:")), writing_box)
+
+        # The text cursor: how the insertion point looks where you type.
+        self.caret = QComboBox()
+        caret_titles = _caret_titles()
+        for value in CARET_CHOICES:
+            self.caret.addItem(caret_titles[value], value)
+        self.caret.setCurrentIndex(max(0, self.caret.findData(caret_style())))
+        self.caret.activated.connect(
+            lambda index: choose_caret_style(self.caret.itemData(index)))
+        caret_box = QWidget()
+        caret_column = QVBoxLayout(caret_box)
+        caret_column.setContentsMargins(0, 0, 0, 0)
+        caret_column.setSpacing(4)
+        caret_column.addWidget(self.caret, 0, Qt.AlignLeft)
+        caret_column.addWidget(self._help(
+            _("How the cursor looks where you type, in every document.")))
+        form.addRow(self._label(_("Text cursor:"), self.caret), caret_box)
 
         # Pasted images: only while Nostr is in use (nothing of Nostr before).
         self.paste = QComboBox()
