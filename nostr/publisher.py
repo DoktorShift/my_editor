@@ -64,7 +64,7 @@ from .outbox import RelayDirectory, ask_draft_relays, normalize_relay_url
 from . import refs
 from .outbox import defaults as outbox_defaults
 from .outbox.lookup import Lookup, fetch_addressable
-from .outbox.policy import dedupe_relays
+from .outbox.policy import dedupe_relays, is_newer
 from .profiles import Profile
 from .publish_pipeline import Mention, PublishPipeline, PublishResult
 from .relay import RelayPool
@@ -556,7 +556,9 @@ def first_publication_among(found: Dict[str, Lookup], names: Sequence[str],
     """What the relays said about an article that may be out under any of
     ``names`` (in the order they count: a file's own names first, the
     link name asked about last). The first found is the article; with
-    none found, NEVER only when the answers would say so for each."""
+    none found, NEVER only when the answers would say so for each. A
+    file's own names were asked of the write relays alone, so the write
+    relays' answers tell for them."""
     slug = names[-1]
     for name in names:
         lookup = found.get(name)
@@ -564,7 +566,9 @@ def first_publication_among(found: Dict[str, Lookup], names: Sequence[str],
             answer = first_publication_of(lookup, outbox)
             return FirstPublication(answer.state, answer.published_at,
                                     under="" if name == slug else name)
-    answers = [first_publication_of(found[name], outbox) for name in names if name in found]
+    answers = [first_publication_of(found[name], outbox, indexers=() if name != slug
+                                    else outbox_defaults.INDEXER_RELAYS)
+               for name in names if name in found]
     if answers and all(answer.state == NEVER for answer in answers):
         return FirstPublication(NEVER)
     return FirstPublication(UNKNOWN)
@@ -587,19 +591,56 @@ def find_first_publication(relay_pool: RelayPool, relay_directory: RelayDirector
     does not hide the first version.
 
     ``also``: other link names the article may be out under (a file's own
-    name, which 3.3 published files under), asked about in the same
-    request and counted before ``slug`` (first_publication_among)."""
+    name, which 3.3 published files under), counted before ``slug``
+    (first_publication_among). They are asked of the write relays alone,
+    where 3.3 published: those get one request about every name, the
+    others one about ``slug``, so no name goes where it would not be
+    published."""
     names = list(dict.fromkeys([*also, slug]))
 
     def got_relays(relays: List[str]) -> None:
         outbox = dedupe_relays(relays)
         asked = dedupe_relays([*outbox, *relay_directory.cached(author).read,
                                *outbox_defaults.INDEXER_RELAYS])
-        fetch_addressable(relay_pool, asked, kind=30023, author=author, d_tags=names,
-                          on_done=lambda found: on_done(
-                              first_publication_among(found, names, outbox)),
+        if len(names) == 1:
+            fetch_addressable(relay_pool, asked, kind=30023, author=author, d_tags=names,
+                              on_done=lambda found: on_done(
+                                  first_publication_among(found, names, outbox)),
+                              timeout_ms=timeout_ms, parent=parent)
+            return
+        parts: Dict[str, Dict[str, Lookup]] = {}
+
+        def answered(part: str, found: Dict[str, Lookup]) -> None:
+            parts[part] = found
+            if len(parts) == 2:
+                on_done(first_publication_among(
+                    _joined(parts["own"], parts["others"]), names, outbox))
+        others = [url for url in asked if url not in outbox]
+        fetch_addressable(relay_pool, outbox, kind=30023, author=author, d_tags=names,
+                          on_done=lambda found: answered("own", found),
+                          timeout_ms=timeout_ms, parent=parent)
+        fetch_addressable(relay_pool, others, kind=30023, author=author, d_tags=[slug],
+                          on_done=lambda found: answered("others", found),
                           timeout_ms=timeout_ms, parent=parent)
     relay_directory.outbox_of(author, got_relays)
+
+
+def _joined(own: Dict[str, Lookup], others: Dict[str, Lookup]) -> Dict[str, Lookup]:
+    """Two lookups' answers as one: per name, the newer version either
+    found, and every relay that answered or refused in either."""
+    joined = dict(own)
+    for name, other in others.items():
+        mine = own.get(name)
+        if mine is None:
+            joined[name] = other
+            continue
+        newer = (other.event if other.event is not None
+                 and (mine.event is None or is_newer(other.event, mine.event)) else mine.event)
+        joined[name] = Lookup(state=mine.state if newer is mine.event else other.state,
+                              event=newer, answered=mine.answered + other.answered,
+                              refused=mine.refused + other.refused,
+                              unchecked=mine.unchecked or other.unchecked)
+    return joined
 
 
 # --------------------------------------------------------------------------- #

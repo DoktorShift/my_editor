@@ -84,8 +84,39 @@ def _asking(write=("wss://nos.lol",), read=("wss://read.example",), also=()):
     find_first_publication(pool, directory, PK, "my-post", found.append, parent=owner,
                            timeout_ms=3_600_000, **({"also": also} if also else {}))
     settle()
-    assert len(pool.subs) == 1                     # one question, whatever it asks about
-    return pool.subs[0], found, owner
+    # One request per relay, whatever it asks about.
+    assert len(pool.subs) == (2 if also else 1)
+    return (_Relays(pool.subs) if also else pool.subs[0]), found, owner
+
+
+class _Relays:
+    """The question as the relays see it when it took a request for some
+    relays and another for the others: each relay answers its own request,
+    with what matches it."""
+
+    def __init__(self, subs):
+        self.subs = subs
+        assert not set(subs[0].urls) & set(subs[1].urls)     # one request per relay
+
+    @property
+    def urls(self):
+        return [url for sub in self.subs for url in sub.urls]
+
+    def filter_of(self, url):
+        return next(sub.filters[0] for sub in self.subs if url in sub.urls)
+
+    def answer(self, url, *events):
+        names = self.filter_of(url)["#d"]
+        for sub in self.subs:
+            if url in sub.urls:
+                sub.answer(url, *[event for event in events
+                                  if any(tag[:1] == ["d"] and tag[1] in names
+                                         for tag in event["tags"])])
+
+    def refuse(self, url, reason=""):
+        for sub in self.subs:
+            if url in sub.urls:
+                sub.refuse(url, reason)
 
 
 def _time_runs_out(owner):
@@ -169,7 +200,7 @@ def test_a_files_own_names_are_asked_about_with_the_made_one_in_one_question():
     request, and one found is the article's, exactly as it is."""
     from tests.outbox_fakes import settle, signed
     sub, found, _owner = _asking(also=(RAW, COMPOSED))
-    assert sub.filters[0]["#d"] == [RAW, COMPOSED, "my-post"]
+    assert sub.filter_of("wss://nos.lol")["#d"] == [RAW, COMPOSED, "my-post"]
     for url in sub.urls:
         if url == "wss://nos.lol":
             sub.answer(url, signed(30023, [["client", "MyEditor"], ["d", RAW],
@@ -194,6 +225,20 @@ def test_found_under_more_than_one_name_the_files_own_comes_first(names, under):
     settle()
     assert found[0].state == FOUND and found[0].under == under
     assert found[0].published_at == FIRST + names.index(under or "my-post")
+
+
+def test_a_files_own_names_go_only_to_the_relays_it_was_published_to():
+    """Review round 4, L2: the file's own names were asked of the author's
+    read relays and the public indexers too, also when the article would
+    not go out under them. 3.3 published to the write relays: only those
+    are asked about the file's names; the others about the made name, as
+    for any article."""
+    from nostr.outbox.defaults import INDEXER_RELAYS
+    relays, _found, _owner = _asking(also=(RAW, COMPOSED))
+    assert {"wss://read.example", *INDEXER_RELAYS} <= set(relays.urls)
+    for url in relays.urls:
+        assert relays.filter_of(url)["#d"] == (
+            [RAW, COMPOSED, "my-post"] if url == "wss://nos.lol" else ["my-post"])
 
 
 @pytest.mark.parametrize("answering, state", [({"wss://nos.lol", "indexer"}, NEVER),
