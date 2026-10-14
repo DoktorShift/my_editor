@@ -74,7 +74,7 @@ def close_windows():
 class _Blobs:
     files: dict = {}         # sha256 -> bytes
     delay = 0.0              # seconds after each 64 KiB
-    asked: list = []         # the paths asked for
+    asked: list = []         # (host, path) of each request
 
 
 class _Handler(http.server.BaseHTTPRequestHandler):
@@ -82,7 +82,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         pass
 
     def do_GET(self):  # noqa: N802
-        _Blobs.asked.append(self.path)
+        _Blobs.asked.append((self.headers.get("Host"), self.path))
         body = _Blobs.files.get(self.path.strip("/").split(".")[0])
         if body is None:
             self.send_response(404)
@@ -529,7 +529,9 @@ def test_a_private_file_its_key_does_not_open_says_so_and_asks_no_other_server(
     assert wait_for(lambda: not saving(world), 5)
     assert world.dialog._status.text() == (
         "“Beach.png” wasn’t saved: it’s kept privately, and its key doesn’t open it.")
-    assert _Blobs.asked == [f"/{sha}"]
+    # Both addresses reach this one test server; the Host tells them apart.
+    assert {host for host, _path in _Blobs.asked} == {server.split("//", 1)[1]}
+    assert {path for _host, path in _Blobs.asked} == {f"/{sha}"}
     assert folder(out) == []
 
 
