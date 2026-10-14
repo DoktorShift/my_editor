@@ -45,8 +45,6 @@ panel.set_active_profile(Profile(user_pubkey="a" * 64, bunker_pubkey="b" * 64,
                                  local_secret_hex="c" * 64, display_name="Alice"))
 w._show_drafts_panel()
 w.act_article_details.setChecked(True)
-app.processEvents()
-app.processEvents()
 side = w._central_splitter.widget(0)
 splitter = w._central_splitter
 
@@ -64,7 +62,24 @@ def measure():
         "tabs_content": top_of(stack),
     }
 
-r = {"at_rest": measure()}
+def settled():
+    # At rest: the window has taken every pending change (on a desktop
+    # platform such as Windows' own, the show and the resizes it brings
+    # arrive over several passes of the event loop), so two looks a
+    # moment apart agree.
+    deadline = time.monotonic() + 5
+    last = None
+    while time.monotonic() < deadline:
+        for _ in range(3):
+            app.processEvents()
+        time.sleep(0.02)
+        now = measure()
+        if now == last:
+            return now
+        last = now
+    return last
+
+r = {"at_rest": settled()}
 r["handle_width"] = splitter.handleWidth()
 dark = w.is_dark_theme
 line = (DARK_BORDER if dark else LIGHT_BORDER).lower()
@@ -79,13 +94,9 @@ r["resting_line"] = [l.text() for l in panel.findChildren(QLabel)
 font = QFont(app.font())
 font.setPointSizeF(font.pointSizeF() * 1.4)
 app.setFont(font)
-for _ in range(4):
-    app.processEvents()
-r["larger_text"] = measure()
+r["larger_text"] = settled()
 w.findbar.show()
-for _ in range(4):
-    app.processEvents()
-r["find_bar"] = measure()
+r["find_bar"] = settled()
 w.close()
 print("RESULT " + json.dumps(r))
 """
