@@ -277,6 +277,31 @@ def test_a_file_size_limit_reached_at_the_end_ends_the_save_and_leaves_nothing(
     assert sorted(p.name for p in out.iterdir()) == []
 
 
+def test_a_file_too_big_to_hold_in_memory_ends_as_one_that_couldnt_be_written(
+        tmp_path, monkeypatch, server):
+    """Saved over a file that is written in place (a hard link, a folder
+    that takes no new file), a download is held in memory: one too big
+    for it says it couldn't be saved, as any file that couldn't be
+    written, and no error escapes."""
+    media = blob(server, b"a long film" * 100)
+    world = library(tmp_path, monkeypatch, [media], names={media.hash: "Film.mp4"})
+    escaped = []
+    monkeypatch.setattr(sys, "excepthook", lambda kind, *rest: escaped.append(kind))
+
+    def no_memory(part, target):
+        raise MemoryError
+
+    monkeypatch.setattr(thumbnail_loader, "place_document", no_memory)
+    out = tmp_path / "out"
+    out.mkdir()
+    save_as(monkeypatch, world, media, out / "Film.mp4")
+    assert wait_for(lambda: not saving(world), 10), "the save never ended"
+    assert world.dialog._status.text() == (
+        "“Film.mp4” couldn’t be saved there. Choose another folder.")
+    assert escaped == []
+    assert sorted(p.name for p in out.iterdir()) == []
+
+
 def test_a_file_saved_from_this_computer_onto_a_full_disk_says_so(tmp_path, monkeypatch, server):
     body = b"cached" * 100
     media = blob(server, body)

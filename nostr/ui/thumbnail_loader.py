@@ -527,6 +527,10 @@ class FileDownload(QObject):
             said = self._close(why) or self._place()
         except OSError as exc:
             said = write_problem(exc)
+        except MemoryError:
+            # Written in place (a hard link, a folder that takes no new
+            # file), the file is held in memory, and this one didn't fit.
+            said = "write"
         finally:
             try:
                 if self._part is not None:
