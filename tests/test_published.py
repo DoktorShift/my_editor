@@ -497,7 +497,6 @@ def test_links_lead_to_the_item_and_name_where_it_is():
     essay = PublishedItem(article("essay", "Essay"), found_on=(R1, R2, "wss://three.example"))
     entity = essay.nostr_address()
     assert bech32.decode_naddr(entity) == ("essay", PK, 30023, [R1, R2])
-    assert essay.web_link() == "https://njump.me/" + entity
     hello = PublishedItem(note("hello"), found_on=(R1,))
     event_id, hints, author, kind = bech32.decode_nevent(hello.nostr_address())
     assert (event_id, hints, author, kind) == (hello.id, [R1], PK, 1)
@@ -507,7 +506,7 @@ def test_an_identifier_too_long_for_a_link_has_no_link():
     """Review F17: NIP-19 holds 255 bytes per value; such an article has
     no address to open or copy, and asking for one must not raise."""
     long_d = PublishedItem(article("ü" * 130, "Long"), found_on=(R1,))
-    assert long_d.nostr_address() is None and long_d.web_link() is None
+    assert long_d.nostr_address() is None
 
 
 def test_the_first_publication_of_an_article_survives_edits():
@@ -541,3 +540,39 @@ def test_deletion_requests_are_asked_in_bounded_pieces():
     assert [len(flt.get("#e", flt.get("#a", []))) for flt in filters] == [100, 100, 50, 100, 50]
     assert [len(request) for request in requests] == [4, 1]
     assert deletion_requests(PK, [], []) == []
+
+
+# -- curations ----------------------------------------------------------------------------
+
+def curation(d, title, *, at=NOW - 1500, articles=("30023:" + "b" * 64 + ":one",)):
+    tags = [["d", d], ["title", title], ["description", "Reading for the weekend"]]
+    tags += [["a", ref] for ref in articles]
+    return signed(30004, tags, "", created_at=at)
+
+
+def test_curations_are_read_beside_articles_and_notes():
+    """A writer's curations (Standup sites and magazines, kind 30004) are
+    part of what they published: listed, addressable, and kept apart from
+    an article that happens to share their identifier."""
+    model, relays, _seen = setup()
+    shelf = curation("shelf", "Weekend reading")
+    same_d = article("shelf", "An article with the same identifier", at=NOW - 1200)
+    relays.keep(R1, shelf, same_d, note("Hello"))
+    model.set_account(Profile())
+    relays.run()
+    items = {item.title: item for item in model.items()}
+    assert set(items) == {"Weekend reading", "An article with the same identifier", "Hello"}
+    shelf_item = items["Weekend reading"]
+    assert shelf_item.is_curation and not shelf_item.is_article
+    assert shelf_item.identifier == "shelf"
+    assert shelf_item.curated == 1
+    assert bech32.decode_naddr(shelf_item.nostr_address())[:3] == ("shelf", PK, 30004)
+
+
+def test_a_deleted_curation_stays_out():
+    model, relays, _seen = setup()
+    relays.keep(R1, curation("gone", "Gone"),
+                deletion(addresses=[address(30004, PK, "gone")], kinds=(30004,)))
+    model.set_account(Profile())
+    relays.run()
+    assert model.items() == []

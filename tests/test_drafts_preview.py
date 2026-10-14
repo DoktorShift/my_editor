@@ -672,8 +672,22 @@ def child_host(panel):
     host.deleteLater()
 
 
-def row_of(panel, index: int):
-    return panel._list.itemWidget(panel._list.item(index))
+def row_point(panel, index: int, offset=(5, 5)) -> QPointF:
+    """A point inside a row, in the list's viewport (the rows are painted:
+    the viewport is what the pointer is over), under any section title."""
+    from nostr.ui.post_list import ROW_ROLE, section_height
+    item = panel._list.item(index)
+    rect = panel._list.visualItemRect(item)
+    top = rect.top() + (section_height() if item.data(ROW_ROLE).section else 0)
+    return QPointF(rect.left() + offset[0], top + offset[1])
+
+
+def pointer(panel, index: int, kind, offset=(5, 5), *, buttons=Qt.NoButton,
+            button=Qt.NoButton) -> None:
+    """A mouse event over a row, delivered to the list's viewport."""
+    at = row_point(panel, index, offset)
+    QApplication.sendEvent(panel._list.viewport(), QMouseEvent(
+        kind, at, at, button, buttons, Qt.NoModifier))
 
 
 def identifier_at(panel, index: int) -> str:
@@ -690,23 +704,16 @@ def index_of(panel, identifier: str) -> int:
 
 def move_onto(panel, index: int) -> None:
     """A real pointer move inside a row, as Qt would deliver it."""
-    row = row_of(panel, index)
-    QApplication.sendEvent(row, QEvent(QEvent.Enter))
-    QApplication.sendEvent(row, QMouseEvent(
-        QEvent.MouseMove, QPointF(5, 5), QPointF(5, 5),
-        Qt.NoButton, Qt.NoButton, Qt.NoModifier,
-    ))
+    pointer(panel, index, QEvent.MouseMove)
 
 
 def leave(panel, index: int) -> None:
-    QApplication.sendEvent(row_of(panel, index), QEvent(QEvent.Leave))
+    QApplication.sendEvent(panel._list.viewport(), QEvent(QEvent.Leave))
 
 
 def press(panel, index: int) -> None:
-    QApplication.sendEvent(row_of(panel, index), QMouseEvent(
-        QEvent.MouseButtonPress, QPointF(5, 5), QPointF(5, 5),
-        Qt.LeftButton, Qt.LeftButton, Qt.NoModifier,
-    ))
+    pointer(panel, index, QEvent.MouseButtonPress, buttons=Qt.LeftButton,
+            button=Qt.LeftButton)
 
 
 def fire(timer) -> None:
@@ -783,10 +790,7 @@ def test_movement_inside_one_row_does_not_restart_the_dwell(panel, monkeypatch):
     move_onto(panel, 1)
     started = controller._dwell.remainingTime()
     for _ in range(3):
-        QApplication.sendEvent(row_of(panel, 1), QMouseEvent(
-            QEvent.MouseMove, QPointF(9, 9), QPointF(9, 9),
-            Qt.NoButton, Qt.NoButton, Qt.NoModifier,
-        ))
+        pointer(panel, 1, QEvent.MouseMove, (9, 9))
     assert controller._dwell.remainingTime() <= started
     assert controller.pending_identifier() == "d1"
 
@@ -873,13 +877,16 @@ def test_leaving_the_popover_closes_it_after_its_own_delay(panel, monkeypatch):
     assert controller.is_open() is False
 
 
-def test_nothing_inside_the_popover_swallows_the_pointer(panel):
-    # popovers.md asks to "limit the amount of functionality in the
-    # popover to a few related tasks"; here the number of tasks is zero,
-    # so every child hands its mouse events to the window.
+def test_nothing_in_the_short_preview_swallows_the_pointer(panel):
+    # The short preview has no tasks: every part of its header hands its
+    # mouse events to the window. Only the full preview's text and its
+    # commands take the pointer, and they are hidden here.
     open_preview(panel, 0)
     popover = panel._preview.popover()
-    children = popover.findChildren(QWidget)
+    interactive = (popover.reader(), popover.action_bar())
+    assert not any(part.isVisible() for part in interactive)
+    children = [child for child in popover.findChildren(QWidget)
+                if not any(child is part or part.isAncestorOf(child) for part in interactive)]
     assert children
     for child in children:
         assert child.testAttribute(Qt.WA_TransparentForMouseEvents) is True
@@ -921,29 +928,43 @@ def test_scrolling_closes_and_disarms_and_the_next_move_re_arms(panel):
     assert controller.is_armed() is True
 
 
-def test_a_mouse_press_closes_and_disarms_until_release(panel):
-    # popovers.md: "a popover generally closes when people click or tap
-    # outside its bounds".
+def test_a_click_opens_the_full_preview_and_a_second_click_closes_it(panel):
+    # popovers.md: "let people close one popover and open another with a
+    # single click". A click on the short preview's row grows it into the
+    # full one; another click on that row puts it away.
     controller = panel._preview
     open_preview(panel, 0)
+    assert controller.is_full() is False
     press(panel, 0)
+    assert controller.is_open() is True and controller.is_full() is True
+    assert controller.shown_identifier() == identifier_at(panel, 0)
+    press(panel, 1)                                  # one click moves it
+    assert controller.shown_identifier() == identifier_at(panel, 1)
+    press(panel, 1)
     assert controller.is_open() is False
     assert controller.is_disarmed() is True
 
 
+def test_a_click_that_chooses_several_rows_closes_the_preview(panel):
+    controller = panel._preview
+    press(panel, 0)
+    assert controller.is_full() is True
+    at = row_point(panel, 1)
+    QApplication.sendEvent(panel._list.viewport(), QMouseEvent(
+        QEvent.MouseButtonPress, at, at, Qt.LeftButton, Qt.LeftButton, Qt.ShiftModifier))
+    assert controller.is_open() is False
+
+
 def test_a_drag_across_rows_is_not_a_dwell(panel):
     controller = panel._preview
-    QApplication.sendEvent(row_of(panel, 1), QMouseEvent(
-        QEvent.MouseMove, QPointF(5, 5), QPointF(5, 5),
-        Qt.NoButton, Qt.LeftButton, Qt.NoModifier,
-    ))
+    pointer(panel, 1, QEvent.MouseMove, buttons=Qt.LeftButton)
     assert controller.is_armed() is False
 
 
 def test_a_wheel_event_on_a_row_closes_immediately(panel):
     controller = panel._preview
     open_preview(panel, 0)
-    QApplication.sendEvent(row_of(panel, 0), QEvent(QEvent.Wheel))
+    QApplication.sendEvent(panel._list.viewport(), QEvent(QEvent.Wheel))
     assert controller.is_open() is False
     assert controller.is_disarmed() is True
 
@@ -951,17 +972,15 @@ def test_a_wheel_event_on_a_row_closes_immediately(panel):
 def test_a_search_keystroke_closes_and_leaves_no_widget_reference(panel):
     controller = panel._preview
     open_preview(panel, 0)
-    rows_before = [row_of(panel, i) for i in range(panel._list.count())]
-
     panel._search_edit.setText("Article 1")
     assert controller.is_open() is False
     assert controller.is_disarmed() is True
-    # The rebuild destroyed every row widget the preview could have been
-    # holding; the controller holds identifiers and rects only.
+    # The rebuild replaced every row; the controller holds identifiers and
+    # rects only, never a row.
     assert controller.shown_identifier() == ""
     assert controller.pending_identifier() == ""
-    for attribute in vars(controller).values():
-        assert attribute not in rows_before
+    from PySide6.QtWidgets import QListWidgetItem
+    assert not any(isinstance(value, QListWidgetItem) for value in vars(controller).values())
 
 
 def test_a_context_menu_closes_the_popover_before_it_is_built(panel):
@@ -1021,9 +1040,9 @@ def help_event(panel, index: int) -> bool:
     moments ago, so on a row the pointer is resting on this always
     arrives while the popover is up.
     """
-    row = row_of(panel, index)
-    pos = QPoint(5, 5)
-    QApplication.sendEvent(row, QHelpEvent(QEvent.ToolTip, pos, row.mapToGlobal(pos)))
+    viewport = panel._list.viewport()
+    pos = row_point(panel, index).toPoint()
+    QApplication.sendEvent(viewport, QHelpEvent(QEvent.ToolTip, pos, viewport.mapToGlobal(pos)))
     return QToolTip.isVisible()
 
 
@@ -1033,7 +1052,6 @@ def test_no_tooltip_appears_beside_an_open_preview(panel, tooltips):
     # popover deliberately does not cover the row, which is exactly why
     # the pointer stays on the row and the help event fires.
     open_preview(panel, 0)
-    assert row_of(panel, 0).toolTip() != ""  # the row keeps its text
     assert help_event(panel, 0) is False
     # Nor on the row a pending swap is about to open, which the pointer
     # is equally resting on.
@@ -1044,13 +1062,13 @@ def test_no_tooltip_appears_beside_an_open_preview(panel, tooltips):
 
 
 def test_a_row_that_gets_no_preview_keeps_its_tooltip(panel, tooltips):
-    # The tooltip is the only place a FAILED row's full text exists, so
-    # suppression stops where the preview stops.
+    # Suppression stops where the preview stops: a FAILED row gets no
+    # preview, so the list's own tooltip rule (the whole title, where the
+    # row cuts it) speaks for it, not the preview controller.
     panel._store_ref.set_failed(identifier_at(panel, 1), "signer timed out")
     move_onto(panel, 1)
     assert panel._preview.is_armed() is False
-    assert row_of(panel, 1).toolTip() != ""
-    assert help_event(panel, 1) is True
+    assert panel._preview._suppresses_tooltip(identifier_at(panel, 1)) is False
 
 
 def test_deactivating_the_window_closes_the_preview(panel):
@@ -1359,7 +1377,7 @@ def test_the_loader_refuses_bytes_that_are_not_an_image(loader):
 def test_the_hero_box_keeps_its_ratio_whatever_the_image_is(source):
     from PySide6.QtGui import QPixmap
 
-    hero = dp._HeroImage(is_dark=True)
+    hero = dp.HeroImage(is_dark=True)
     hero.reset(width=360)
     box = hero.size()
     assert box.width() == 360
@@ -1415,7 +1433,10 @@ def test_a_loading_row_announces_no_preview_facts():
     assert "Tagged" not in spoken
 
 
-def test_space_on_the_focused_row_opens_the_preview_and_gives_it_focus(panel):
+def test_space_opens_the_full_preview_and_the_keys_stay_in_the_list(panel):
+    """As Quick Look in Finder: Space shows the current row's preview and
+    the keyboard stays in the list, so the arrow keys move the preview
+    along; Tab goes into it, to its next step."""
     from PySide6.QtGui import QKeyEvent
 
     controller = panel._preview
@@ -1425,15 +1446,19 @@ def test_space_on_the_focused_row_opens_the_preview_and_gives_it_focus(panel):
 
     event = QKeyEvent(QEvent.KeyPress, Qt.Key_Space, Qt.NoModifier, " ")
     assert QApplication.sendEvent(panel._list, event) is True
-    assert event.isAccepted() is True
-    assert controller.is_open() is True
-    assert controller.opened_by_keyboard() is True
+    assert controller.is_full() is True
+    assert controller.shown_identifier() == identifier_at(panel, 1)
+    assert panel._list.hasFocus() is True
 
+    panel._list.setCurrentRow(0)                      # the arrow keys
+    assert controller.shown_identifier() == identifier_at(panel, 0)
+
+    QApplication.sendEvent(panel._list, QKeyEvent(QEvent.KeyPress, Qt.Key_Tab, Qt.NoModifier))
     popover = controller.popover()
-    # Without focus the screen reader cursor never enters the window and
-    # the keyboard route would be theatre.
+    assert controller.opened_by_keyboard() is True
     assert popover.focusPolicy() == Qt.StrongFocus
-    assert popover.focusWidget() is not None
+    primary = popover.action_bar().primary
+    assert primary is not None and primary.text() == "Continue Editing"
 
 
 def test_space_again_closes_it_and_escape_returns_focus_to_the_list(panel):
@@ -1448,7 +1473,15 @@ def test_space_again_closes_it_and_escape_returns_focus_to_the_list(panel):
     controller.toggle_current_row()
     assert controller.is_open() is False
 
+    # Escape in the list closes it.
     controller.toggle_current_row()
+    QApplication.sendEvent(panel._list, QKeyEvent(QEvent.KeyPress, Qt.Key_Escape,
+                                                  Qt.NoModifier))
+    assert controller.is_open() is False
+
+    # Escape inside it, after Tab, closes it and gives the list the keys back.
+    controller.toggle_current_row()
+    QApplication.sendEvent(panel._list, QKeyEvent(QEvent.KeyPress, Qt.Key_Tab, Qt.NoModifier))
     popover = controller.popover()
     QApplication.sendEvent(popover, QKeyEvent(
         QEvent.KeyPress, Qt.Key_Escape, Qt.NoModifier,
@@ -1512,13 +1545,14 @@ def test_show_preview_describes_the_row_it_was_raised_on(panel):
 
 def test_every_line_of_the_popover_carries_its_own_accessible_name():
     popover = compose(article())
-    assert popover.accessibleName() == "Draft preview"
+    # Named for what it previews, as it opens.
+    assert popover.accessibleName() == f"Preview of {popover.fields().title}"
     assert popover.accessibleDescription()
     fields = popover.fields()
     for name, label in popover.labels():
         if label.height():
             assert label.accessibleName() == getattr(fields, name)
-    hero = popover.findChild(dp._HeroImage)
+    hero = popover.findChild(dp.HeroImage)
     assert hero.accessibleName() == "Article image"
     # No description, because NIP-23 carries no alt text to put in one.
     assert hero.accessibleDescription() == ""
@@ -1657,3 +1691,136 @@ def test_a_replaced_loader_is_disconnected_from_the_old_one(panel, tmp_path):
     assert HERO not in controller._image_failures
     second.url_failed.emit(HERO, "from the new loader")
     assert controller._image_failures[HERO] == "from the new loader"
+
+
+# --------------------------------------------------------------------------- #
+# The full preview (a click, Space)                                           #
+# --------------------------------------------------------------------------- #
+
+def test_the_full_preview_shows_the_text_styled_and_the_next_steps(panel):
+    controller = panel._preview
+    press(panel, 0)
+    popover = controller.popover()
+    assert popover.is_full() is True
+    reader, bar = popover.reader(), popover.action_bar()
+    assert reader.isVisibleTo(popover) and bar.isVisibleTo(popover)
+    # The editor's Preview renderer drew the body.
+    assert reader.toPlainText().strip()
+    assert reader.focusPolicy() != Qt.NoFocus
+    # The next step trailing as the default button, the rest beside it or
+    # in the ⋯ menu, Delete last.
+    assert bar.primary.text() == "Continue Editing"
+    assert "publish" in bar.buttons
+    more = [a.text() for a in bar.more.menu().actions() if not a.isSeparator()]
+    assert more[-1] == "Delete Draft"
+    # Wider than the short preview: a reading column.
+    assert popover.card_size().width() >= 320
+
+
+def test_continue_editing_in_the_preview_opens_the_draft_and_closes_the_preview(panel):
+    opened = []
+    panel.open_draft.connect(opened.append)
+    press(panel, 0)
+    controller = panel._preview
+    controller.popover().action_bar().primary.click()
+    assert opened == [identifier_at(panel, 0)]
+    assert controller.is_open() is False
+
+
+def test_a_click_elsewhere_closes_the_full_preview(panel):
+    controller = panel._preview
+    press(panel, 0)
+    assert controller.is_full() is True
+    # The pointer travelling over other rows changes nothing.
+    move_onto(panel, 1)
+    assert controller.shown_identifier() == identifier_at(panel, 0)
+    at = QPointF(5, 5)
+    QApplication.sendEvent(panel._search_edit, QMouseEvent(
+        QEvent.MouseButtonPress, at, at, Qt.LeftButton, Qt.LeftButton, Qt.NoModifier))
+    assert controller.is_open() is False
+
+
+def test_the_full_preview_moves_with_its_row_as_the_list_scrolls(panel):
+    controller = panel._preview
+    press(panel, 1)
+    before = controller.shown_anchor()
+    bar = panel._list.verticalScrollBar()
+    bar.setRange(0, 200)
+    bar.setValue(0)
+    controller._on_scrolled(0)
+    assert controller.is_full() is True
+    assert controller.shown_anchor() == before
+
+
+# --------------------------------------------------------------------------- #
+# Detaching the full preview into a window                                    #
+# --------------------------------------------------------------------------- #
+
+def test_the_full_preview_detaches_into_a_window_that_stays(panel):
+    """popovers.md (macOS): "Consider letting people detach a popover",
+    with "minimal appearance changes": the same header, text and commands,
+    in a window that stays while the person writes beside it."""
+    controller = panel._preview
+    press(panel, 0)
+    more = [a.text() for a in controller.popover().action_bar().more.menu().actions()
+            if not a.isSeparator()]
+    assert "Open in New Window" in more
+    title = controller.popover().fields().title
+    window = controller.detach()
+    try:
+        assert controller.is_open() is False
+        assert window.isVisible() and window.windowTitle() == title
+        assert window.reader.toPlainText().strip()
+        assert window.bar.primary.text() == "Continue Editing"
+        assert "Open in New Window" not in [
+            a.text() for a in window.bar.more.menu().actions()]
+        assert controller.windows() == [window]
+        # A command that keeps the post in view leaves the window open; one
+        # that moves on from it (Continue Editing) closes it.
+        copied = []
+        panel.copy_event_id.connect(copied.append)
+        window.bar.chosen.emit("copy_id")
+        assert copied and window.isVisible()
+        opened = []
+        panel.open_draft.connect(opened.append)
+        window.bar.primary.click()
+        assert opened == [identifier_at(panel, 0)] and not window.isVisible()
+    finally:
+        window.close()
+
+
+def test_dragging_the_full_preview_by_its_header_detaches_it(panel):
+    controller = panel._preview
+    press(panel, 0)
+    popover = controller.popover()
+    detached = []
+    popover.detach_requested.connect(lambda: detached.append(True))
+    start = QPointF(40, 30)
+    end = QPointF(40 + 4 * QApplication.startDragDistance(), 30)
+    QApplication.sendEvent(popover, QMouseEvent(
+        QEvent.MouseButtonPress, start, popover.mapToGlobal(start), Qt.LeftButton,
+        Qt.LeftButton, Qt.NoModifier))
+    QApplication.sendEvent(popover, QMouseEvent(
+        QEvent.MouseMove, end, popover.mapToGlobal(end), Qt.NoButton, Qt.LeftButton,
+        Qt.NoModifier))
+    assert detached == [True]
+    for window in controller.windows():
+        window.close()
+
+
+def test_the_full_preview_is_never_narrower_than_its_commands():
+    """German labels (Veröffentlichen…, Weiter bearbeiten) are longer: the
+    preview grows to show its buttons whole rather than clip them."""
+    from nostr.ui.preview_parts import PreviewAction
+    popover = dp.PreviewPopover(is_dark=True)
+    actions = (PreviewAction("publish", "Veröffentlichen…"),
+               PreviewAction("open", "Weiter bearbeiten eines sehr langen Entwurfs",
+                             primary=True),
+               PreviewAction("delete", "Entwurf löschen", more=True, destructive=True))
+    size = popover.compose(article(), width=200, max_height=900, now=NOW, full=True,
+                           actions=actions)
+    bar = popover.action_bar()
+    assert size.width() >= bar.sizeHint().width()
+    for button in bar.buttons.values():
+        assert button.sizeHint().width() <= size.width()
+    popover.setParent(None)

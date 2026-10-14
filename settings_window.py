@@ -11,7 +11,9 @@ changed at all once given.
 
 The window holds only what is chosen once and kept: the appearance, the
 language, the writing font, whether the format bar shows over a selection,
-how the text cursor looks, and, while a Nostr account is in use, what happens to a pasted image. Every command stays in its menu: the window
+how the text cursor looks, and, while a Nostr account is in use, what
+happens to a pasted image and where published posts open on the web.
+Every command stays in its menu: the window
 shows the menu commands' state and chooses through them (or through what
 they call), so the two never disagree, and it holds no feature logic of its
 own.
@@ -40,6 +42,7 @@ from PySide6.QtWidgets import (
 import theme
 from constants import DARK_MUTED_FG, LIGHT_MUTED_FG
 from i18n import _
+from nostr import web_readers
 
 # What happens to a pasted image while a Nostr account is in use, as the
 # setting stores it ("ask", "always", "never"), in the order offered.
@@ -73,8 +76,10 @@ class SettingsWindow(QDialog):
     ``choose_format_bar(on)`` read and store whether the format bar shows
     over a selection; ``caret_style()`` and ``choose_caret_style(value)``
     read and store the text cursor (CARET_CHOICES); ``paste_choice()`` and
-    ``choose_paste(value)`` read and store the pasted-image setting,
-    offered while ``nostr_in_use()``.
+    ``choose_paste(value)`` read and store the pasted-image setting, and
+    ``web_reader()`` and ``choose_web_reader(key)`` the reading app
+    published posts open in (web_readers), both offered while
+    ``nostr_in_use()``.
     """
 
     def __init__(self, *, appearance: Dict[str, QAction],
@@ -88,6 +93,8 @@ class SettingsWindow(QDialog):
                  choose_format_bar: Callable[[bool], None],
                  caret_style: Callable[[], str] = lambda: "medium",
                  choose_caret_style: Callable[[str], None] = lambda value: None,
+                 web_reader: Callable[[], str] = lambda: web_readers.DISCOVER,
+                 choose_web_reader: Callable[[str], None] = lambda key: None,
                  is_dark: bool = True, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
         self.setWindowTitle(_("Settings"))
@@ -98,6 +105,7 @@ class SettingsWindow(QDialog):
         self._choose_paste = choose_paste
         self._nostr_in_use = nostr_in_use
         self._format_bar_shown = format_bar
+        self._web_reader = web_reader
 
         form = QFormLayout()
         form.setLabelAlignment(Qt.AlignRight)
@@ -192,6 +200,24 @@ class SettingsWindow(QDialog):
         self._paste_label = self._label(_("Pasted images:"), self.paste)
         form.addRow(self._paste_label, self._paste_box)
 
+        # Where published posts open on the web: only while Nostr is in use.
+        self.reader = QComboBox()
+        for app in web_readers.READERS:
+            self.reader.addItem(app.name, app.key)
+        self.reader.activated.connect(
+            lambda index: choose_web_reader(self.reader.itemData(index)))
+        self._reader_box = QWidget()
+        reader_column = QVBoxLayout(self._reader_box)
+        reader_column.setContentsMargins(0, 0, 0, 0)
+        reader_column.setSpacing(4)
+        reader_column.addWidget(self.reader, 0, Qt.AlignLeft)
+        reader_column.addWidget(self._help(
+            _("Where your published posts open on the web, and the app a copied link "
+              "points to. A post the app cannot show, such as a short note in Standup "
+              "Discover, opens in njump.")))
+        self._reader_label = self._label(_("Open posts on the web in:"), self.reader)
+        form.addRow(self._reader_label, self._reader_box)
+
         layout = QVBoxLayout(self)
         layout.setContentsMargins(24, 22, 24, 22)
         layout.addLayout(form)
@@ -262,6 +288,10 @@ class SettingsWindow(QDialog):
         shown = bool(self._nostr_in_use())
         self._paste_label.setVisible(shown)
         self._paste_box.setVisible(shown)
+        self._reader_label.setVisible(shown)
+        self._reader_box.setVisible(shown)
+        chosen = self.reader.findData(self._web_reader())
+        self.reader.setCurrentIndex(chosen if chosen >= 0 else 0)
         index = self.paste.findData(self._paste_choice())
         self.paste.setCurrentIndex(index if index >= 0 else 0)
 

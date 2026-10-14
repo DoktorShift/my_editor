@@ -13,6 +13,7 @@ opens the menu of the current row; every control has a name.
 """
 
 import os
+import time
 import sys
 
 import pytest
@@ -23,12 +24,13 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from PySide6.QtCore import QPoint, Qt  # noqa: E402
 from PySide6.QtGui import QContextMenuEvent, QGuiApplication  # noqa: E402
 from PySide6.QtTest import QTest  # noqa: E402
-from PySide6.QtWidgets import QApplication  # noqa: E402
+from PySide6.QtWidgets import QApplication, QMenu  # noqa: E402
 
 import alerts  # noqa: E402
 from nostr.published import LOADING, PAGE_SIZE, PublishedList  # noqa: E402
 from nostr.ui import published_view as pv  # noqa: E402
-from nostr.ui.published_view import META_ROLE, PublishedView  # noqa: E402
+from nostr.ui.post_list import ROW_ROLE, list_date  # noqa: E402
+from nostr.ui.published_view import PublishedView  # noqa: E402
 from tests.accessibility import unnamed_controls  # noqa: E402
 from tests.outbox_fakes import (  # noqa: E402
     NOW, FakeClient, FakeRelayDirectory, FakeSessionPool, PK, Profile, signed,
@@ -136,7 +138,7 @@ def test_loading_then_nothing_published_yet():
     assert model.state == LOADING
     assert shown(view) == ("", "Looking for your notes and articles…", True, False)
     relays.run()
-    assert shown(view) == ("Nothing published yet",
+    assert shown(view) == ("Nothing Published Yet",
                            "Notes and articles you publish appear here.", False, False)
     assert unnamed_controls(view) == []
 
@@ -161,12 +163,17 @@ def test_a_row_says_its_title_what_it_is_and_when_it_first_went_out():
     relays.run()
     assert shown(view) == ["Hello there", "Essay"]
     rows = view._rows
-    date = pv.format_absolute_date(NOW - 2000)
-    assert rows.data(rows.index(1), META_ROLE) == f"Article · {date}"
-    assert rows.data(rows.index(0), META_ROLE).startswith("Note · ")
+    essay, hello = rows.data(rows.index(1), ROW_ROLE), rows.data(rows.index(0), ROW_ROLE)
+    # Line 2: what it is, when it first went out, the words after the title.
+    assert (essay.title, essay.kind, essay.detail) == ("Essay", "article", "Body")
+    assert essay.when == list_date(NOW - 2000, int(time.time()))
+    assert (hello.kind, hello.detail) == ("note", "No additional text")
+    # Grouped by date: the first row starts its section.
+    assert hello.section
     spoken = rows.data(rows.index(1), Qt.ItemDataRole.AccessibleTextRole)
     assert spoken.startswith("Essay. Article. First published ")
-    assert "Essay" in rows.data(rows.index(1), Qt.ItemDataRole.ToolTipRole)
+    # No tooltip repeating a row shown whole (the painter's rule).
+    assert rows.data(rows.index(1), Qt.ItemDataRole.ToolTipRole) is None
     assert view._list.accessibleName() == "Published"
     assert unnamed_controls(view) == []
 
@@ -231,15 +238,6 @@ def test_load_more_that_failed_says_so_and_stays_the_way_to_try_again():
     assert rows.rowCount() == PAGE_SIZE + 1 and not model.has_more
 
 
-def test_a_narrow_line_shows_the_date_in_digits():
-    view, _model, relays, _said, _edited = make(article("essay", "Essay"))
-    view.set_account(Profile())
-    relays.run()
-    rows = view._rows
-    assert rows.data(rows.index(0), pv.SHORT_META_ROLE) == (
-        f"Article · {pv.format_short_date(NOW - 2000)}")
-
-
 # -- actions --------------------------------------------------------------------------------
 
 def test_return_opens_an_article_for_editing_and_a_note_in_the_browser(opened):
@@ -263,8 +261,8 @@ def test_an_article_without_a_link_still_has_its_menu():
     relays.run()
     menu = view.menu_for(view._rows.index(0))
     enabled = {a.text(): a.isEnabled() for a in menu.actions() if not a.isSeparator()}
-    assert enabled == {"Edit": True, "Open in Browser": False, "Copy Link": False,
-                       "Delete from Nostr…": True}
+    assert enabled == {"Edit Article": True, "Open in Standup Discover": False,
+                       "Open With": False, "Copy Link": False, "Delete from Nostr…": True}
 
 
 def test_a_row_and_its_confirmation_name_a_markdown_note_in_words(answered_alerts):
@@ -286,11 +284,19 @@ def test_the_menu_of_an_article_and_of_a_note():
     relays.run()
     words = lambda menu: [a.text() for a in menu.actions() if not a.isSeparator()]  # noqa: E731
     article_menu = view.menu_for(view._rows.index(1))
-    assert words(article_menu) == ["Edit", "Open in Browser", "Copy Link", "Delete from Nostr…"]
-    assert article_menu.defaultAction().text() == "Edit"
+    assert words(article_menu) == ["Edit Article", "Open in Standup Discover", "Open With",
+                                   "Copy Link", "Delete from Nostr…"]
+    assert article_menu.defaultAction().text() == "Edit Article"
+    # Open With lists every app that shows an article, Standup Discover first.
+    open_with = next(m for m in article_menu.findChildren(QMenu) if m.title() == "Open With")
+    assert words(open_with) == ["Standup Discover", "njump", "YakiHonne", "Primal",
+                                "noStrudel"]
     note_menu = view.menu_for(view._rows.index(0))
-    assert words(note_menu) == ["Open in Browser", "Copy Link", "Delete from Nostr…"]
-    assert note_menu.defaultAction().text() == "Open in Browser"
+    assert words(note_menu) == ["Open in njump", "Open With", "Copy Link", "Delete from Nostr…"]
+    assert note_menu.defaultAction().text() == "Open in njump"
+    # Discover shows no single note, so a note's menus never offer it.
+    note_apps = next(m for m in note_menu.findChildren(QMenu) if m.title() == "Open With")
+    assert "Standup Discover" not in words(note_apps)
     delete = note_menu.actions()[-1]
     assert not delete.shortcut().isEmpty()        # the key that does it, shown
     assert view.menu_for(view._rows.index(5)) is None
@@ -302,8 +308,34 @@ def test_copy_link_puts_the_web_address_on_the_clipboard():
     relays.run()
     menu = view.menu_for(view._rows.index(0))
     next(a for a in menu.actions() if a.text() == "Copy Link").trigger()
-    assert QGuiApplication.clipboard().text().startswith("https://njump.me/naddr1")
+    # The default app's link, so a shared link points to Standup Discover.
+    assert QGuiApplication.clipboard().text().startswith(
+        "https://discover.einundzwanzig.space/a/naddr1")
     assert said[-1] == "Link copied."
+
+
+def test_discover_is_asked_first_and_njump_opens_when_it_has_no_page(opened):
+    """Discover shows an article once it has indexed it; until then the
+    article opens on njump and the status line says why."""
+    asked = []
+    view, _model, relays, said, _edited = make(article("essay", "Essay"))
+    view._page_check = lambda url, done: (asked.append(url), done(False))
+    view.set_account(Profile())
+    relays.run()
+    view.preview_act(view._rows.item_at(0).id, "open:discover")
+    assert asked and asked[0].startswith("https://discover.einundzwanzig.space/a/")
+    assert opened and opened[0].startswith("https://njump.me/naddr1")
+    assert said[-1] == ("Standup Discover doesn’t show this article yet, so it opened on "
+                        "njump.")
+    opened.clear()
+    view._page_check = lambda url, done: done(True)
+    view.preview_act(view._rows.item_at(0).id, "open:discover")
+    assert opened[0].startswith("https://discover.einundzwanzig.space/a/")
+    # Another app is not checked first.
+    opened.clear()
+    view._page_check = lambda url, done: (_ for _ in ()).throw(AssertionError("asked"))
+    view.preview_act(view._rows.item_at(0).id, "open:primal")
+    assert opened == [opened[0]] and opened[0].startswith("https://primal.net/a/naddr1")
 
 
 def test_delete_asks_first_with_the_owners_words_and_cancel_as_the_default(answered_alerts):
@@ -334,7 +366,7 @@ def test_confirming_deletes_and_the_row_goes(answered_alerts):
     select(view, 1)
     answered_alerts.answers = [True]
     QTest.keyClick(view._list, Qt.Key.Key_Backspace)
-    assert view._rows.data(view._rows.index(1), META_ROLE) == "Deleting…"
+    assert view._rows.data(view._rows.index(1), ROW_ROLE).detail == "Deleting…"
     relays.run()
     assert shown(view) == ["kept"]
     assert said[-1] == "2 of 2 relays accepted the request to delete “Essay”."
@@ -361,7 +393,7 @@ def test_a_deletion_no_relay_took_offers_try_again(answered_alerts):
         ("Cancel", alerts.CANCEL), ("Try Again", alerts.DEFAULT)]
     assert R1 in failure["details"]
     relays.run()
-    assert shown(view) == ("Nothing published yet",
+    assert shown(view) == ("Nothing Published Yet",
                            "Notes and articles you publish appear here.", False, False)
 
 
@@ -399,20 +431,12 @@ def test_keys_act_on_the_selected_row_only(answered_alerts, opened):
     assert answered_alerts.asked[0]["title"] == "Delete “only note” from Nostr?"
 
 
-def test_one_date_style_for_the_whole_list():
-    """Review F11: when one row's date in words does not fit, every row
-    writes its date in digits, so the column reads and lines up alike."""
-    view, model, relays, _said, _edited = make(note("a"), article("essay", "Essay"))
+def test_a_note_says_the_words_after_its_first_line():
+    view, _model, relays, _said, _edited = make(note("Coffee first\nthen the long article"))
     view.set_account(Profile())
     relays.run()
-    view.show()
-    assert not view.digit_dates
-    view.resize(110, 480)                           # too narrow for "Article · 10 January 2027"
-    QApplication.processEvents()
-    assert view.digit_dates
-    view.resize(320, 480)
-    QApplication.processEvents()
-    assert not view.digit_dates
+    row = view._rows.data(view._rows.index(0), ROW_ROLE)
+    assert (row.title, row.detail) == ("Coffee first", "then the long article")
 
 
 def test_a_deletion_left_as_it_is_keeps_the_row(answered_alerts):
@@ -447,3 +471,104 @@ def test_both_themes_build():
     assert view.is_dark and "#1E1E1E".lower() in view.styleSheet().lower()
     view.apply_theme(False)
     assert not view.is_dark
+
+
+# -- search --------------------------------------------------------------------------------
+
+def test_search_filters_by_title_and_text_and_says_when_nothing_matches():
+    view, _model, relays, _said, _edited = make(
+        note("Coffee first, then the long article"), article("lotus", "Lotus v0.4.5"))
+    view.set_account(Profile())
+    relays.run()
+    view.set_search_text("lotus")
+    assert [row for row in shown(view) if row] == ["Lotus v0.4.5"]
+    view.set_search_text("COFFEE")
+    assert shown(view)[0].startswith("Coffee first")
+    view.set_search_text("nothing like it")
+    assert shown(view) == ("No Results for “nothing like it”",
+                           "Check the spelling or try a new search.", False, False)
+    view.set_search_text("")
+    assert len([row for row in shown(view) if row]) == 2
+
+
+def test_the_panel_search_field_follows_the_view_shown():
+    """One search field over both views (level with the document tabs):
+    named for the view shown, filtering it, and keeping what was typed in
+    each view."""
+    from nostr.ui.drafts_panel import DraftsPanel
+    view, _model, relays, _said, _edited = make(article("lotus", "Lotus v0.4.5"),
+                                                note("gm"))
+    view.set_account(Profile())
+    relays.run()
+    panel = DraftsPanel(is_dark=False)
+    pv.add_to_panel(panel, view)
+    field = panel._search_edit
+    assert field.placeholderText() == "Search Drafts"
+    field.setText("plain")
+    panel.show_view(pv.PANEL_VIEW)
+    assert field.placeholderText() == field.accessibleName() == "Search Published"
+    assert field.text() == ""
+    field.setText("lotus")
+    assert [row for row in shown(view) if row] == ["Lotus v0.4.5"]
+    panel.show_view(panel.DRAFTS_VIEW)
+    assert field.text() == "plain"
+    panel.show_view(pv.PANEL_VIEW)
+    assert field.text() == "lotus"
+
+
+# -- the preview ---------------------------------------------------------------------------
+
+def test_a_click_on_a_published_post_opens_its_full_preview(monkeypatch):
+    """As in the Drafts view: a click shows the post styled as Nostr shows
+    it, with its next step; an article's is Edit Article, a note's Open in
+    Browser, and Delete from Nostr… is last in the ⋯ menu."""
+    from PySide6.QtCore import QEvent, QPointF
+    from PySide6.QtGui import QMouseEvent
+    view, _model, relays, _said, edited = make(article("essay", "Essay"), note("Hello there"))
+    view.set_account(Profile())
+    relays.run()
+    view.show()
+    view.activateWindow()
+    QApplication.processEvents()
+    controller = view._preview
+
+    def click(row):
+        rect = view._list.visualRect(view._rows.index(row))
+        at = QPointF(rect.left() + 20, rect.bottom() - 10)
+        QApplication.sendEvent(view._list.viewport(), QMouseEvent(
+            QEvent.MouseButtonPress, at, at, Qt.LeftButton, Qt.LeftButton, Qt.NoModifier))
+
+    click(1)                                          # the article
+    assert controller.is_full() is True
+    bar = controller.popover().action_bar()
+    assert bar.primary.text() == "Edit Article"
+    more = [a.text() for a in bar.more.menu().actions() if not a.isSeparator()]
+    assert more[-1] == "Delete from Nostr…"
+    assert controller.popover().reader().toPlainText().strip() == "Body"
+    bar.primary.click()
+    assert [item.title for item in edited] == ["Essay"]
+    click(0)                                          # the note
+    assert controller.popover().action_bar().primary.text() == "Open in njump"
+    view.hide()
+    assert controller.is_open() is False
+
+
+def test_a_curation_is_listed_and_opens_in_standup_discover_first(opened):
+    """Curations (Standup sites and magazines) are among what was
+    published: a row with what they collect, opening in Standup Discover's
+    curated reader first, never offered for editing."""
+    shelf = signed(30004, [["d", "my-blog"], ["title", "Weekend reading"],
+                           ["a", "30023:" + "b" * 64 + ":one"],
+                           ["a", "30023:" + "b" * 64 + ":two"]], "", created_at=NOW - 500)
+    view, _model, relays, _said, edited = make(shelf)
+    view.set_account(Profile())
+    relays.run()
+    row = view._rows.data(view._rows.index(0), ROW_ROLE)
+    assert (row.title, row.kind, row.detail) == ("Weekend reading", "curation",
+                                                 "Collects 2 articles")
+    menu = view.menu_for(view._rows.index(0))
+    words = [a.text() for a in menu.actions() if not a.isSeparator()]
+    assert words[0] == "Open in Standup Discover" and "Edit Article" not in words
+    menu.defaultAction().trigger()
+    assert opened[0].startswith("https://media.einundzwanzig.space/s/by/")
+    assert opened[0].endswith("/bXktYmxvZw") and edited == []

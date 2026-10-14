@@ -1,11 +1,13 @@
 # SPDX-FileCopyrightText: 2026 rinbal
 # SPDX-License-Identifier: AGPL-3.0-or-later
-"""What an account published: its articles and notes, read back from its relays.
+"""What an account published: its articles, curations and notes, read back
+from its relays.
 
 A writer expects to see what they published and to take something back.
 :class:`PublishedList` reads one account's articles (NIP-23, kind 30023,
-the newest version of each) and notes (kind 1, newest first, a page at a
-time) from the relays the account writes to (RelayDirectory.outbox_of),
+the newest version of each), its curations (NIP-51 curation sets, kind
+30004: the sites and magazines Standup builds, the newest version of
+each) and notes (kind 1, newest first, a page at a time) from the relays the account writes to (RelayDirectory.outbox_of),
 leaves out what a deletion request by the same author covers (NIP-09,
 nostr/deletion.py), and deletes an item through DeletionJob, hiding it as
 soon as one relay took the request.
@@ -48,9 +50,6 @@ from typing import Callable, Dict, Iterable, List, Optional, Sequence, Set, Tupl
 
 from PySide6.QtCore import QObject, Signal
 
-import link_url
-import url_safety
-
 from .bech32 import encode_naddr, encode_nevent
 from .deletion import (
     DELETION_KIND, DeletionJob, DeletionRequest, address_of, read_deletion,
@@ -63,8 +62,11 @@ from .queries import Fetched, fetch_events, full_pages, page_horizon
 
 NOTE_KIND = 1
 ARTICLE_KIND = 30023
+CURATION_KIND = 30004
+# The kinds read as one newest version per identifier.
+ADDRESSABLE_KINDS = (ARTICLE_KIND, CURATION_KIND)
 PAGE_SIZE = 50                # notes per page
-ARTICLE_LIMIT = 500           # articles asked for at once
+ARTICLE_LIMIT = 500           # articles and curations asked for at once
 TAG_BATCH = 100               # ids or addresses in one filter
 FILTERS_PER_REQUEST = 4       # filters in one request
 QUERY_TIMEOUT_MS = 8_000
@@ -107,6 +109,16 @@ class PublishedItem:
         return self.kind == ARTICLE_KIND
 
     @property
+    def is_curation(self) -> bool:
+        return self.kind == CURATION_KIND
+
+    @property
+    def curated(self) -> int:
+        """How many articles a curation collects (its ``a`` tags)."""
+        return sum(1 for tag in self.event.get("tags", []) or []
+                   if isinstance(tag, list) and len(tag) >= 2 and tag[0] == "a")
+
+    @property
     def pubkey(self) -> str:
         return str(self.event["pubkey"]).lower()
 
@@ -116,8 +128,8 @@ class PublishedItem:
 
     @property
     def identifier(self) -> str:
-        """An article's identifier (its ``d``), "" for a note."""
-        return _tag(self.event, "d") if self.is_article else ""
+        """An article's or a curation's identifier (its ``d``), "" for a note."""
+        return _tag(self.event, "d") if self.kind in ADDRESSABLE_KINDS else ""
 
     @property
     def first_published(self) -> int:
@@ -125,7 +137,7 @@ class PublishedItem:
         kept across edits, or the time it was made. A version cannot have
         gone out first after it was made, so a later ``published_at`` (one
         written in milliseconds, say) gives way to the version's own time."""
-        if self.is_article:
+        if self.kind in ADDRESSABLE_KINDS:
             return min(published_at_of(self.event) or self.created_at, self.created_at)
         return self.created_at
 
@@ -135,7 +147,7 @@ class PublishedItem:
         with; a note's first words. The app's one rule for a body that
         carries no title (drafts.derive_title_from_markdown), so Markdown
         never reaches a row. "" when there are no words at all."""
-        if self.is_article:
+        if self.kind in ADDRESSABLE_KINDS:
             title = " ".join(_tag(self.event, "title").split())
             if title:
                 return title
@@ -148,24 +160,17 @@ class PublishedItem:
         return mentioned_pubkeys(self.event)
 
     def nostr_address(self) -> Optional[str]:
-        """``naddr1…`` for an article (every version), ``nevent1…`` for a
-        note, naming relays it was found on so a reader finds it. None when
-        it cannot be written: NIP-19 holds at most 255 bytes per value, and
-        an article's identifier can be longer."""
+        """``naddr1…`` for an article or a curation (every version),
+        ``nevent1…`` for a note, naming relays it was found on so a reader
+        finds it. None when it cannot be written: NIP-19 holds at most 255
+        bytes per value, and an identifier can be longer."""
         hints = [url for url in self.found_on if url.isascii()][:LINK_HINTS]
         try:
-            if self.is_article:
-                return encode_naddr(self.identifier, self.pubkey, ARTICLE_KIND, hints)
+            if self.kind in ADDRESSABLE_KINDS:
+                return encode_naddr(self.identifier, self.pubkey, self.kind, hints)
             return encode_nevent(self.id, hints, self.pubkey, self.kind)
         except ValueError:
             return None
-
-    def web_link(self) -> Optional[str]:
-        """A web address any browser shows it at, None when there is none
-        it is safe to open."""
-        entity = self.nostr_address()
-        link = link_url.web_address_for("nostr:" + entity) if entity else None
-        return link if link and url_safety.is_safe_external_url(link) else None
 
 
 def _tag(event: dict, name: str) -> str:
@@ -424,7 +429,7 @@ class PublishedList(QObject):
 
     def _ask(self, relays: Sequence[str], filters: List[dict],
              on_done: Callable[[Fetched], None],
-             kinds: Tuple[int, ...] = (NOTE_KIND, ARTICLE_KIND)) -> None:
+             kinds: Tuple[int, ...] = (NOTE_KIND, *ADDRESSABLE_KINDS)) -> None:
         fetch_events(self._pool, relays, filters, on_done, accept=self._accepts(kinds),
                      timeout_ms=QUERY_TIMEOUT_MS, parent=self)
 
@@ -439,7 +444,7 @@ class PublishedList(QObject):
         relays = list(relays)
         author = self._author()
         self._ask(relays, [{"kinds": [NOTE_KIND], "authors": [author], "limit": PAGE_SIZE},
-                           {"kinds": [ARTICLE_KIND], "authors": [author],
+                           {"kinds": list(ADDRESSABLE_KINDS), "authors": [author],
                             "limit": ARTICLE_LIMIT}],
                   lambda fetched: self._on_first_page(generation, relays, fetched))
 
@@ -566,7 +571,7 @@ class PublishedList(QObject):
         author = self._author()
         requests = deletion_requests(
             author, [e["id"] for e in found],
-            [address_of(e) for e in found if e["kind"] == ARTICLE_KIND])
+            [address_of(e) for e in found if e["kind"] in ADDRESSABLE_KINDS])
         if not requests:
             on_done(_Deletions({}, True))
             return
@@ -613,9 +618,11 @@ class PublishedList(QObject):
         items = [PublishedItem(note, where([note["id"]])) for note in self._notes.values()
                  if not covered(note) and (not self._has_more
                                            or note["created_at"] >= self._horizon)]
-        versions: Dict[str, List[dict]] = {}
+        # One newest version per address: an article and a curation that
+        # share an identifier are two things.
+        versions: Dict[Tuple[int, str], List[dict]] = {}
         for version in self._articles.values():
-            versions.setdefault(_tag(version, "d"), []).append(version)
+            versions.setdefault((version["kind"], _tag(version, "d")), []).append(version)
         for same in versions.values():
             newest = None
             for version in same:

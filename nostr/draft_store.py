@@ -284,6 +284,11 @@ class DraftStore(QObject):
 
         record.title = title
         record.snippet = snippet
+        # The wrap's ``k`` tag is optional, so a draft may only learn what
+        # it is (a note, an article) from the event inside it, here.
+        kind = int(inner.get("kind", 0) or 0)
+        if kind:
+            record.inner_kind = kind
         record.content = str(inner.get("content", ""))
         record.inner_tags = [list(t) for t in inner.get("tags", []) if isinstance(t, list)]
         record.state = DraftState.READY

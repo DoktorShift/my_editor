@@ -246,6 +246,44 @@ def more(color: QColor) -> QIcon:
 # Drawn at any size with ``paint``: a tile's kind, and the lock on the
 # thumbnail of a private file.
 
+def inspector(color: QColor) -> QIcon:
+    """A window with a pane at its right holding lines of details: the
+    inspector beside the document (Article Details)."""
+    def draw(painter: QPainter, ink: QColor) -> None:
+        painter.setPen(_pen(ink, 1.5))
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.drawRoundedRect(QRectF(2, 3.5, 14, 11), 2.4, 2.4)
+        painter.drawLine(QPointF(11, 3.8), QPointF(11, 14.2))
+        painter.setPen(_pen(ink, 1.3))
+        for y in (7.0, 10.0):
+            painter.drawLine(QPointF(12.8, y), QPointF(14.2, y))
+    return _icon(draw, color)
+
+
+def drafts(color: QColor) -> QIcon:
+    """Two pages, one behind the other, the front one written on: the
+    drafts and what was published (the Drafts panel)."""
+    def draw(painter: QPainter, ink: QColor) -> None:
+        painter.setPen(_pen(ink, 1.5))
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        # The page behind shows only above and right of the front one.
+        back = QPainterPath()
+        back.moveTo(6.5, 3.6)
+        back.lineTo(6.5, 3.4)
+        back.quadTo(6.5, 2, 7.9, 2)
+        back.lineTo(14.6, 2)
+        back.quadTo(16, 2, 16, 3.4)
+        back.lineTo(16, 11.6)
+        back.quadTo(16, 13, 14.6, 13)
+        back.lineTo(14.3, 13)
+        painter.drawPath(back)
+        painter.drawRoundedRect(QRectF(2.5, 5, 9.5, 11.2), 1.6, 1.6)
+        painter.setPen(_pen(ink, 1.3))
+        for y, end in ((8.6, 9.5), (11.2, 9.5), (13.6, 7.6)):
+            painter.drawLine(QPointF(5, y), QPointF(end, y))
+    return _icon(draw, color)
+
+
 def _draw_lock(painter: QPainter, ink: QColor) -> None:
     """A padlock: only the person can open the file."""
     painter.setPen(_pen(ink, 1.6))
@@ -315,6 +353,72 @@ def _draw_alert(painter: QPainter, ink: QColor) -> None:
     painter.drawEllipse(QRectF(8, 11.8, 2, 2))
 
 
+def _draw_article(painter: QPainter, ink: QColor) -> None:
+    """A page with lines of text: an article (long-form)."""
+    painter.setPen(_pen(ink, 1.6))
+    painter.setBrush(Qt.BrushStyle.NoBrush)
+    painter.drawRoundedRect(QRectF(3.5, 1.8, 11, 14.4), 2, 2)
+    for y, end in ((6.0, 11.5), (9.0, 11.5), (12.0, 9.2)):
+        painter.drawLine(QPointF(6.5, y), QPointF(end, y))
+
+
+def _draw_note(painter: QPainter, ink: QColor) -> None:
+    """A speech bubble: a note, a short post."""
+    painter.setPen(_pen(ink, 1.6))
+    painter.setBrush(Qt.BrushStyle.NoBrush)
+    bubble = QPainterPath()
+    bubble.addRoundedRect(QRectF(2, 2.5, 14, 10), 3, 3)
+    tail = QPainterPath()
+    tail.moveTo(5, 12.3)
+    tail.lineTo(4.4, 16)
+    tail.lineTo(9, 12.3)
+    painter.drawPath(bubble.united(tail))
+
+
+def _draw_curation(painter: QPainter, ink: QColor) -> None:
+    """Cards stacked: a curation, a collection of articles."""
+    painter.setPen(_pen(ink, 1.6))
+    painter.setBrush(Qt.BrushStyle.NoBrush)
+    painter.drawRoundedRect(QRectF(2.5, 6.5, 13, 9.5), 2, 2)
+    painter.drawLine(QPointF(4.5, 4.2), QPointF(13.5, 4.2))
+    painter.drawLine(QPointF(6.5, 2), QPointF(11.5, 2))
+
+
+def _draw_clock(painter: QPainter, ink: QColor) -> None:
+    """A clock face: something that ends at a time (an expiring draft)."""
+    painter.setPen(_pen(ink, 1.6))
+    painter.setBrush(Qt.BrushStyle.NoBrush)
+    painter.drawEllipse(QRectF(2, 2, 14, 14))
+    painter.drawLine(QPointF(9, 5), QPointF(9, 9))
+    painter.drawLine(QPointF(9, 9), QPointF(11.8, 10.8))
+
+
+def _draw_search(painter: QPainter, ink: QColor) -> None:
+    """A magnifying glass: a search."""
+    painter.setPen(_pen(ink, 1.6))
+    painter.setBrush(Qt.BrushStyle.NoBrush)
+    painter.drawEllipse(QRectF(2.5, 2.5, 10, 10))
+    painter.drawLine(QPointF(11, 11), QPointF(15.5, 15.5))
+
+
+def _draw_pages(painter: QPainter, ink: QColor) -> None:
+    """Two pages, one behind the other: drafts."""
+    painter.setPen(_pen(ink, 1.5))
+    painter.setBrush(Qt.BrushStyle.NoBrush)
+    painter.drawRoundedRect(QRectF(2.5, 5, 9.5, 11.2), 1.6, 1.6)
+    back = QPainterPath()
+    back.moveTo(6.5, 3.6)
+    back.quadTo(6.5, 2, 7.9, 2)
+    back.lineTo(14.6, 2)
+    back.quadTo(16, 2, 16, 3.4)
+    back.lineTo(16, 11.6)
+    back.quadTo(16, 13, 14.6, 13)
+    back.lineTo(14.3, 13)
+    painter.drawPath(back)
+    for y, end in ((8.6, 9.5), (11.2, 9.5), (13.6, 7.6)):
+        painter.drawLine(QPointF(5, y), QPointF(end, y))
+
+
 def _draw_text(painter: QPainter, ink: QColor) -> None:
     _draw_document(painter, ink)
     for y in (8, 10.5, 13):
@@ -353,15 +457,17 @@ def _draw_book(painter: QPainter, ink: QColor) -> None:
     painter.drawLine(QPointF(8.5, 6), QPointF(12.5, 6))
 
 
-_GLYPHS = {"lock": _draw_lock, "video": _draw_video, "audio": _draw_audio,
-           "document": _draw_document, "alert": _draw_alert, "text": _draw_text,
+_GLYPHS = {"search": _draw_search, "pages": _draw_pages, "lock": _draw_lock,
+           "video": _draw_video, "audio": _draw_audio, "document": _draw_document,
+           "alert": _draw_alert, "article": _draw_article, "note": _draw_note,
+           "curation": _draw_curation, "clock": _draw_clock, "text": _draw_text,
            "spreadsheet": _draw_spreadsheet, "presentation": _draw_presentation,
            "archive": _draw_archive, "book": _draw_book}
 
 
 def paint(name: str, painter: QPainter, rect: QRectF, color: QColor) -> None:
-    """Draw a glyph from ``_GLYPHS`` to fill
-    the square ``rect``, sharp at any size."""
+    """Draw a glyph from ``_GLYPHS`` to fill the square ``rect``, sharp at
+    any size."""
     painter.save()
     painter.setRenderHint(QPainter.RenderHint.Antialiasing)
     painter.translate(rect.topLeft())

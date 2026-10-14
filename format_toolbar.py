@@ -346,19 +346,25 @@ class FormatToolbar(QToolBar):
             self._popup_entries.append(menu.addMenu(self._insert_menu))
 
     def add_trailing(self, widget: QWidget) -> QWidget:
-        """A holder for ``widget`` (the Write, Preview and Split switch), to
-        go right of the toolbar, outside it, looking like its far end. A
-        narrow window then moves the toolbar's own buttons into its
-        chevron, never the switch (a narrow Split needs it, Q-N). Showing
-        or hiding the holder shows or hides the switch."""
-        holder = QWidget()
-        holder.setObjectName("FormatBarTrailing")
-        holder.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
-        row = QHBoxLayout(holder)
-        row.setContentsMargins(6, 3, 8, 3)
-        row.addWidget(widget)
-        self._trailing = holder
-        self._style_trailing()
+        """Put ``widget`` right of the toolbar, outside it, in the holder
+        that looks like its far end (the Write, Preview and Split switch,
+        then the pane toggles), and return that holder. A narrow window
+        then moves the toolbar's own buttons into its chevron, never what
+        is here (a narrow Split needs its switch, Q-N; the trailing edge
+        holds "buttons that open nearby inspectors", Apple's guidelines
+        for toolbars)."""
+        holder = getattr(self, "_trailing", None)
+        if holder is None:
+            holder = QWidget()
+            holder.setObjectName("FormatBarTrailing")
+            holder.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+            row = QHBoxLayout(holder)
+            row.setContentsMargins(6, 3, 8, 3)
+            # Groups apart by room, not by lines, as a Mac toolbar's are.
+            row.setSpacing(12)
+            self._trailing = holder
+            self._style_trailing()
+        holder.layout().addWidget(widget)
         return holder
 
     def _style_trailing(self) -> None:
@@ -368,7 +374,8 @@ class FormatToolbar(QToolBar):
         background, border = ((DARK_MENU_BG, DARK_BORDER) if self._dark
                               else (LIGHT_MENU_BG, LIGHT_BORDER))
         holder.setStyleSheet(f"#FormatBarTrailing {{ background: {background};"
-                             f" border: none; border-bottom: 1px solid {border}; }}")
+                             f" border: none; border-bottom: 1px solid {border}; }}"
+                             + button_rules("#FormatBarTrailing", self._dark))
 
     # -- what the window tells it ------------------------------------------------
 

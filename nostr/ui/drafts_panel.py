@@ -5,22 +5,26 @@
 Layout, top to bottom:
 
   ┌──────────────────────────────────────────┐
-  │  Drafts                          ⋯    ×  │  chrome band 1
+  │  ( Drafts | Published )          ⋯    ×  │  band 1: the toolbar band's
+  ├──────────────────────────────────────────┤  section over this pane
+  │  [ Search Drafts                      ]  │  band 2: level with the
+  ├──────────────────────────────────────────┤  document tabs
+  │  Refreshing drafts…                      │  the banner, only with
+  ├──────────────────────────────────────────┤  something to say
   │  [▢] Imports                    14 new › │  the Imports row
-  │  [ Search drafts…                     ]  │  chrome band 2
-  │  Drafts for Alice                        │  status line
-  ├──────────────────────────────────────────┤
   │  Article title                      2h   │  list rows
   │  blog.example.com · first words of body  │
-  │  Another draft                      1d   │
-  │  first words of body                     │
   │                                          │
   │   (empty state placeholder)              │
   └──────────────────────────────────────────┘
 
-Everything starts at the same 12 px gutter: the title or the view
-switch, the Imports row, the search field, the status line, the empty
-state and both row lines.
+The panel is a pane of the window, not a thing beside it: the window's
+divider is its left edge, and the window keeps its two bands as tall as
+the format toolbar and the tab row beside it (``align_bands``,
+window_grid.py), so the lines under them run straight across.
+
+Everything starts at the same 12 px gutter: the view switch, the search
+field, the banner, the Imports row, the empty state and both row lines.
 
 Band 1 names the panel's view. With one view (Drafts) it is a title;
 when another view is added (``add_view``), a segmented switch takes its
@@ -45,7 +49,8 @@ The Imports row (the owner's decision D-2: one place for imports, the
 Imports window) says how many new posts wait and opens the window; while
 an import has posts to do, it says how far it is, with Pause or Resume.
 
-Band 2 is the search field.
+Band 2 is the search field of the view shown: each view filters itself
+(``add_view(search=...)``) and keeps what was typed into it.
 
 Each row is two stacked lines with exactly one inline item, the age.
 ``typography.md`` warns that in a horizontally constrained context
@@ -59,25 +64,30 @@ Decryption state is carried by three channels that survive greyscale and
 colour blindness: the title's slant, the words on line 2, and the row's
 accessible text. It used to be carried by the hue of one lock glyph.
 
-The account the drafts belong to is named in the status line, and the
-one control that switches accounts is the editor header's ProfileChip
-(``widgets.py``). The panel deliberately carries no second chip: two
-identical avatar-plus-chevron controls a few hundred pixels apart read
-as one duplicated control, and only one of them owned the menu.
+The account the drafts belong to is shown by the account's picture at
+the end of the tab row beside the panel (the ProfileChip, ``widgets.py``),
+the one control that switches accounts. The panel carries no second chip
+and no line naming the account: at rest it says nothing, and its banner
+speaks only while there is something to know.
 
 There is no kind filter. The wrap's ``k`` tag is optional, so an
 undecrypted, loading or failed draft has ``inner_kind == 0``, and
 filtering on it hid drafts instead of sorting them. Search is the only
 filter, so clearing the field always shows every draft in the store.
 
+The rows are painted by post_list.py, which the Published view uses
+too, so both lists read alike: grouped by date as Notes groups notes,
+two lines each (the title; what it is, when, and the words after the
+title), selected as a Mac list selects. A draft's row is an item of
+Qt's own list with its words in roles, so selection, the keyboard and
+the scrollbar are the platform's.
+
 Cross-platform discipline:
-  - All glyphs are Unicode codepoints (⟲, ×) so the panel renders
-    identically on macOS / Windows / Linux without bundling fonts.
-  - Uses Qt's built-in widgets exclusively (QListWidget + setItemWidget
-    pattern) so the panel honours each platform's native scrollbar,
-    selection highlight, and high-DPI behaviour for free.
+  - Glyphs are drawn (format_icons.py) or Unicode (⋯), so the panel
+    renders identically on macOS / Windows / Linux without bundling fonts.
   - No platform-specific code paths, `is_dark` is the only branching
-    axis, matching the rest of the editor.
+    axis, matching the rest of the editor; the selection takes the
+    system's selection color (theme.list_selection_color).
 
 The panel is **dormant** when no profile is bound: ``set_active_profile(None)``
 puts it in a quiet "not connected" state. It is the host (MainWindow)'s
@@ -88,7 +98,7 @@ it does, the panel won't crash, it'll just show the disconnected state.
 from __future__ import annotations
 
 import time
-from typing import Callable, List, NamedTuple, Optional, Tuple
+from typing import Callable, List, Optional, Tuple
 
 from PySide6.QtCore import QEvent, QPointF, QRect, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import (
@@ -104,7 +114,6 @@ from PySide6.QtGui import (
 from PySide6.QtWidgets import (
     QApplication,
     QBoxLayout,
-    QButtonGroup,
     QFrame,
     QHBoxLayout,
     QLabel,
@@ -126,6 +135,7 @@ from PySide6.QtWidgets import (
 )
 
 from i18n import _, ngettext
+from segmented_control import Segment, SegmentedControl
 
 from ..draft_store import DraftRecord, DraftState, DraftStore
 from ..imports.constants import IDENTIFIER_PREFIX
@@ -137,24 +147,28 @@ from ..profiles import Profile
 from .drafts_common import (
     LIST_GUTTER as GUTTER,
     MIN_CONTROL_PX as _MIN_CONTROL_PX,
-    ROW_LINE_GAP as _ROW_LINE_GAP,
-    ROW_PAD_V as _ROW_PAD_V,
-    SELECTION_BAR_W as _SELECTION_BAR_W,
     THEME_TOKENS as _THEME_TOKENS,
     format_absolute_date,
     format_absolute_time as _format_absolute_time,
     secondary_font as _secondary_font,
     source_host as _source_host,
-    title_font as _title_font,
 )
 from .drafts_preview import (
+    PreviewAction,
     PreviewController,
     preview_announcement,
     preview_is_eligible,
 )
 from .eliding_label import ElidingLabel
+from .post_list import (
+    EMPTY_SYMBOL_SIZE, FAILED, LOADING, READY, ROW_ROLE, PostRow, PostRowDelegate, list_date,
+    section_height, section_starts, symbol_pixmap, words_after_title,
+)
 from .imports_glyphs import glyph
 
+
+# Qt's largest widget size, which lets a band take its own height again.
+QWIDGETSIZE_MAX = (1 << 24) - 1
 
 # Width hints. The host can resize through a QSplitter; these are the
 # sensible defaults so the panel doesn't crowd the editor.
@@ -162,18 +176,15 @@ DEFAULT_PANEL_WIDTH: int = 320
 MIN_PANEL_WIDTH: int = 260
 MAX_PANEL_WIDTH: int = 520
 
-# The panel's single gutter (GUTTER) and the rows' box model (_ROW_PAD_V,
-# _ROW_LINE_GAP, _SELECTION_BAR_W) come from drafts_common, which every
-# list in the panel shares, so its views read alike. The segmented
-# control, the search field, the status line, the empty state and both
+# The panel's single gutter (GUTTER) comes from drafts_common, and the
+# rows are drawn by post_list.py, which both of the panel's lists share,
+# so its views read alike. The segmented
+# control, the search field, the banner, the empty state and both
 # row lines all start at the gutter. ``layout.md``: "Align components
 # with one another to make them easier to scan and to communicate
 # organization and hierarchy."
 
-# Between the title and the age on a row's first line.
-_ROW_INLINE_GAP: int = 8
-
-# How long a one-off sync narration holds the status line once the store
+# How long a one-off sync narration holds the banner once the store
 # is no longer loading. Matches the main window's own transient status
 # messages, and lets the line fall back to naming the account.
 _SYNC_MESSAGE_TTL_MS: int = 6_000
@@ -190,16 +201,36 @@ def _panel_css(is_dark: bool) -> str:
     """
     t = _THEME_TOKENS[bool(is_dark)]
     return f"""
-QFrame#drafts_panel {{
-    background: {t["panel_bg"]};
-    border-left: 1px solid {t["border"]};
-}}
-QFrame#drafts_panel_top_band,
-QFrame#drafts_panel_imports,
-QFrame#drafts_panel_search_band {{
+/* No edge of its own: the window's divider is the panel's left edge. */
+QFrame#drafts_panel {{ background: {t["panel_bg"]}; }}
+/* Band 1 is the toolbar band's section over this pane: its background and
+   its line. Band 2 is the tab row's: the list's ground and the line under
+   the document tabs. */
+QFrame#drafts_panel_top_band {{
     background: {t["chrome_bg"]};
     border: none;
+    border-bottom: 1px solid {t["border"]};
 }}
+QFrame#drafts_panel_search_band {{
+    background: {t["panel_bg"]};
+    border: none;
+    border-bottom: 1px solid {t["border"]};
+}}
+QFrame#drafts_panel_imports {{ background: {t["panel_bg"]}; border: none; }}
+QFrame#drafts_panel_banner {{
+    background: {t["panel_bg"]};
+    border: none;
+    border-bottom: 1px solid {t["border"]};
+}}
+QPushButton#drafts_panel_banner_action {{
+    background: transparent;
+    color: {t["row_fg"]};
+    border: 1px solid {t["border"]};
+    border-radius: 4px;
+    padding: 2px 10px;
+}}
+QPushButton#drafts_panel_banner_action:hover {{ background: {t["hover_bg"]}; }}
+QPushButton#drafts_panel_banner_action:focus {{ border-color: {t["accent"]}; }}
 QLabel#drafts_panel_title {{ color: {t["chrome_fg"]}; font-weight: 600; }}
 QLabel#drafts_panel_imports_activity {{ color: {t["muted"]}; }}
 QPushButton#drafts_panel_imports_open {{
@@ -228,13 +259,6 @@ QToolButton#drafts_panel_view_popup {{
    the style's arrow sat in the corner, on the view's name. */
 QToolButton#drafts_panel_view_popup::menu-indicator {{ image: none; width: 0px; }}
 QToolButton#drafts_panel_view_popup:hover {{ background: {t["hover_bg"]}; }}
-/* One hairline, where the chrome meets the list. The two bands read as
-   a single surface so nothing divides them. layout.md: "Group related
-   items to help people find the information they want... use negative
-   space, background shapes, colors, materials, or separator lines to
-   show when elements are related". */
-QFrame#drafts_panel_search_band {{ border-bottom: 1px solid {t["border"]}; }}
-
 QLabel#drafts_panel_status {{ color: {t["muted"]}; }}
 QLabel#drafts_panel_status[error="true"] {{ color: {t["error_fg"]}; }}
 
@@ -252,37 +276,13 @@ QToolButton#drafts_panel_icon_btn:pressed {{ background: {t["control_pressed_bg"
 QToolButton#drafts_panel_icon_btn:disabled {{ color: {t["disabled"]}; }}
 QToolButton#drafts_panel_icon_btn::menu-indicator {{ image: none; width: 0px; }}
 
-QPushButton#drafts_panel_segment {{
-    background: transparent;
-    color: {t["muted"]};
-    border: 1px solid {t["border"]};
-    padding: 2px {_SEGMENT_INSET_PX}px;
-}}
-QPushButton#drafts_panel_segment[seg="first"] {{
-    border-top-left-radius: 4px;
-    border-bottom-left-radius: 4px;
-    border-right: none;
-}}
-QPushButton#drafts_panel_segment[seg="last"] {{
-    border-top-right-radius: 4px;
-    border-bottom-right-radius: 4px;
-}}
-QPushButton#drafts_panel_segment:hover {{ color: {t["chrome_fg"]}; }}
-QPushButton#drafts_panel_segment:checked {{
-    background: {t["panel_bg"]};
-    color: {t["row_fg"]};
-}}
-
 /* Focus indicators. Measured before this change: rendering each control
    focused and unfocused differed by zero pixels, because setting a
    background and a border in QSS makes Qt paint the whole control from
    the stylesheet box model and skip the native ring. accessibility.md:
    "Let people use the keyboard alone to navigate and interact with your
    app... evaluate your app to ensure it works well with Full Keyboard
-   Access." Focus is carried by the border because the segments already
-   spend their background on ``checked``, so the two states have to be
-   distinguishable from one another as well as from rest. */
-QPushButton#drafts_panel_segment:focus,
+   Access." The view switch draws its own ring (segmented_control.py). */
 QToolButton#drafts_panel_icon_btn:focus,
 QToolButton#drafts_panel_view_popup:focus,
 QPushButton#drafts_panel_imports_open:focus,
@@ -303,13 +303,7 @@ QListWidget#drafts_panel_list {{
     background: {t["panel_bg"]};
     border: none;
 }}
-QListWidget#drafts_panel_list::item {{ border: none; }}
-QListWidget#drafts_panel_list::item:selected {{ background: {t["selected_bg"]}; }}
-/* No ::item:hover rule: the row widget covers the item rect exactly and
-   is not mouse transparent, so the viewport never sees the pointer and
-   such a rule could not fire. The row paints its own hover fill.
-   No ``outline: 0`` either, so the keyboard's current row keeps
-   whatever indicator the platform draws. */
+QListWidget#drafts_panel_list::item {{ border: none; background: transparent; }}
 
 QLabel#drafts_panel_empty_title {{ color: {t["chrome_fg"]}; font-weight: 600; }}
 QLabel#drafts_panel_empty_body {{ color: {t["muted"]}; }}
@@ -322,22 +316,6 @@ QPushButton#drafts_panel_empty_action {{
 }}
 QPushButton#drafts_panel_empty_action:hover {{ background: {t["hover_bg"]}; }}
 
-QLabel#drafts_row_title {{ color: {t["row_fg"]}; font-weight: 600; }}
-QLabel#drafts_row_age,
-QLabel#drafts_row_meta {{ color: {t["muted"]}; }}
-/* Progress and failure must not share a channel. feedback.md: "it often
-   works well to display status information in a passive way so that
-   people can view it when they need it. In contrast, a warning about
-   possible data loss needs to interrupt people." Both recede in colour,
-   only failure leans. */
-QLabel#drafts_row_title[state="loading"],
-QLabel#drafts_row_title[state="failed"] {{ color: {t["muted"]}; }}
-QLabel#drafts_row_title[sel="true"] {{ color: {t["selected_fg"]}; }}
-QLabel#drafts_row_age[sel="true"],
-QLabel#drafts_row_meta[sel="true"] {{ color: {t["selected_muted"]}; }}
-/* Last, and colour-free, so a failed row keeps its slant whether or not
-   it is also the selected one. */
-QLabel#drafts_row_title[state="failed"] {{ font-style: italic; }}
 """
 
 
@@ -365,55 +343,6 @@ QMenu::separator {{ height: 1px; background: {t["border"]}; margin: 4px 0px; }}
 # Type scale and derived geometry                                             #
 # --------------------------------------------------------------------------- #
 
-# The age column is sized from the widest thing it can ever hold, so it
-# never clips and never changes width from row to row. "just now" is
-# rendered "now" for the same reason: it was the one string wide enough
-# to give a freshly saved draft a different column width from every
-# other row. These are the widest age of each unit, in seconds;
-# ``_AGE_SAMPLES``, below the formatter, writes them in the language shown.
-_AGE_SAMPLE_SECONDS: Tuple[int, ...] = (
-    0, 59 * 60, 23 * 3600, 29 * 86_400, 11 * 30 * 86_400, 99 * 365 * 86_400,
-)
-
-
-class _RowMetrics(NamedTuple):
-    title_font: QFont
-    secondary_font: QFont
-    height: int
-    age_width: int
-
-
-def _row_metrics() -> _RowMetrics:
-    """Row fonts and geometry, derived rather than pinned.
-
-    Recomputed on demand rather than cached at import: the row widget
-    and its list item's size hint have to agree, and they only agree if
-    both read this one function against the current application font. At
-    the macOS 13 pt default this returns a 54 px row, which is exactly
-    the height that used to be hardcoded, so density does not change on
-    a normal machine, it merely scales now.
-    """
-    title_font = _title_font()
-    secondary_font = _secondary_font()
-    fm_title = QFontMetrics(title_font)
-    fm_secondary = QFontMetrics(secondary_font)
-    height = (
-        _ROW_PAD_V
-        + fm_title.height()
-        + _ROW_LINE_GAP
-        + fm_secondary.height()
-        + _ROW_PAD_V
-    )
-    age_width = max(fm_secondary.horizontalAdvance(s) for s in _AGE_SAMPLES)
-    return _RowMetrics(title_font, secondary_font, height, age_width)
-
-
-# The inset around a segment's label. Segments are only shown when they
-# fit with it whole; where they do not, the switch becomes a pop-up button
-# instead of squeezing them.
-_SEGMENT_INSET_PX = 14
-
-
 def _control_height() -> int:
     """Minimum height for the panel's chrome controls.
 
@@ -439,52 +368,6 @@ def _save_shortcut_text() -> str:
 # Record to text                                                              #
 # --------------------------------------------------------------------------- #
 
-def _format_relative_time(ts: int, *, now: Optional[int] = None) -> str:
-    """Return a compact human-readable age, e.g. ``'2h'``, ``'3d'``.
-
-    Every result fits the age column, which is sized from
-    ``_AGE_SAMPLES``. Full timestamps belong in the row tooltip and in
-    the row's accessible text, not on the row itself.
-    """
-    if ts <= 0:
-        return ""
-    now = now if now is not None else int(time.time())
-    delta = max(0, now - int(ts))
-    # Abbreviated units, the same for one and many in English: "5m", "1h".
-    if delta < 60:
-        return _("now")
-    if delta < 3600:
-        n = delta // 60
-        return ngettext("{n}m", "{n}m", n).format(n=n)
-    if delta < 86_400:
-        n = delta // 3600
-        return ngettext("{n}h", "{n}h", n).format(n=n)
-    if delta < 86_400 * 30:
-        n = delta // 86_400
-        return ngettext("{n}d", "{n}d", n).format(n=n)
-    if delta < 86_400 * 365:
-        n = delta // (86_400 * 30)
-        return ngettext("{n}mo", "{n}mo", n).format(n=n)
-    n = delta // (86_400 * 365)
-    return ngettext("{n}y", "{n}y", n).format(n=n)
-
-
-_AGE_SAMPLES: Tuple[str, ...] = tuple(
-    _format_relative_time(1, now=1 + age) for age in _AGE_SAMPLE_SECONDS
-)
-
-
-# Row state as a stylesheet property. Set from one mapping rather than a
-# boolean OR: LOADING and FAILED used to share a single ``failed`` flag,
-# so a draft mid-decryption rendered identically to one that could not be
-# decrypted and a cold load of a whole library looked broken.
-_ROW_STATE = {
-    DraftState.READY: "ready",
-    DraftState.LOADING: "loading",
-    DraftState.FAILED: "failed",
-}
-
-
 def _display_title(record: DraftRecord) -> str:
     """Line 1 of a row. Shared so the row and its announcement agree."""
     if record.state is DraftState.LOADING:
@@ -493,8 +376,10 @@ def _display_title(record: DraftRecord) -> str:
 
 
 def _display_meta(record: DraftRecord) -> str:
-    """Line 2 of a row: one composed string, one elision.
+    """Line 2 of a row after its date: one composed string, one elision.
 
+    The words after the title, never the title again: a note's title is
+    its first line, and its preview used to start with that same line.
     Elide-right naturally preserves the host, because the host sits at
     the head of the line.
     """
@@ -514,7 +399,7 @@ def _display_meta(record: DraftRecord) -> str:
     # preview: its 90 days are said once, where drafts are created (Q-11),
     # not on every row (CP2 review N6); its tooltip and its spoken text
     # say it.
-    preview = record.snippet or ""
+    preview = words_after_title(record.title, record.snippet or "")
     if not is_imported(record):
         preview = expiry_note(record.expiration) or preview
     if host and preview:
@@ -539,9 +424,8 @@ def expiry_note(expiration: Optional[int]) -> str:
 def _accessible_row_text(record: DraftRecord, *, now: Optional[int] = None) -> str:
     """What a screen reader announces for one row.
 
-    The visible row lives in a ``setItemWidget`` widget that the
-    accessibility tree does not descend into, and the item itself had no
-    display text, so a screen reader heard a list of blank rows. This
+    The visible row is painted (post_list.py), so the item itself has no
+    display text, and a screen reader heard a list of blank rows. This
     goes on the item, in reading order, in words rather than glyphs.
     ``accessibility.md``: "Describe your app's interface and content for
     VoiceOver... VoiceOver is a screen reader that lets people
@@ -579,24 +463,34 @@ def _accessible_row_text(record: DraftRecord, *, now: Optional[int] = None) -> s
     return ". ".join(s.rstrip(". ") for s in sentences if s.strip()) + "."
 
 
-def _row_tooltip(record: DraftRecord) -> str:
-    """The whole row, unelided, plus the exact save time and, for a draft
-    that still carries an end date, when it is removed."""
-    lines = [_display_title(record)]
-    meta = _display_meta(record)
-    if meta:
-        lines.append(meta)
-    saved = _format_absolute_time(record.created_at)
-    if saved:
-        lines.append(_("Saved {time}").format(time=saved))
-    note = expiry_note(record.expiration) if record.state is DraftState.READY else ""
-    if note and note not in meta:
-        lines.append(note)
-    return "\n".join(lines)
+# What a draft's inner kind is, as the row's symbol says it.
+_KIND_NAMES = {1: "note", 30023: "article"}
+
+_ROW_STATES = {DraftState.READY: READY, DraftState.LOADING: LOADING,
+               DraftState.FAILED: FAILED}
+
+
+def _draft_row(record: DraftRecord, *, now: int) -> PostRow:
+    """One draft as its row draws it (post_list.py): the title, then what
+    it is, when it was saved and the words after the title. A draft still
+    decrypting knows none of that yet; one that could not be decrypted
+    says why, with an alert at the end of its title."""
+    when = list_date(record.created_at, now)
+    state = _ROW_STATES.get(record.state, READY)
+    if record.state is DraftState.LOADING:
+        return PostRow(_display_title(record), when=when, state=state)
+    detail = _display_meta(record)
+    if record.state is DraftState.FAILED:
+        return PostRow(_display_title(record), when=when, detail=detail, state=state,
+                       mark="alert")
+    expiring = not is_imported(record) and bool(expiry_note(record.expiration))
+    return PostRow(_display_title(record), kind=_KIND_NAMES.get(record.inner_kind, ""),
+                   when=when, detail=detail or _("No additional text"), state=state,
+                   mark="clock" if expiring else "")
 
 
 # --------------------------------------------------------------------------- #
-# Row widget                                                                  #
+# Chrome widgets                                                              #
 # --------------------------------------------------------------------------- #
 
 class _ElidingLabel(ElidingLabel):
@@ -620,71 +514,6 @@ class _ElidingLabel(ElidingLabel):
     def __init__(self, parent: Optional[QWidget] = None,
                  mode: Qt.TextElideMode = Qt.ElideRight) -> None:
         super().__init__("", parent, mode=mode, tooltip=False)
-
-
-class _SegmentButton(QPushButton):
-    """A segment of the view switch, which elides its own label at paint
-    time should it ever be squeezed.
-
-    The band shows segments only where they fit whole (``_TopBand``), so
-    this is a safety net. It matters because QPushButton does not elide:
-    handed less than its sizeHint it clips the centred string from both
-    ends, so at 200 percent type "Drafts" once painted as "raf" with no
-    ellipsis to say anything had been cut. ``accessibility.md``: "Support
-    larger text sizes... Ideally, give people the option to enlarge text
-    by at least 200 percent."
-
-    Elision happens at paint time for the same reason it does in
-    ``_ElidingLabel``: eliding through ``setText`` would shrink the
-    button's sizeHint, which re-runs the layout, which hands the button
-    a different width, which changes the elision. ``text()`` stays the
-    full label, so the layout keeps asking for the room the whole word
-    needs and only the painted glyphs are ever cut.
-
-    The recovery is the tooltip, which always carries the untruncated
-    label. ``text-fields.md``: "Consider using an expansion tooltip to
-    show the full version of clipped or truncated text."
-    """
-
-    def __init__(
-        self, label: str, hint: str, parent: Optional[QWidget] = None,
-    ) -> None:
-        super().__init__(label, parent)
-        self.setObjectName("drafts_panel_segment")
-        self.setCheckable(True)
-        self.setAccessibleName(label)
-        # The label leads, so the word survives even when the segment is
-        # too narrow to paint it. ``buttons.md`` notes that "buttons that
-        # contain text don't need to display a tooltip because the
-        # button's descriptive label communicates what it does", which
-        # holds only for as long as the label is fully visible.
-        self.setToolTip(f"{label}: {hint}")
-
-    def painted_text(self) -> str:
-        """The string ``paintEvent`` will draw at the current width."""
-        option = QStyleOptionButton()
-        self.initStyleOption(option)
-        # Ask the style rather than subtracting a padding literal: the
-        # padding lives in the panel's QSS, so QStyleSheetStyle is the
-        # only thing that knows the real inner width. ``contentsRect()``
-        # does not, it reports the full width and is what made this
-        # clipping invisible to measurement.
-        inner = self.style().subElementRect(
-            QStyle.SE_PushButtonContents, option, self,
-        )
-        return self.fontMetrics().elidedText(
-            self.text(), Qt.ElideRight, inner.width(),
-        )
-
-    def paintEvent(self, event) -> None:
-        option = QStyleOptionButton()
-        self.initStyleOption(option)
-        option.text = self.painted_text()
-        # Drawn through the widget's own style, so the stylesheet keeps
-        # ownership of the fill, the border, the corner rounding and the
-        # focus ring. Only the string differs from what QPushButton
-        # would have painted for itself.
-        QStylePainter(self).drawControl(QStyle.CE_PushButton, option)
 
 
 # Room on the right of the view pop-up for its chevrons, in pixels.
@@ -750,8 +579,9 @@ class _ViewPopup(QToolButton):
 
 
 class _ViewSwitch(QWidget):
-    """Segments for the panel's views, or a pop-up button where they do
-    not fit (see ``_TopBand``).
+    """Segments for the panel's views (the shared segmented control, as
+    the toolbar's Write · Preview · Split), or a pop-up button where they
+    do not fit (see ``_TopBand``).
 
     Signals:
       view_chosen(str)   a view was picked (its key)
@@ -765,14 +595,8 @@ class _ViewSwitch(QWidget):
         self._control_h = control_h
         self._views: List[Tuple[str, str, str]] = []
         self._current = ""
-        self.segments: List[_SegmentButton] = []
-        self._segments = QWidget()
-        self._segments_layout = QHBoxLayout(self._segments)
-        self._segments_layout.setContentsMargins(0, 0, 0, 0)
-        self._segments_layout.setSpacing(0)
-        self._group = QButtonGroup(self)
-        self._group.setExclusive(True)
-        self._group.idClicked.connect(self._on_segment)
+        self._segments = SegmentedControl()
+        self._segments.chosen.connect(self.view_chosen)
         self.popup = _ViewPopup(control_h)
         self.popup.setAccessibleName(_("View"))
         self.popup.hide()
@@ -797,6 +621,13 @@ class _ViewSwitch(QWidget):
     def sizeHint(self) -> QSize:
         shown = self.popup if self.is_popup() else self._segments
         return QSize(shown.sizeHint().width(), self._control_h)
+
+    @property
+    def segments(self) -> List[Segment]:
+        return self._segments.segments
+
+    def set_dark(self, dark: bool) -> None:
+        self._segments.set_dark(dark)
 
     def has_choice(self) -> bool:
         return len(self._views) > 1
@@ -830,22 +661,10 @@ class _ViewSwitch(QWidget):
 
     def set_views(self, views, current: str) -> None:
         self._views = list(views)
-        for button in self.segments:
-            self._group.removeButton(button)
-            self._segments_layout.removeWidget(button)
-            button.hide()
-            button.deleteLater()
-        self.segments = []
+        self._segments.set_segments(self._views)
         menu = self.popup.menu()
         menu.clear()
-        for index, (key, title, hint) in enumerate(self._views):
-            button = _SegmentButton(title, hint)
-            button.setProperty("seg", "first" if index == 0 else (
-                "last" if index == len(self._views) - 1 else "middle"))
-            button.setMinimumHeight(self._control_h)
-            self._group.addButton(button, index)
-            self._segments_layout.addWidget(button)
-            self.segments.append(button)
+        for key, title, hint in self._views:
             action = menu.addAction(title)
             action.setCheckable(True)
             action.setToolTip(hint)
@@ -859,15 +678,9 @@ class _ViewSwitch(QWidget):
 
     def set_current(self, key: str) -> None:
         self._current = key
+        self._segments.set_current(key)
         for index, (view_key, title, _hint) in enumerate(self._views):
             chosen = view_key == key
-            if index < len(self.segments):
-                self.segments[index].setChecked(chosen)
-                # Tab reaches the switch on the view shown, as it reaches a
-                # group of radio buttons on the one chosen; the arrow keys
-                # move between the views.
-                self.segments[index].setFocusPolicy(
-                    Qt.FocusPolicy.StrongFocus if chosen else Qt.FocusPolicy.ClickFocus)
             actions = self.popup.menu().actions()
             if index < len(actions):
                 actions[index].setChecked(chosen)
@@ -878,10 +691,6 @@ class _ViewSwitch(QWidget):
                 # which view is up, as a pop-up button reads.
                 self.popup.setAccessibleName(_("View: {title}").format(title=title))
         self.updateGeometry()
-
-    def _on_segment(self, index: int) -> None:
-        if 0 <= index < len(self._views):
-            self.view_chosen.emit(self._views[index][0])
 
 
 class _TopBand(QFrame):
@@ -1163,154 +972,6 @@ class _ImportsRow(QFrame):
             self.resume_requested.emit()
 
 
-class _DraftRowWidget(QWidget):
-    """One row: title and age on line 1, host and preview on line 2.
-
-    Two stacked lines with exactly one inline item, per ``typography.md``:
-    "When font size increases in a horizontally constrained context,
-    inline items (like glyphs and timestamps) and container boundaries
-    can crowd text and cause truncation or overlapping. To improve
-    readability, consider using a stacked layout where text appears
-    above secondary items."
-
-    The lock glyph and the kind pill that used to sit on line 1 are
-    gone. ``layout.md``: "Make essential information easy to find by
-    giving it sufficient space. People want to view the most important
-    information right away, so don't obscure it by crowding it with
-    nonessential details." Neither discriminated anything: the lock was
-    an identical ⚿ on every row and the pill read "Imported" on 54 of 54
-    rows in a real library.
-    """
-
-    def __init__(
-        self,
-        parent: Optional[QWidget] = None,
-        *,
-        is_dark: bool = True,
-    ) -> None:
-        super().__init__(parent)
-        self._is_dark = bool(is_dark)
-        self._selected = False
-        self._hovered = False
-
-        metrics = _row_metrics()
-        self._row_height = metrics.height
-        self.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
-
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(GUTTER, _ROW_PAD_V, GUTTER, _ROW_PAD_V)
-        layout.setSpacing(_ROW_LINE_GAP)
-
-        top = QHBoxLayout()
-        top.setContentsMargins(0, 0, 0, 0)
-        top.setSpacing(_ROW_INLINE_GAP)
-
-        self._title = _ElidingLabel()
-        self._title.setObjectName("drafts_row_title")
-        self._title.setFont(metrics.title_font)
-        self._title.setProperty("state", "ready")
-        self._title.setProperty("sel", "false")
-        top.addWidget(self._title, 1)
-
-        # The only fixed width on line 1, and it is derived, so it holds
-        # at 200% font instead of clipping "just now" inside 36 px.
-        self._age = QLabel("")
-        self._age.setObjectName("drafts_row_age")
-        self._age.setFont(metrics.secondary_font)
-        self._age.setFixedWidth(metrics.age_width)
-        self._age.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
-        self._age.setProperty("sel", "false")
-        top.addWidget(self._age, 0)
-        layout.addLayout(top)
-
-        self._meta = _ElidingLabel()
-        self._meta.setObjectName("drafts_row_meta")
-        self._meta.setFont(metrics.secondary_font)
-        self._meta.setProperty("sel", "false")
-        layout.addWidget(self._meta)
-
-        self._styled_labels = (self._title, self._age, self._meta)
-        self.setFixedHeight(metrics.height)
-
-    # -- geometry ----------------------------------------------------------
-
-    def row_height(self) -> int:
-        """The height this row asked for, so the item can hint the same.
-
-        Both the widget and its ``QListWidgetItem`` must read one value
-        or the list allocates its own height whatever the row asks for.
-        """
-        return self._row_height
-
-    # -- content -----------------------------------------------------------
-
-    def set_record(self, record: DraftRecord) -> None:
-        self._title.set_full_text(_display_title(record))
-        self._meta.set_full_text(_display_meta(record))
-        self._age.setText(_format_relative_time(record.created_at))
-        self.setToolTip(_row_tooltip(record))
-        self._title.setProperty("state", _ROW_STATE.get(record.state, "ready"))
-        # The draft this row is showing, stored on the widget so the
-        # preview controller's event filter can resolve a row without
-        # walking the list, and so it never has to hold a widget
-        # reference of its own past the event it is handling.
-        self.setProperty("draft_identifier", record.identifier)
-        self.refresh_style()
-
-    # -- state -------------------------------------------------------------
-
-    def set_selected(self, selected: bool) -> None:
-        if bool(selected) == self._selected:
-            return
-        self._selected = bool(selected)
-        for label in self._styled_labels:
-            label.setProperty("sel", "true" if self._selected else "false")
-        self.refresh_style()
-
-    def apply_theme(self, is_dark: bool) -> None:
-        self._is_dark = bool(is_dark)
-        self.update()
-
-    def enterEvent(self, event) -> None:
-        # Hover changes the fill only, never a text colour, so it costs a
-        # repaint and not a restyle.
-        self._hovered = True
-        self.update()
-        super().enterEvent(event)
-
-    def leaveEvent(self, event) -> None:
-        self._hovered = False
-        self.update()
-        super().leaveEvent(event)
-
-    def refresh_style(self) -> None:
-        for label in self._styled_labels:
-            label.style().unpolish(label)
-            label.style().polish(label)
-        self.update()
-
-    # -- painting ----------------------------------------------------------
-
-    def paintEvent(self, event) -> None:
-        tokens = _THEME_TOKENS[self._is_dark]
-        painter = QPainter(self)
-        if self._hovered and not self._selected:
-            # The list's ::item:hover rule cannot fire, this widget covers
-            # the item rect exactly and is not mouse transparent. Making
-            # it transparent would revive the rule and lose the row's
-            # tooltip, which is the only place the full title and the
-            # exact save time are readable, so the fill is painted here.
-            painter.fillRect(self.rect(), QColor(tokens["hover_bg"]))
-        if self._selected:
-            # The shape cue that goes with the selection fill. A bar
-            # survives greyscale and colour blindness in a way a
-            # background tint does not.
-            painter.fillRect(
-                QRect(0, 0, _SELECTION_BAR_W, self.height()),
-                QColor(tokens["selection_bar"]),
-            )
-
-
 # --------------------------------------------------------------------------- #
 # Drafts panel                                                                #
 # --------------------------------------------------------------------------- #
@@ -1355,20 +1016,22 @@ class DraftsPanel(QFrame):
                                    view; a view added with a ``refresh``
                                    of its own reads again itself)
       draft_relays_requested()   , Draft Relays… in the action menu
-      close_requested()          , × on the header
+      hide_requested()           , Hide Drafts in the action menu (the
+                                   toolbar's toggle and the Nostr menu
+                                   show and hide it too)
       view_changed(str)          , another view was chosen (its key)
       open_imports()             , the Imports row: open the Imports window
       pause_import()             , the Imports row's Pause
       resume_import()            , the Imports row's Resume or Try Again
 
-    Switching profiles is not one of these: the editor header's
-    ProfileChip owns that menu, and the panel names the bound account
-    in its status line rather than duplicating the control.
+    Switching profiles is not one of these: the ProfileChip at the end
+    of the tab row owns that menu and names the account.
 
     Public methods:
       bind_store(store)          , connect to a DraftStore instance
       set_active_profile(p)      , the account the drafts belong to
-      set_status(text)           , narrate a sync step on the status line
+      set_status(text)           , narrate a sync step in the banner
+      align_bands(toolbar, search), the window's grid (window_grid.py)
       set_signer_unsupported(bool), show the "signer lacks NIP-44" state
       apply_theme(is_dark)       , switch dark/light
       set_preview_image_loader(l), hand the hover preview a ThumbnailLoader
@@ -1397,7 +1060,7 @@ class DraftsPanel(QFrame):
     copy_event_id = Signal(str)
     refresh_requested = Signal()
     draft_relays_requested = Signal()
-    close_requested = Signal()
+    hide_requested = Signal()
     view_changed = Signal(str)
     open_imports = Signal()
     pause_import = Signal()
@@ -1432,6 +1095,11 @@ class DraftsPanel(QFrame):
         # called while it is shown. Drafts: refresh_requested, to the host.
         self._view_refresh: dict = {}
         self._refresh_names: dict = {self.DRAFTS_VIEW: _("Refresh Drafts")}
+        # Each view's search: what the field is called while it is shown,
+        # how the view filters, and what was typed into it, kept per view.
+        self._search_names: dict = {self.DRAFTS_VIEW: _("Search Drafts")}
+        self._view_search: dict = {}
+        self._view_search_text: dict = {}
 
         self._status_timer = QTimer(self)
         self._status_timer.setSingleShot(True)
@@ -1455,6 +1123,8 @@ class DraftsPanel(QFrame):
         outer.setSpacing(0)
 
         outer.addWidget(self._build_top_band())
+        outer.addWidget(self._build_search_band())
+        outer.addWidget(self._build_banner())
         outer.addWidget(self._build_mode_stack(), 1)
         # Return and Enter open the action menu (``eventFilter``), once the
         # list it filters for too is there.
@@ -1462,8 +1132,8 @@ class DraftsPanel(QFrame):
 
     def _build_mode_stack(self) -> QWidget:
         """The views, one page each: Drafts, and whatever ``add_view``
-        adds. The Imports row and the search band belong to the drafts
-        list, so they live on its page."""
+        adds. The Imports row belongs to the drafts list, so it lives on
+        its page, at the top of the list."""
         self._mode_stack = QStackedWidget()
         self._mode_stack.setObjectName("drafts_panel_mode_stack")
 
@@ -1476,7 +1146,6 @@ class DraftsPanel(QFrame):
         self._imports_row.pause_requested.connect(self.pause_import)
         self._imports_row.resume_requested.connect(self.resume_import)
         drafts_mode_layout.addWidget(self._imports_row)
-        drafts_mode_layout.addWidget(self._build_search_band())
         drafts_mode_layout.addWidget(self._build_body(), 1)
         self._mode_stack.addWidget(drafts_mode)
         self._view_pages[self.DRAFTS_VIEW] = drafts_mode
@@ -1484,8 +1153,10 @@ class DraftsPanel(QFrame):
 
     def _build_top_band(self) -> QWidget:
         """Band 1: the view's title (or the switch between views) on the
-        leading edge, the panel's action menu and close on the trailing
-        one.
+        leading edge, the panel's action menu on the trailing one. No
+        close button: a Mac pane is shown and hidden from the toolbar (its
+        toggle), the menu bar and a key, and Hide Drafts is in the action
+        menu.
 
         ``_TopBand`` chooses between the title, the segments and the
         pop-up button, and takes the two buttons to a second line only
@@ -1501,7 +1172,7 @@ class DraftsPanel(QFrame):
         self._view_switch.view_chosen.connect(self.show_view)
 
         # Icon-only, so the accessible name is the only string that
-        # announces them; the glyph alone reads as "⋯" and "×".
+        # announces it; the glyph alone reads as "⋯".
         # accessibility.md: "To ensure a smooth experience, label
         # interface elements appropriately."
         icons = QWidget()
@@ -1513,10 +1184,6 @@ class DraftsPanel(QFrame):
         # line, where the holder is only ever as wide as its buttons.
         icons_layout.addStretch(1)
         icons_layout.addWidget(self._build_actions_button(control_h))
-        self._close_btn = self._make_icon_button(
-            "×", _("Close drafts panel"), self.close_requested.emit, control_h,
-        )
-        icons_layout.addWidget(self._close_btn)
 
         self._top_band = _TopBand(self._title, self._view_switch, icons)
         return self._top_band
@@ -1558,8 +1225,8 @@ class DraftsPanel(QFrame):
         Space, Return or Enter.
 
         Refresh (the view shown reads again), Draft Relays… (also in the
-        Nostr menu), and, in the Drafts view, Select All and Delete for
-        the drafts selected. ``pull-down-buttons.md``: "listing a minimum
+        Nostr menu), in the Drafts view Select All and Delete for the
+        drafts selected, and Hide Drafts. ``pull-down-buttons.md``: "listing a minimum
         of three items can help the interaction feel worthwhile".
         """
         self._actions_btn = self._make_icon_button("⋯", _("Actions"), None, control_h)
@@ -1578,6 +1245,9 @@ class DraftsPanel(QFrame):
         self._select_all_action.triggered.connect(self._select_all_drafts)
         self._delete_selected_action = menu.addAction(_("Delete Draft"))
         self._delete_selected_action.triggered.connect(self._delete_selected)
+        menu.addSeparator()
+        hide = menu.addAction(_("Hide Drafts"))
+        hide.triggered.connect(self.hide_requested)
         self._actions_btn.setMenu(menu)
         return self._actions_btn
 
@@ -1611,11 +1281,15 @@ class DraftsPanel(QFrame):
         self.draft_relays_requested.emit()
 
     def _build_search_band(self) -> QWidget:
-        """Band 2: the search field, which is the panel's only filter.
+        """Band 2: the search field of the view shown, level with the
+        document tabs beside the panel (the window sets its height,
+        ``align_bands``), so the line under it meets the line under the
+        tabs.
 
-        ``searching.md``: "If search is important, give it a primary
-        position in your app or view." It is the only filter left, so it
-        gets the band to itself.
+        ``search-fields.md``: "Include search at the top of the sidebar
+        when filtering content or navigation there." Search is each view's
+        only filter: it reads the whole text of a draft, not only its
+        title, and clearing it shows everything again.
 
         There used to be an All / Notes / Articles chip row under it. It
         filtered on ``record.inner_kind``, which comes from the outer
@@ -1623,40 +1297,90 @@ class DraftsPanel(QFrame):
         decrypted yet, and every draft from a client that omits the tag,
         was kind 0 and matched neither Notes nor Articles. The chips did
         not mis-sort those drafts, they hid them.
-
-        The status line sits under the field rather than in a footer.
-        ``sidebars.md``: "Avoid putting critical information or actions
-        at the bottom of a sidebar. People often relocate a window in a
-        way that hides its bottom edge." ``feedback.md``: "When status
-        feedback is available near the items it describes, people get
-        important information without having to take action or leave
-        their current context."
         """
         frame = QFrame()
         frame.setObjectName("drafts_panel_search_band")
-        layout = QVBoxLayout(frame)
-        layout.setContentsMargins(GUTTER, 0, GUTTER, 6)
-        layout.setSpacing(3)
+        layout = QHBoxLayout(frame)
+        layout.setContentsMargins(GUTTER, 6, GUTTER, 7)
+        layout.setSpacing(0)
+        self._search_band = frame
 
         self._search_edit = QLineEdit()
         self._search_edit.setObjectName("drafts_panel_search")
-        self._search_edit.setPlaceholderText(_("Search drafts…"))
-        self._search_edit.setAccessibleName(_("Search drafts"))
+        self._search_edit.setPlaceholderText(self._search_names[self.DRAFTS_VIEW])
+        self._search_edit.setAccessibleName(self._search_names[self.DRAFTS_VIEW])
         self._search_edit.setClearButtonEnabled(True)
         self._search_edit.setMinimumHeight(_control_height())
+        self._search_edit.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self._search_edit.textChanged.connect(self._on_search_changed)
-        layout.addWidget(self._search_edit)
+        layout.addWidget(self._search_edit, 1, Qt.AlignVCenter)
+        return frame
 
-        # Eliding, for the same reason the row title is: a long display
-        # name would otherwise be clipped from the right with no sign it
-        # had been cut, and would push the band's sizeHint past the
-        # width the user dragged the panel to.
+    def _build_banner(self) -> QWidget:
+        """What the panel has to say, over the list, only while there is
+        something to know: a refresh under way, drafts that could not be
+        decrypted, a signer that does not answer (with Try Again). At rest
+        it says nothing; the account's picture at the end of the tab row
+        beside the panel names whose drafts these are.
+
+        ``feedback.md``: "When status feedback is available near the
+        items it describes, people get important information without
+        having to take action or leave their current context."
+        ``sidebars.md``: "Avoid putting critical information or actions at
+        the bottom of a sidebar", so it sits at the top of the list.
+        """
+        frame = QFrame()
+        frame.setObjectName("drafts_panel_banner")
+        layout = QVBoxLayout(frame)
+        layout.setContentsMargins(GUTTER, 6, GUTTER, 7)
+        layout.setSpacing(6)
+        # The sentence has the whole width, so it is said whole on the
+        # narrowest panel; eliding only past that, with the whole sentence
+        # as its tooltip, so it never widens the panel.
         self._status_label = _ElidingLabel()
         self._status_label.setObjectName("drafts_panel_status")
         self._status_label.setFont(_secondary_font())
         self._status_label.setProperty("error", "false")
         layout.addWidget(self._status_label)
+        # Its action under it, leading, as an inline message has it.
+        self._banner_action = QPushButton(_("Try Again"))
+        self._banner_action.setObjectName("drafts_panel_banner_action")
+        self._banner_action.clicked.connect(self.retry_signer.emit)
+        self._banner_action.hide()
+        layout.addWidget(self._banner_action, 0, Qt.AlignLeft)
+        self._banner = frame
+        frame.hide()
         return frame
+
+    # -- the window's grid ----------------------------------------------------
+
+    def align_bands(self, toolbar_height: int, search_height: int) -> None:
+        """Line the panel's two bands up with the window beside it: band 1
+        as tall as the format toolbar (``toolbar_height``), band 2 ending
+        on the line under the document tabs (``search_height``). 0 gives a
+        band its own height (no toolbar shown, or the find bar between the
+        toolbar and the tabs). A band whose own content is taller (very
+        large text) keeps its height rather than cutting its controls."""
+        self._top_band.setMinimumHeight(max(0, int(toolbar_height)))
+        if search_height > 0:
+            self._search_band.setFixedHeight(int(search_height))
+        else:
+            self._search_band.setMinimumHeight(0)
+            self._search_band.setMaximumHeight(QWIDGETSIZE_MAX)
+
+    def _show_search_of(self, key: str) -> None:
+        """The search field as the view ``key`` has it: its name, what was
+        typed into it there, or no field for a view that has no search."""
+        searchable = key == self.DRAFTS_VIEW or key in self._view_search
+        self._search_edit.setVisible(searchable)
+        if not searchable:
+            return
+        name = self._search_names.get(key, _("Search"))
+        self._search_edit.setPlaceholderText(name)
+        self._search_edit.setAccessibleName(name)
+        wanted = self._view_search_text.get(key, "")
+        if self._search_edit.text() != wanted:
+            self._search_edit.setText(wanted)
 
     def _build_body(self) -> QWidget:
         # Stacks the actual list and an empty-state widget on the same
@@ -1669,8 +1393,12 @@ class DraftsPanel(QFrame):
         self._list.setObjectName("drafts_panel_list")
         self._list.setAccessibleName(_("Drafts"))
         self._list.setSpacing(0)
-        self._list.setUniformItemSizes(True)
+        # A section's first row is taller by the section's title.
+        self._list.setUniformItemSizes(False)
         self._list.setVerticalScrollMode(QListWidget.ScrollPerPixel)
+        self._list.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self._row_delegate = PostRowDelegate(self._list, is_dark=self._is_dark)
+        self._list.setItemDelegate(self._row_delegate)
         # Extended, so a shift-drag or a cmd-click selects a range the way
         # it does in every list on this platform, and Select All means
         # what it says. The preview and the open/publish commands still
@@ -1678,7 +1406,6 @@ class DraftsPanel(QFrame):
         # there is exactly one current row whatever else is selected.
         self._list.setSelectionMode(QListWidget.ExtendedSelection)
         self._list.itemActivated.connect(self._on_item_activated)
-        self._list.currentItemChanged.connect(self._on_current_item_changed)
         self._list.setContextMenuPolicy(Qt.CustomContextMenu)
         self._list.customContextMenuRequested.connect(self._on_context_menu)
         # Delete / Backspace on the list, see ``eventFilter``.
@@ -1691,6 +1418,13 @@ class DraftsPanel(QFrame):
         empty_layout.setContentsMargins(GUTTER, 24, GUTTER, 24)
         empty_layout.setSpacing(8)
         empty_layout.addStretch(1)
+        # A quiet symbol over the title, as Apple's empty states have one;
+        # decoration, so a screen reader passes over it.
+        self._empty_symbol = QLabel()
+        self._empty_symbol.setAlignment(Qt.AlignCenter)
+        self._empty_symbol.setAccessibleName("")
+        self._empty_symbol_name = ""
+        empty_layout.addWidget(self._empty_symbol)
         self._empty_title = QLabel("")
         self._empty_title.setObjectName("drafts_panel_empty_title")
         self._empty_title.setAlignment(Qt.AlignCenter)
@@ -1724,13 +1458,18 @@ class DraftsPanel(QFrame):
 
     def add_view(self, key: str, title: str, hint: str, widget: QWidget, *,
                  refresh: Optional[Callable[[], None]] = None,
-                 refresh_name: str = "") -> None:
+                 refresh_name: str = "",
+                 search: Optional[Callable[[str], None]] = None,
+                 search_name: str = "") -> None:
         """Add a view beside Drafts (another page of the panel). From the
         second view on, band 1 offers the switch between them.
 
         ``refresh`` is how the view reads again when Refresh in the action
         menu is chosen while it is shown, and ``refresh_name`` what that
-        command is called then (title case, as menus write it)."""
+        command is called then (title case, as menus write it).
+        ``search`` filters the view by what is typed in the search field
+        while it is shown, and ``search_name`` names the field then; a
+        view without one leaves the field out."""
         if key in self._view_pages:
             raise ValueError(f"the panel already has a view {key!r}")
         self._views.append((key, title, hint))
@@ -1739,6 +1478,9 @@ class DraftsPanel(QFrame):
             self._view_refresh[key] = refresh
         if refresh_name:
             self._refresh_names[key] = refresh_name
+        if search is not None:
+            self._view_search[key] = search
+            self._search_names[key] = search_name or _("Search")
         self._mode_stack.addWidget(widget)
         self._view_switch.set_views(self._views, self.current_view())
         self._make_room_for_view_names()
@@ -1759,6 +1501,8 @@ class DraftsPanel(QFrame):
             return
         self._mode_stack.setCurrentWidget(page)
         self._view_switch.set_current(key)
+        self._show_search_of(key)
+        self._render_status()
         self._update_actions_menu()
         self._top_band.reflow()
         # Another view is other data and other rows, so the drafts
@@ -1782,6 +1526,7 @@ class DraftsPanel(QFrame):
     def apply_theme(self, is_dark: bool) -> None:
         self._is_dark = is_dark
         self.setStyleSheet(_panel_css(is_dark))
+        self._view_switch.set_dark(is_dark)
         self._actions_menu.setStyleSheet(_menu_css(is_dark))
         self._apply_placeholder_colour(is_dark)
         # Re-styled in place rather than closed: a theme switch is not a
@@ -1789,17 +1534,10 @@ class DraftsPanel(QFrame):
         self._preview.apply_theme(is_dark)
         if hasattr(self, "_imports_row"):
             self._imports_row.update()
-        if not hasattr(self, "_list") or self._list is None:
-            return
-        self._list.viewport().update()
-        # Rows paint their own hover fill and selection bar, so they each
-        # need the new tokens, and their property-driven labels need a
-        # repolish to pick up the new colours.
-        for i in range(self._list.count()):
-            widget = self._list.itemWidget(self._list.item(i))
-            if isinstance(widget, _DraftRowWidget):
-                widget.apply_theme(is_dark)
-                widget.refresh_style()
+        if hasattr(self, "_empty_symbol"):
+            self._paint_empty_symbol()
+        if getattr(self, "_row_delegate", None) is not None:
+            self._row_delegate.set_dark(is_dark)
 
     def _apply_placeholder_colour(self, is_dark: bool) -> None:
         """Hold the search placeholder above the 4.5:1 minimum.
@@ -1860,8 +1598,6 @@ class DraftsPanel(QFrame):
         # Where drafts are kept is the account's: nothing to set without one.
         self._draft_relays_action.setEnabled(profile is not None)
         self._refresh_empty_state()
-        # The status line names the account, so it has to be re-rendered
-        # whenever the binding changes.
         self._render_status()
 
     def set_status(self, text: str) -> None:
@@ -1930,6 +1666,20 @@ class DraftsPanel(QFrame):
         """
         return self._preview_anchor(self._list.currentItem())
 
+    def preview_row_at(self, pos) -> Tuple[str, QRect]:
+        """The draft under ``pos`` (in the list's viewport) and its row's
+        rect in global coordinates; nothing over a section's title, which
+        is no draft's."""
+        item = self._list.itemAt(pos)
+        identifier, anchor = self._preview_anchor(item)
+        if not identifier:
+            return "", QRect()
+        local = self._list.visualItemRect(item)
+        row = item.data(ROW_ROLE)
+        if isinstance(row, PostRow) and row.section and pos.y() < local.top() + section_height():
+            return "", QRect()
+        return identifier, anchor
+
     def _preview_anchor(self, item: Optional[QListWidgetItem]) -> Tuple[str, QRect]:
         if item is None:
             return "", QRect()
@@ -1937,23 +1687,63 @@ class DraftsPanel(QFrame):
         if not isinstance(identifier, str) or not identifier:
             return "", QRect()
         rect = self._list.visualItemRect(item)
+        row = item.data(ROW_ROLE)
+        if isinstance(row, PostRow) and row.section:
+            # The row itself, under its section's title.
+            rect = rect.adjusted(0, section_height(), 0, 0)
         return identifier, QRect(
             self._list.viewport().mapToGlobal(rect.topLeft()), rect.size(),
         )
 
     def _show_preview_for(self, item: QListWidgetItem) -> None:
-        """Open the preview for the row a context menu was raised on.
+        """Open the full preview for the row a context menu was raised on.
 
         Resolved from the item rather than from the current row: a
         right-click does not move the selection, so the two are often
         different rows and the menu has to describe the one under the
-        pointer. Opened as a keyboard preview, because it was reached by
-        an explicit command and so should take focus and be dismissible
-        with Escape rather than by moving the pointer away.
+        pointer.
         """
         identifier, anchor = self._preview_anchor(item)
         if identifier:
-            self._preview.open_for(identifier, anchor, keyboard=True)
+            self._preview.open_for(identifier, anchor, full=True)
+
+    def preview_anchor_for(self, identifier: str) -> QRect:
+        """Where a draft's row is now (global), or an empty rect when it is
+        not in sight: a full preview moves with its row as the list
+        scrolls."""
+        item = self._items.get(identifier)
+        if item is None:
+            return QRect()
+        local = self._list.visualItemRect(item)
+        if not self._list.viewport().rect().intersects(local):
+            return QRect()
+        return self._preview_anchor(item)[1]
+
+    def preview_actions(self, identifier: str) -> List[PreviewAction]:
+        """The full preview's commands for a draft: Continue Editing (the
+        next step, also Return and a double click), Publish…, and in its ⋯
+        menu Copy Event ID and Delete Draft."""
+        record = self.preview_record(identifier)
+        actions = [PreviewAction("publish", _("Publish…")),
+                   PreviewAction("open", _("Continue Editing"), primary=True)]
+        if record is not None and record.event_id:
+            actions.append(PreviewAction("copy_id", _("Copy Event ID"), more=True))
+        actions.append(PreviewAction("delete", _("Delete Draft"), more=True, destructive=True))
+        return actions
+
+    def preview_act(self, identifier: str, key: str) -> None:
+        """Do what the full preview's bar asked for one draft."""
+        record = self.preview_record(identifier)
+        if record is None:
+            return
+        if key == "open":
+            self.open_draft.emit(identifier)
+        elif key == "publish":
+            self.publish_draft.emit(identifier)
+        elif key == "copy_id":
+            self._copy_event_id(record)
+        elif key == "delete":
+            self._request_delete([identifier])
 
     def preview_is_available(self) -> bool:
         """Whether a preview may open at all right now.
@@ -1972,27 +1762,32 @@ class DraftsPanel(QFrame):
         """The clock the preview reads, in one place so tests can move it."""
         return int(time.time())
 
-    # -- status line: one writer ------------------------------------------
+    # -- the banner: one writer ---------------------------------------------
 
     def _render_status(self) -> None:
-        """The single writer for the status line."""
+        """The single writer for the banner."""
         text, is_error = self._status_line()
         self._status_label.set_full_text(text)
         self._status_label.setToolTip(text)
-        # An empty line collapses rather than leaving a blank strip of
-        # chrome above the list.
         self._status_label.setVisible(bool(text))
+        # Only the drafts view speaks here, and only with something to say:
+        # an empty banner would be a strip of chrome over the list.
+        self._banner.setVisible(bool(text) and self.current_view() == self.DRAFTS_VIEW)
+        # Its one action, where the remedy is a click: the signer again.
+        self._banner_action.setVisible(self._signer_unreachable and not self._signer_unsupported)
         self._status_label.setProperty("error", "true" if is_error else "false")
         self._status_label.style().unpolish(self._status_label)
         self._status_label.style().polish(self._status_label)
 
     def _status_line(self) -> Tuple[str, bool]:
-        """``(text, is_error)`` in priority order, first match wins.
+        """``(text, is_error)`` in priority order, first match wins; at
+        rest ``("", False)``.
 
-        The resting text names the account, which is what replaces the
-        deleted profile chip. It used to read "{ready}/{total}
+        At rest it used to name the account ("Drafts for Alice"), a line
+        of chrome that said the same thing all day; the account's picture
+        beside the panel says it. Before that it read "{ready}/{total}
         decrypted", which said "54/54" for the whole time the user was
-        actually reading the list and so said nothing there.
+        actually reading the list.
         """
         if self._signer_unsupported:
             return _("Your signer app can’t decrypt drafts"), True
@@ -2023,18 +1818,13 @@ class DraftsPanel(QFrame):
         if total and ready < total:
             text = _("Decrypting {ready} of {total}")
             return text.format(ready=ready, total=total), False
-        profile = self._active_profile
-        if profile is None:
-            return "", False
-        name = profile.display_name or profile.npub_short()
-        return _("Drafts for {name}").format(name=name), False
+        return "", False
 
     def _restart_status_ttl(self) -> None:
         self._status_timer.stop()
         # While a refresh is in flight the loading branch holds the line
         # on its own. Once it is not, a narration line is a report of a
-        # finished event, so it expires and the line goes back to naming
-        # the account.
+        # finished event, so it expires and the banner goes away.
         if self._sync_message and not self._loading:
             self._status_timer.start(_SYNC_MESSAGE_TTL_MS)
 
@@ -2067,20 +1857,22 @@ class DraftsPanel(QFrame):
                 _("Your signer app can’t decrypt drafts"),
                 _("Drafts are encrypted in a way this signer app can’t open. To use "
                   "drafts, connect a signer app that can, such as Amber or nsec.app."),
+                symbol="alert",
             )
             return
         # Only when there is nothing readable to show. A signer that went
         # quiet halfway through leaves drafts already decrypted on
         # screen, and replacing those with an explanation would take away
-        # more than it gives; there the status line and the per-row retry
+        # more than it gives; there the banner and the per-row retry
         # carry the message.
         if self._signer_unreachable and not self._has_readable_draft():
             self._show_placeholder(
                 _("Your signer app is not responding"),
                 _("Drafts stay encrypted until your signer app unlocks them. Open "
                   "your signer app, make sure it is running, then try again."),
-                action=_("Try again"),
+                action=_("Try Again"),
                 on_action=self.retry_signer.emit,
+                symbol="alert",
             )
             return
         if self._store is None or len(self._store) == 0:
@@ -2090,23 +1882,26 @@ class DraftsPanel(QFrame):
                 # make people wait for loading to complete before
                 # displaying anything, they can interpret the lack of
                 # content as a problem with your app." Rows arrive into
-                # the list and the status line narrates the wait.
+                # the list and the banner narrates the wait.
                 self._body_stack.setCurrentIndex(0)
                 return
-            body = _("Press {shortcut} in any tab to save its contents "
-                     "as an encrypted draft on Nostr. Drafts sync to your other "
-                     "devices that use the same account.")
+            body = _("Press {shortcut} in any tab to save it as an encrypted draft. "
+                     "Your drafts appear here, on every computer you use with "
+                     "this account.")
             self._show_placeholder(
-                _("No private drafts yet"),
+                _("No Drafts"),
                 body.format(shortcut=_save_shortcut_text()),
+                symbol="pages",
             )
             return
         if self._list.count() == 0:
+            # Apple's own words for a search that found nothing.
             self._show_placeholder(
-                _("No matching drafts"),
-                _('No draft matches "{query}".').format(query=self._search_text),
-                action=_("Clear search"),
+                _("No Results for “{query}”").format(query=self._search_text.strip()),
+                _("Check the spelling or try a new search."),
+                action=_("Clear Search"),
                 on_action=self._search_edit.clear,
+                symbol="search",
             )
             return
         self._body_stack.setCurrentIndex(0)
@@ -2118,7 +1913,10 @@ class DraftsPanel(QFrame):
         *,
         action: str = "",
         on_action: Optional[Callable[[], None]] = None,
+        symbol: str = "",
     ) -> None:
+        self._empty_symbol_name = symbol
+        self._paint_empty_symbol()
         self._empty_title.setText(title)
         self._empty_body.setText(body)
         self._empty_action_handler = on_action if action else None
@@ -2126,14 +1924,23 @@ class DraftsPanel(QFrame):
         if action:
             button.setText(action)
             if button.parentWidget() is None:
-                # After the title and the body, before the space below.
-                self._empty_layout.insertWidget(3, button, 0, Qt.AlignHCenter)
+                # After the symbol, the title and the body, before the
+                # space below.
+                self._empty_layout.insertWidget(4, button, 0, Qt.AlignHCenter)
             button.show()
         elif button.parentWidget() is not None:
             self._empty_layout.removeWidget(button)
             button.hide()
             button.setParent(None)
         self._body_stack.setCurrentIndex(1)
+
+    def _paint_empty_symbol(self) -> None:
+        name = self._empty_symbol_name
+        self._empty_symbol.setVisible(bool(name))
+        if name:
+            self._empty_symbol.setPixmap(symbol_pixmap(
+                name, EMPTY_SYMBOL_SIZE, QColor(_THEME_TOKENS[bool(self._is_dark)]["muted"]),
+                self.devicePixelRatioF() or 2.0))
 
     def _on_empty_action(self) -> None:
         handler = self._empty_action_handler
@@ -2160,6 +1967,7 @@ class DraftsPanel(QFrame):
         for record in self._store.all():
             if self._passes_filter(record):
                 self._insert_row(record)
+        self._refresh_sections()
         self._ensure_current_row()
         self._refresh_empty_state()
         self._render_status()
@@ -2194,33 +2002,44 @@ class DraftsPanel(QFrame):
     def _insert_row(self, record: DraftRecord, *, at_index: Optional[int] = None) -> None:
         item = QListWidgetItem()
         item.setData(Qt.UserRole, record.identifier)
-        widget = _DraftRowWidget(is_dark=self._is_dark)
-        widget.set_record(record)
-        # One value, read from the row itself, so the list cannot
-        # allocate a different height from the one the row asked for.
-        item.setSizeHint(QSize(0, widget.row_height()))
         self._decorate_item(item, record)
         if at_index is None:
             self._list.addItem(item)
         else:
             self._list.insertItem(at_index, item)
-        self._list.setItemWidget(item, widget)
-        # Mouse tracking plus the controller's event filter. It cannot go
-        # on the list's viewport: the row widget covers the item rect
-        # exactly and is not mouse transparent, so the viewport never
-        # sees the pointer.
-        self._preview.attach_row(widget)
         self._items[record.identifier] = item
 
     def _decorate_item(self, item: QListWidgetItem, record: DraftRecord) -> None:
-        """Announcement and tooltip for one row.
+        """What one row draws and what a screen reader says for it.
 
         Called from both ``_insert_row`` and ``_update_row`` so what a
-        screen reader hears cannot drift from what the row shows.
+        screen reader hears cannot drift from what the row shows. The row
+        keeps the section title it has (``_refresh_sections`` owns that);
+        the tooltip is the painter's, shown only where a title is cut.
         """
+        old = item.data(ROW_ROLE)
+        row = _draft_row(record, now=self.preview_now())
+        if isinstance(old, PostRow) and old.section:
+            row = row._replace(section=old.section)
+        item.setData(ROW_ROLE, row)
         item.setData(Qt.AccessibleTextRole, _accessible_row_text(record))
         item.setData(TITLE_ROLE, (record.title or record.snippet or "").strip())
-        item.setData(Qt.ToolTipRole, _row_tooltip(record))
+
+    def _refresh_sections(self) -> None:
+        """Give each row that starts a date section that section's title
+        (Today, Yesterday, Previous 7 Days...), and take it from the
+        others. Run after the rows change, and as the panel is shown, so
+        a day that turned over moves its drafts along."""
+        now = self.preview_now()
+        items = [self._list.item(row) for row in range(self._list.count())]
+        times = []
+        for item in items:
+            record = self.preview_record(item.data(Qt.UserRole))
+            times.append(record.created_at if record is not None else 0)
+        for item, section in zip(items, section_starts(times, now)):
+            row = item.data(ROW_ROLE)
+            if isinstance(row, PostRow) and row.section != section:
+                item.setData(ROW_ROLE, row._replace(section=section))
 
     def _remove_row(self, identifier: str) -> None:
         item = self._items.pop(identifier, None)
@@ -2229,6 +2048,7 @@ class DraftsPanel(QFrame):
         row = self._list.row(item)
         if row >= 0:
             self._list.takeItem(row)
+        self._refresh_sections()
 
     def _update_row(self, identifier: str) -> None:
         item = self._items.get(identifier)
@@ -2238,9 +2058,7 @@ class DraftsPanel(QFrame):
         if record is None:
             return
         self._decorate_item(item, record)
-        widget = self._list.itemWidget(item)
-        if isinstance(widget, _DraftRowWidget):
-            widget.set_record(record)
+        self._refresh_sections()
 
     # -- store-signal handlers --------------------------------------------
 
@@ -2265,6 +2083,7 @@ class DraftsPanel(QFrame):
             if r.identifier in self._items:
                 visible_idx += 1
         self._insert_row(record, at_index=visible_idx)
+        self._refresh_sections()
         self._ensure_current_row()
         self._refresh_empty_state()
         self._render_status()
@@ -2321,6 +2140,13 @@ class DraftsPanel(QFrame):
     # -- search handler ----------------------------------------------------
 
     def _on_search_changed(self, text: str) -> None:
+        view = self.current_view()
+        self._view_search_text[view] = text
+        if view != self.DRAFTS_VIEW:
+            search = self._view_search.get(view)
+            if search is not None:
+                search(text)
+            return
         # Closed and disarmed before the rebuild, not after: the rebuild
         # destroys every row widget, and typing must never leave a
         # preview anchored to one of them or open one for whichever row
@@ -2330,27 +2156,6 @@ class DraftsPanel(QFrame):
         self._rebuild_list()
 
     # -- list interaction --------------------------------------------------
-
-    def _on_current_item_changed(
-        self,
-        current: Optional[QListWidgetItem],
-        previous: Optional[QListWidgetItem],
-    ) -> None:
-        """Drive the row widgets' selected look from the list's current row.
-
-        The list paints the selection fill through ``::item:selected``,
-        but the row widget on top of it owns the text colours and the
-        leading accent bar, so it has to be told.
-        """
-        for item, selected in ((previous, False), (current, True)):
-            if item is None:
-                continue
-            try:
-                widget = self._list.itemWidget(item)
-            except RuntimeError:
-                continue
-            if isinstance(widget, _DraftRowWidget):
-                widget.set_selected(selected)
 
     def _on_item_activated(self, item: QListWidgetItem) -> None:
         """Double-click / Enter on a row.
@@ -2367,6 +2172,8 @@ class DraftsPanel(QFrame):
         record = self._store.get(identifier) if self._store is not None else None
         if record is None:
             return
+        # The draft itself opens; its preview makes way.
+        self._preview.close()
         if record.state is DraftState.READY:
             self.open_draft.emit(identifier)
         elif record.state is DraftState.FAILED:
@@ -2503,7 +2310,9 @@ class DraftsPanel(QFrame):
             menu.addAction(act_retry)
             menu.addSeparator()
 
-        act_open = QAction(_("Open in New Tab"), menu)
+        # What Return and a double click do, and the preview's next step.
+        act_open = QAction(_("Continue Editing"), menu)
+        act_open.setShortcut(QKeySequence(Qt.Key_Return))
         act_open.setData(("open", identifier))
         act_open.setEnabled(record.state is DraftState.READY)
         menu.addAction(act_open)
@@ -2571,6 +2380,17 @@ class DraftsPanel(QFrame):
         return None
 
     # -- lifetime ----------------------------------------------------------
+
+    def showEvent(self, event) -> None:
+        # Dates are relative to today: a panel shown on another day says
+        # "Yesterday" where it said "Today".
+        for row in range(self._list.count()):
+            item = self._list.item(row)
+            record = self.preview_record(item.data(Qt.UserRole))
+            if record is not None:
+                self._decorate_item(item, record)
+        self._refresh_sections()
+        super().showEvent(event)
 
     def hideEvent(self, event) -> None:
         """A hidden panel must not leave a floating window describing it."""
