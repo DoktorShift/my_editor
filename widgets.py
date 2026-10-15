@@ -5,7 +5,7 @@
 
 import math
 
-from PySide6.QtCore import QSize, Qt, Signal
+from PySide6.QtCore import QPoint, QSize, Qt, Signal
 from PySide6.QtGui import QFontMetricsF, QPainter, QColor
 from PySide6.QtWidgets import (
     QWidget, QGridLayout, QHBoxLayout, QLineEdit, QLabel, QPushButton, QFrame, QMenu, QToolButton,
@@ -66,6 +66,14 @@ class ElidedLabel(QLabel):
 
 
 class LineNumberGutter(QWidget):
+    """Each paragraph's number beside it, on the baseline of its first line.
+
+    Where a line is drawn is asked of the editor, never worked out here:
+    its document lays the line out (the document's margin, the paragraph's
+    own spacing, the font of its text), the scroll bar moves it, and the
+    viewport sits below any room kept above the text (a header) and beside
+    the paper's margins. The numbers follow all of them."""
+
     def __init__(self, editor, parent=None):
         super().__init__(parent)
         self.editor = editor
@@ -76,6 +84,9 @@ class LineNumberGutter(QWidget):
         self.editor.verticalScrollBar().valueChanged.connect(self.update)
         self.editor.textChanged.connect(self.update)
         self.editor.cursorPositionChanged.connect(self.update)
+        # A line moves without an edit as well: a new font or text size, a
+        # header's room above the text, the layout of a long file going on.
+        self.editor.document().documentLayout().update.connect(self.update)
 
     def _update_theme(self):
         if hasattr(self.editor, '_theme_colors'):
@@ -98,50 +109,40 @@ class LineNumberGutter(QWidget):
                     }
                 """)
 
+    def numbers(self):
+        """(number, baseline) of each paragraph on screen, the baseline in
+        this gutter's pixels: where the editor draws the first line of it."""
+        editor = self.editor
+        # The document's top, in this gutter's pixels.
+        origin = (self.mapFromGlobal(editor.viewport().mapToGlobal(QPoint(0, 0))).y()
+                  - editor.verticalScrollBar().value())
+        found = []
+        block = editor.first_visible_block()
+        while block.isValid():
+            layout = block.layout()
+            if block.isVisible() and layout.lineCount():
+                line = layout.lineAt(0)
+                top = origin + layout.position().y() + line.y()
+                if top > self.height():
+                    break
+                if top + line.height() >= 0:
+                    found.append((block.blockNumber() + 1, round(top + line.ascent())))
+            block = block.next()
+        return found
+
     def paintEvent(self, event):
         painter = QPainter(self)
-
         if self.is_dark:
             painter.fillRect(self.rect(), QColor("#252526"))
-            text_color = QColor("#858585")
+            painter.setPen(QColor("#858585"))
         else:
             painter.fillRect(self.rect(), QColor("#F8F8F8"))
-            text_color = QColor("#666666")
-
-        doc = self.editor.document()
-        layout = doc.documentLayout()
-
-        font = monospace_font(14)
-        painter.setFont(font)
-        painter.setPen(text_color)
-
-        font_metrics = painter.fontMetrics()
-        editor_padding = 8
-
-        first_visible_block = self.editor.first_visible_block()
-        first_block_rect = layout.blockBoundingRect(first_visible_block)
-
-        block = first_visible_block
-        block_number = block.blockNumber() + 1
-
-        while block.isValid():
-            block_rect = layout.blockBoundingRect(block)
-            y_pos = (block_rect.top() - first_block_rect.top()) + editor_padding + font_metrics.ascent()
-
-            if y_pos - font_metrics.ascent() > self.height():
-                break
-            if y_pos - font_metrics.ascent() < -editor_padding:
-                block = block.next()
-                block_number += 1
-                continue
-
-            line_text = str(block_number)
-            text_width = font_metrics.horizontalAdvance(line_text)
-            x_pos = self.width() - text_width - 8
-            painter.drawText(x_pos, y_pos, line_text)
-
-            block = block.next()
-            block_number += 1
+            painter.setPen(QColor("#666666"))
+        painter.setFont(monospace_font(14))
+        metrics = painter.fontMetrics()
+        for number, baseline in self.numbers():
+            text = str(number)
+            painter.drawText(self.width() - metrics.horizontalAdvance(text) - 8, baseline, text)
 
 
 class FindBar(QFrame):
