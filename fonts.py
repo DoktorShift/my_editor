@@ -106,6 +106,21 @@ def code_font(pixel_size: int = CODE_PIXEL_SIZE) -> QFont:
     return font
 
 
+def names_monospace(families) -> bool:
+    """Whether a page's font families (CSS ``font-family``, as Qt read
+    them) are a monospace font: a code font stack names the generic family,
+    and Qt gives a code element (code, kbd, samp, tt) the system's own
+    fixed font (Menlo on a Mac, Courier New on Windows), or the generic
+    family where there is none."""
+    names = {family.strip().strip("'\"").lower() for family in (families or [])}
+    return bool(names & {"monospace", "ui-monospace", system_fixed_family().lower()})
+
+
+def system_fixed_family() -> str:
+    """The system's own fixed-width font."""
+    return QFontDatabase.systemFont(QFontDatabase.SystemFont.FixedFont).family()
+
+
 def _first_fixed_pitch_family() -> Optional[str]:
     return next((family for family in QFontDatabase.families()
                  if QFontDatabase.isFixedPitch(family)

@@ -56,11 +56,12 @@ from typing import List, NamedTuple, Optional, Tuple
 
 from PySide6.QtCore import QMimeData
 from PySide6.QtGui import (
-    QFontDatabase, QTextBlockFormat, QTextCharFormat, QTextCursor, QTextDocument,
+    QTextBlockFormat, QTextCharFormat, QTextCursor, QTextDocument,
     QTextImageFormat,
 )
 
 from doc_walk import doc_length, iter_blocks
+from fonts import names_monospace
 from link_url import normalize_link_input
 from markdown_writer import PASTE_FEATURES, document_to_markdown, image_markdown, read_markdown
 import rich_text
@@ -268,16 +269,8 @@ def _make_checklists(doc) -> None:
 
 
 def _is_monospace(fmt: QTextCharFormat) -> bool:
-    """Whether the page sets these words in a monospace font: a code font
-    stack names the generic family, and Qt gives a code element (code,
-    kbd, samp, tt) the system's own fixed font (Menlo on a Mac, Courier
-    New on Windows), or the generic family where there is none."""
-    families = {family.strip().strip("'\"").lower() for family in (fmt.fontFamilies() or [])}
-    return bool(families & {"monospace", "ui-monospace", _system_fixed_family().lower()})
-
-
-def _system_fixed_family() -> str:
-    return QFontDatabase.systemFont(QFontDatabase.SystemFont.FixedFont).family()
+    """Whether the page sets these words in a monospace font."""
+    return names_monospace(fmt.fontFamilies())
 
 
 def _kept_href(href: str) -> Optional[str]:

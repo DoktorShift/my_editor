@@ -474,3 +474,83 @@ def test_headings_inline_styles_and_links_export():
 def test_markdown_structure_survives_an_html_round_trip(md):
     # Review F6 (early range): quotes and dividers were lost on save.
     assert document_to_markdown(_roundtrip(_from_markdown(md))) == md
+
+
+# -- fonts and sizes a page set ------------------------------------------------
+
+def _runs(doc):
+    """(text, char format) of every run of text, pictures left out."""
+    found = []
+    block = doc.begin()
+    while block.isValid():
+        it = block.begin()
+        while not it.atEnd():
+            frag = it.fragment()
+            if frag.isValid() and not frag.charFormat().isImageFormat():
+                found.append((frag.text(), frag.charFormat()))
+            it += 1
+        block = block.next()
+    return found
+
+
+def _opened(page):
+    doc = QTextDocument()
+    doc.setHtml(page)
+    normalize_after_set_html(doc)
+    return doc
+
+
+def _fixed(fmt):
+    from PySide6.QtGui import QTextFormat
+    return [prop for prop in (QTextFormat.Property.FontPixelSize,
+                              QTextFormat.Property.FontPointSize,
+                              QTextFormat.Property.FontFamilies,
+                              QTextFormat.Property.FontFamily) if fmt.hasProperty(prop)]
+
+
+def test_a_saved_document_reopens_in_the_writing_font_and_text_size():
+    """Seen in the app: a document saved as HTML came back in monospace at
+    14 px, the page's CSS for browsers, and the Font and Text Size settings
+    no longer reached it. The writer keeps no fonts or sizes, so none are
+    read back: the text follows the editor's font."""
+    doc = QTextDocument()
+    doc.setPlainText("Written here.")
+    reopened = _opened(document_to_html(doc, "T"))
+    assert [(text, _fixed(fmt)) for text, fmt in _runs(reopened)] == [("Written here.", [])]
+
+
+def test_a_pages_sizes_go_and_headings_stay_larger():
+    """A page's own sizes (a paragraph at 12 px beside a body at 16) would
+    stay while the text size grows around them, against Apple's "maintain
+    the relative hierarchy ... when people adjust text sizes". A heading
+    keeps its size relative to the body."""
+    from PySide6.QtGui import QTextFormat
+    reopened = _opened("<html><body style='font-family:Georgia; font-size:16px'>"
+                       "<p style='font-size:12px'>Small print.</p><h2>Heading</h2></body></html>")
+    assert all(_fixed(fmt) == [] for _text, fmt in _runs(reopened))
+    heading = _runs(reopened)[-1][1]
+    assert heading.property(QTextFormat.Property.FontSizeAdjustment) == 2
+
+
+def test_code_stays_code_through_saving_and_opening():
+    """Words a page sets in a monospace font of their own are code; so is
+    code this editor wrote, which used to come back as plain words. Text
+    that is all in one monospace font is the page's font, not code."""
+    import rich_text
+    doc = QTextDocument()
+    cursor = QTextCursor(doc)
+    cursor.insertText("Run ")
+    cursor.insertText("ls", rich_text.style_format(rich_text.CODE, True))
+    cursor.insertText(" now.", QTextCharFormat())
+    reopened = _opened(document_to_html(doc, "T"))
+    assert [(text, fmt.fontFixedPitch()) for text, fmt in _runs(reopened)] == [
+        ("Run ", False), ("ls", True), (" now.", False)]
+    assert _runs(reopened)[1][1].fontFamilies() == rich_text.CODE_FAMILIES
+    foreign = _opened("<html><body style='font-family:Helvetica'><p>Type "
+                      "<code>make</code>.</p></body></html>")
+    assert [(text, fmt.fontFixedPitch()) for text, fmt in _runs(foreign)] == [
+        ("Type ", False), ("make", True), (".", False)]
+    all_mono = _opened("<html><body style='font-family:Menlo, monospace'><p>Just words.</p>"
+                       "</body></html>")
+    assert not _runs(all_mono)[0][1].fontFixedPitch()
+
