@@ -4,7 +4,7 @@
 where the article starts.
 
     ┌──────────────────────────────────────────┐
-    │ [ cover, cropped as feeds show it ]      │  Change Cover…  Remove (hover)
+    │ [ cover, 16:9 as the article card ]      │  Change Cover…  Remove (hover)
     │                                          │
     │ Plain text, forever                      │  the title (placeholder: the
     │ Why the files outlive the apps.          │  one it publishes with)
@@ -47,9 +47,9 @@ from ..blossom.store import MediaStore
 from .cover_field import library_picture_hash
 from .thumbnail_loader import ThumbnailLoader
 
-# The cover's band: as tall as a wide cover reads at a glance, cropped from
-# the middle as feeds crop it.
-COVER_HEIGHT = 150
+# The cover in the article card's 16:9 framing (cover_field.THUMB), as
+# readers see it.
+COVER_RATIO = (16, 9)
 COVER_RADIUS = 8
 # The title in the writing font at this scale, the summary at this one.
 TITLE_SCALE = 1.75
@@ -69,16 +69,25 @@ def _scaled(font: QFont, scale: float) -> QFont:
 
 
 class _CoverBanner(QWidget):
-    """The cover, centre-cropped into a rounded band; words in its place
-    while its picture can't be shown."""
+    """The cover across the column in 16:9, centre-cropped and rounded;
+    words in its place while its picture can't be shown."""
 
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
-        self.setFixedHeight(COVER_HEIGHT)
-        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         self._picture = QPixmap()
         self._words = ""
         self._dark = False
+
+    def hasHeightForWidth(self) -> bool:  # noqa: N802, Qt's name
+        return True
+
+    def heightForWidth(self, width: int) -> int:  # noqa: N802, Qt's name
+        across, down = COVER_RATIO
+        return width * down // across
+
+    def sizeHint(self) -> QSize:  # noqa: N802, Qt's name
+        return QSize(480, self.heightForWidth(480))
 
     def set_picture(self, picture: QPixmap, words: str = "") -> None:
         self._picture, self._words = picture, words

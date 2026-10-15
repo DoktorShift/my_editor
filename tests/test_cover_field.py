@@ -373,10 +373,10 @@ def stacked_field():
     return field
 
 
-def test_the_inspectors_well_spans_its_column_cropped_as_feeds_crop_a_cover():
+def test_the_inspectors_well_spans_its_column_in_the_cards_16_by_9():
     field = stacked_field()
     well = field.preview
-    assert well.hasHeightForWidth() and well.heightForWidth(300) == 150
+    assert well.hasHeightForWidth() and well.heightForWidth(320) == 180
     assert well.focusPolicy() & Qt.FocusPolicy.TabFocus
 
 
