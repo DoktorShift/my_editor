@@ -35,7 +35,7 @@ from PySide6.QtTest import QTest  # noqa: E402
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
 import front_matter  # noqa: E402
-from nostr import bech32  # noqa: E402
+from nostr import bech32, profiles, refs  # noqa: E402
 from nostr.article_details import (  # noqa: E402
     ArticleDetails, from_front_matter, front_matter_with)
 from nostr.known_people import Person  # noqa: E402
@@ -190,6 +190,25 @@ def test_you_keep_what_the_others_leave():
     section.select("")
     assert section.share_title.text() == "You keep what the others leave."
     assert not section._share_row.isVisibleTo(panel) and not section.remove_button.isEnabled()
+
+
+def test_your_row_says_your_accounts_name():
+    """Seen in the app: your own row read "npub1cmx6…nr5c · you" unless the
+    people you follow included you. It says your account's name, as the
+    account menu does; your short key only for an account without one."""
+    short = refs.short_key(bech32.encode_npub(ME))
+
+    def your_row(display_name):
+        account = profiles.Profile(user_pubkey=ME, bunker_pubkey="", bunker_relays=[],
+                                   local_secret_hex="", display_name=display_name)
+        panel = ArticleDetailsPanel(profile=lambda: account,
+                                    name_of=lambda pubkey: short if pubkey == ME else "Bob")
+        panel.show_article(ArticleDetails(title="T", coauthors=((BOB, ""),)),
+                           fixed_identifier=False)
+        return panel.authors.table.item(0, 0).text()
+
+    assert your_row("Alice") == "Alice · you"
+    assert your_row("") == f"{short} · you"
 
 
 def test_a_share_is_held_within_what_the_others_leave():

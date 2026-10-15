@@ -237,7 +237,8 @@ class ArticleDetailsPanel(QFrame):
         self._section(form, _("Authors"))
         self.authors = AuthorsSection(
             coauthors=self._coauthors, name_of=self._name_of, pick_person=self._pick_person,
-            own_pubkey=lambda: getattr(profile(), "user_pubkey", ""), parent=body)
+            own_pubkey=lambda: getattr(profile(), "user_pubkey", ""),
+            own_name=lambda: getattr(profile(), "display_name", ""), parent=body)
         self.authors.changed.connect(self._hand_back)
         form.addWidget(self.authors)
         self._add_kept_note(form, "coauthors")
