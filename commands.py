@@ -106,6 +106,10 @@ NO_SHORTCUT: Tuple[Tuple[str, str, str], ...] = (
     ("format.smaller", "all",
      "Option-Command-0 to 3 (Ctrl+0 to 3) choose each style; Bigger and Smaller step "
      "through them from the format bar and the menu."),
+    ("edit.start_dictation", "all",
+     "The system's own key starts it: Fn twice on a Mac, Windows+H on Windows."),
+    ("edit.speech.", "all", "Apple's Edit > Speech has no keys; the system's Speak "
+     "Selection key reads any selection."),
     ("view.actual_size", "other",
      "Ctrl+0 is Body there, as in LibreOffice; Zoom Out and Zoom In step back to it, and "
      "Settings shows the size."),

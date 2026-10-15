@@ -74,11 +74,11 @@ def _modules() -> str:
     import markdownify  # noqa: F401
     import readability  # noqa: F401
     import segno  # noqa: F401  QR codes for pairing and payment
-    from PySide6 import QtPdf, QtPdfWidgets, QtWebSockets  # noqa: F401
+    from PySide6 import QtPdf, QtPdfWidgets, QtTextToSpeech, QtWebSockets  # noqa: F401
     import export_html  # noqa: F401
     import export_pdf  # noqa: F401
     import pdf_viewer  # noqa: F401
-    return "PDF, web sockets, exports, imports, QR codes"
+    return "PDF, web sockets, speech, exports, imports, QR codes"
 
 
 def _spelling() -> str:
