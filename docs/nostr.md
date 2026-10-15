@@ -154,7 +154,9 @@ Another device that is running while you change this follows the new setting wit
 
 ### Recovery
 
-If your signer (Amber, nsec.app) times out a decrypt approval or you dismiss the prompt by accident, the row shows up as failed with a one-click retry. Double-click the row or right-click **Retry decryption** to send the request again. No relay round-trip needed.
+While your signer app does not answer (the phone is asleep, or the app is closed), the drafts that are not open yet wait for it. MyEditor asks it first with a question no signer asks you about, so nothing waits on a timeout per draft. The Drafts panel lists the drafts that are open and says the rest in one line at the top ("48 drafts are locked until your signer app answers."), with **Try Again**. It asks your signer app again every minute, when you come back to MyEditor and when you show the panel, and the drafts open as soon as it answers.
+
+If you dismiss a decrypt prompt in your signer (Amber, nsec.app) by accident, the row shows up as failed with a one-click retry. Double-click the row or right-click **Retry Decryption** to send the request again. No relay round-trip needed.
 
 ### Storage notes
 

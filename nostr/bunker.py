@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import json
 import secrets
+import time
 from dataclasses import dataclass
 from typing import Callable, Dict, List, Optional, Tuple
 from urllib.parse import parse_qs, quote, urlsplit
@@ -63,6 +64,11 @@ DEFAULT_RPC_TIMEOUT_MS = 30_000
 # is a liveness probe: if it has not come back in a few seconds, the answer
 # we need is somewhere else.
 PING_TIMEOUT_MS = 6_000
+
+# A signer that answered anything this recently is taken to be there
+# (``check_alive``): asking again only to find out would cost a signer that
+# ignores ping six seconds, right after it proved itself.
+ANSWERED_RECENTLY_MS = 30_000
 
 # A signer may answer any request with an "auth_url" challenge instead of a
 # result, meaning the user has to authenticate in a browser first. The real
@@ -338,6 +344,8 @@ class BunkerClient(QObject):
         self._pending: Dict[str, _Pending] = {}
         self._is_connected = False
         self._warned_unreadable = False
+        # When the signer last answered anything (time.monotonic()).
+        self._answered_at: Optional[float] = None
 
         # nostrconnect:// state, only used while listen_for_nostrconnect
         # is the active flow.
@@ -601,11 +609,55 @@ class BunkerClient(QObject):
                 return
             _ok("pong")
 
+        self._probe(_ok, _confirm_identity, on_failure, timeout_ms)
+
+    def check_alive(
+        self,
+        on_answer: Callable[[], None],
+        on_silence: Callable[[str], None],
+        *,
+        timeout_ms: int = DEFAULT_RPC_TIMEOUT_MS,
+    ) -> None:
+        """Find out whether the signer app is there before asking it for
+        something that waits on a person or on a 30-second timeout.
+
+        Asked the way ``reattach`` proves the channel, with questions no
+        signer asks a person about. Any reply counts, a refusal too: someone
+        is there to give it. ``on_silence`` gets the reason when nothing came
+        back. A signer that answered within ``ANSWERED_RECENTLY_MS`` is not
+        asked at all.
+        """
+        recently = self._answered_at is not None and (
+            time.monotonic() - self._answered_at) * 1000 < ANSWERED_RECENTLY_MS
+        if recently:
+            # On a later turn, as every answer arrives.
+            QTimer.singleShot(0, self, on_answer)
+            return
+
+        def _failed(reason: str) -> None:
+            if is_signer_answer(reason):
+                on_answer()
+            else:
+                on_silence(reason)
+
+        self._probe(lambda _pong: on_answer(), lambda _pk: on_answer(), _failed, timeout_ms)
+
+    def _probe(
+        self,
+        on_ping: Callable[[str], None],
+        on_public_key: Callable[[str], None],
+        on_failure: Callable[[str], None],
+        timeout_ms: int,
+    ) -> None:
+        """Prove the channel: ``ping``, then ``get_public_key`` if the ping
+        fails. Not every signer answers ping (Amber does not); every signer
+        implements ``get_public_key``, and we already hold permission for it."""
+
         def _ping_failed(_reason: str) -> None:
             self._send_request(
                 method="get_public_key",
                 params=[],
-                on_success=_confirm_identity,
+                on_success=on_public_key,
                 on_failure=on_failure,
                 timeout_ms=timeout_ms,
             )
@@ -613,7 +665,7 @@ class BunkerClient(QObject):
         self._send_request(
             method="ping",
             params=[],
-            on_success=_ok,
+            on_success=on_ping,
             on_failure=_ping_failed,
             # The probe gets a short leash so the fallback that actually
             # works is reached quickly. ``min`` so a caller asking for an
@@ -1025,6 +1077,7 @@ class BunkerClient(QObject):
         request_id = payload.get("id")
         if not isinstance(request_id, str) or request_id not in self._pending:
             return
+        self._answered_at = time.monotonic()
 
         error = payload.get("error")
         result = payload.get("result")
@@ -1179,7 +1232,10 @@ class BunkerSessionPool(QObject):
         def _err(reason: str) -> None:
             if not current():
                 return
+            # Gone for good: drafts that wait for a signer app ask again
+            # every minute, each time with a client of its own.
             new_client.close(reason=reason)
+            new_client.deleteLater()
             for _ready_cb, err_cb in self._inflight.pop(pubkey, []):
                 try:
                     err_cb(reason)

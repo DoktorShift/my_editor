@@ -222,14 +222,19 @@ QFrame#drafts_panel_banner {{
     border: none;
     border-bottom: 1px solid {t["border"]};
 }}
+QLabel#drafts_panel_locked {{ color: {t["muted"]}; }}
+/* Try Again under the line, as a link: a quiet way to ask now, where a
+   bordered button would make the line read as a problem. The transparent
+   border leaves room for the focus ring without moving the words. */
 QPushButton#drafts_panel_banner_action {{
     background: transparent;
-    color: {t["row_fg"]};
-    border: 1px solid {t["border"]};
-    border-radius: 4px;
-    padding: 2px 10px;
+    color: {t["link"]};
+    border: 1px solid transparent;
+    border-radius: 3px;
+    padding: 0px;
+    text-align: left;
 }}
-QPushButton#drafts_panel_banner_action:hover {{ background: {t["hover_bg"]}; }}
+QPushButton#drafts_panel_banner_action:pressed {{ color: {t["muted"]}; }}
 QPushButton#drafts_panel_banner_action:focus {{ border-color: {t["accent"]}; }}
 QLabel#drafts_panel_title {{ color: {t["chrome_fg"]}; font-weight: 600; }}
 QLabel#drafts_panel_imports_activity {{ color: {t["muted"]}; }}
@@ -1033,6 +1038,8 @@ class DraftsPanel(QFrame):
       set_status(text)           , narrate a sync step in the banner
       align_bands(toolbar, search), the window's grid (window_grid.py)
       set_signer_unsupported(bool), show the "signer lacks NIP-44" state
+      set_signer_unreachable(bool), drafts wait for the signer app: one
+                                   quiet line with Try Again (retry_signer)
       apply_theme(is_dark)       , switch dark/light
       set_preview_image_loader(l), hand the hover preview a ThumbnailLoader
       add_view(key, title, hint, widget, refresh=, refresh_name=),
@@ -1319,9 +1326,9 @@ class DraftsPanel(QFrame):
     def _build_banner(self) -> QWidget:
         """What the panel has to say, over the list, only while there is
         something to know: a refresh under way, drafts that could not be
-        decrypted, a signer that does not answer (with Try Again). At rest
-        it says nothing; the account's picture at the end of the tab row
-        beside the panel names whose drafts these are.
+        decrypted, drafts that wait for the signer app (with Try Again).
+        At rest it says nothing; the account's picture at the end of the
+        tab row beside the panel names whose drafts these are.
 
         ``feedback.md``: "When status feedback is available near the
         items it describes, people get important information without
@@ -1342,15 +1349,55 @@ class DraftsPanel(QFrame):
         self._status_label.setFont(_secondary_font())
         self._status_label.setProperty("error", "false")
         layout.addWidget(self._status_label)
-        # Its action under it, leading, as an inline message has it.
-        self._banner_action = QPushButton(_("Try Again"))
-        self._banner_action.setObjectName("drafts_panel_banner_action")
-        self._banner_action.clicked.connect(self.retry_signer.emit)
-        self._banner_action.hide()
-        layout.addWidget(self._banner_action, 0, Qt.AlignLeft)
+        layout.addWidget(self._build_locked_line())
         self._banner = frame
         frame.hide()
         return frame
+
+    def _build_locked_line(self) -> QWidget:
+        """Drafts that wait for the signer app, said once and quietly: a
+        small lock, the sentence in secondary text, and Try Again as a
+        link under it. Not an error, so not red: nothing is wrong with
+        the drafts, and the remedy is the person opening an app."""
+        line = QWidget()
+        row = QHBoxLayout(line)
+        row.setContentsMargins(0, 0, 0, 0)
+        row.setSpacing(6)
+        # Decoration, so a screen reader passes over it; the sentence says it.
+        self._locked_symbol = QLabel()
+        self._locked_symbol.setAccessibleName("")
+        self._locked_symbol.setAlignment(Qt.AlignCenter)
+        row.addWidget(self._locked_symbol, 0, Qt.AlignTop)
+        words = QVBoxLayout()
+        words.setContentsMargins(0, 0, 0, 0)
+        words.setSpacing(1)
+        # Wrapped, not elided: said whole however narrow the panel.
+        self._locked_label = QLabel()
+        self._locked_label.setObjectName("drafts_panel_locked")
+        self._locked_label.setFont(_secondary_font())
+        self._locked_label.setWordWrap(True)
+        words.addWidget(self._locked_label)
+        # Its action under it, leading, as an inline message has it.
+        self._banner_action = QPushButton(_("Try Again"))
+        self._banner_action.setObjectName("drafts_panel_banner_action")
+        self._banner_action.setFont(_secondary_font())
+        self._banner_action.setFlat(True)
+        self._banner_action.setCursor(Qt.PointingHandCursor)
+        self._banner_action.clicked.connect(self.retry_signer.emit)
+        words.addWidget(self._banner_action, 0, Qt.AlignLeft)
+        row.addLayout(words, 1)
+        self._locked_line = line
+        line.hide()
+        return line
+
+    def _paint_locked_symbol(self) -> None:
+        """The lock, in the line's own grey, as tall as a line of it."""
+        metrics = QFontMetrics(_secondary_font())
+        size = max(10, round(metrics.height() * 0.8))
+        self._locked_symbol.setFixedSize(size, metrics.height())
+        self._locked_symbol.setPixmap(symbol_pixmap(
+            "lock", size, QColor(_THEME_TOKENS[bool(self._is_dark)]["muted"]),
+            self.devicePixelRatioF() or 2.0))
 
     # -- the window's grid ----------------------------------------------------
 
@@ -1536,6 +1583,8 @@ class DraftsPanel(QFrame):
             self._imports_row.update()
         if hasattr(self, "_empty_symbol"):
             self._paint_empty_symbol()
+        if hasattr(self, "_locked_symbol"):
+            self._paint_locked_symbol()
         if getattr(self, "_row_delegate", None) is not None:
             self._row_delegate.set_dark(is_dark)
 
@@ -1618,22 +1667,31 @@ class DraftsPanel(QFrame):
         self._refresh_empty_state()
 
     def set_signer_unreachable(self, unreachable: bool) -> None:
-        """Show (or clear) the state where the signer is not answering."""
+        """Drafts wait for the signer app, or no longer do. While they
+        wait, the ones not open yet are one quiet line over the list
+        (``_locked_drafts``), not a row each; the ones already open stay."""
         if unreachable == self._signer_unreachable:
             return
         self._signer_unreachable = unreachable
         if unreachable:
-            # A stale narration line would otherwise outrank the new
-            # state for its remaining TTL, which is exactly the window
-            # where the user is looking for an explanation.
+            # A narration line left from before would otherwise come back
+            # the moment the drafts no longer wait.
             self._sync_message = ""
-        self._render_status()
+        # Only the drafts not open yet leave the list or come back to it:
+        # the rows someone may be reading keep their place and selection.
+        for record in list(self._store or []):
+            if record.state is DraftState.LOADING:
+                self._on_record_changed(record.identifier)
         self._refresh_empty_state()
+        self._render_status()
 
-    def _has_readable_draft(self) -> bool:
-        return any(
-            record.state is DraftState.READY for record in self._store or []
-        )
+    def _locked_drafts(self) -> int:
+        """How many drafts wait for the signer app: those not open yet
+        while it does not answer (none while it does)."""
+        if not self._signer_unreachable or self._signer_unsupported:
+            return 0
+        return sum(1 for record in self._store or []
+                   if record.state is DraftState.LOADING)
 
     # -- public API: the hover preview ------------------------------------
 
@@ -1767,14 +1825,20 @@ class DraftsPanel(QFrame):
     def _render_status(self) -> None:
         """The single writer for the banner."""
         text, is_error = self._status_line()
+        # Drafts waiting for the signer app get a line of their own (the
+        # status line's sentence then): wrapped rather than elided, with
+        # the lock and Try Again.
+        locked = self._locked_drafts() > 0
+        self._locked_label.setText(text if locked else "")
+        self._locked_line.setVisible(locked)
+        text = "" if locked else text
         self._status_label.set_full_text(text)
         self._status_label.setToolTip(text)
         self._status_label.setVisible(bool(text))
         # Only the drafts view speaks here, and only with something to say:
         # an empty banner would be a strip of chrome over the list.
-        self._banner.setVisible(bool(text) and self.current_view() == self.DRAFTS_VIEW)
-        # Its one action, where the remedy is a click: the signer again.
-        self._banner_action.setVisible(self._signer_unreachable and not self._signer_unsupported)
+        self._banner.setVisible((bool(text) or locked)
+                                and self.current_view() == self.DRAFTS_VIEW)
         self._status_label.setProperty("error", "true" if is_error else "false")
         self._status_label.style().unpolish(self._status_label)
         self._status_label.style().polish(self._status_label)
@@ -1791,12 +1855,18 @@ class DraftsPanel(QFrame):
         """
         if self._signer_unsupported:
             return _("Your signer app can’t decrypt drafts"), True
-        # Outranks both the failure count and the decrypting count. Those
-        # describe drafts; this describes the one thing standing between
-        # the user and all of them, and it is the only line here whose
-        # remedy is somewhere other than this app.
-        if self._signer_unreachable:
-            return _("Your signer app is not responding"), True
+        # Outranks both the failure count and the decrypting count: it is
+        # the one thing standing between the person and those drafts, and
+        # its remedy is somewhere other than this app. Said as a state, not
+        # a problem: a signer app on a phone that is asleep is ordinary.
+        locked = self._locked_drafts()
+        if locked:
+            text = ngettext(
+                "{n} draft is locked until your signer app answers.",
+                "{n} drafts are locked until your signer app answers.",
+                locked,
+            )
+            return text.format(n=locked), False
 
         failed = ready = total = 0
         for record in self._store or []:
@@ -1860,21 +1930,6 @@ class DraftsPanel(QFrame):
                 symbol="alert",
             )
             return
-        # Only when there is nothing readable to show. A signer that went
-        # quiet halfway through leaves drafts already decrypted on
-        # screen, and replacing those with an explanation would take away
-        # more than it gives; there the banner and the per-row retry
-        # carry the message.
-        if self._signer_unreachable and not self._has_readable_draft():
-            self._show_placeholder(
-                _("Your signer app is not responding"),
-                _("Drafts stay encrypted until your signer app unlocks them. Open "
-                  "your signer app, make sure it is running, then try again."),
-                action=_("Try Again"),
-                on_action=self.retry_signer.emit,
-                symbol="alert",
-            )
-            return
         if self._store is None or len(self._store) == 0:
             if self._loading:
                 # A first refresh in flight is not an empty library.
@@ -1894,7 +1949,9 @@ class DraftsPanel(QFrame):
                 symbol="pages",
             )
             return
-        if self._list.count() == 0:
+        # Drafts that all wait for the signer app leave the list empty
+        # without a search: the line over it says it, once.
+        if self._list.count() == 0 and self._search_text:
             # Apple's own words for a search that found nothing.
             self._show_placeholder(
                 _("No Results for “{query}”").format(query=self._search_text.strip()),
@@ -1986,8 +2043,13 @@ class DraftsPanel(QFrame):
         """Search is the only filter, so an empty field shows everything.
 
         This is the invariant the kind chips broke: no draft may be
-        unreachable, whatever its ``inner_kind`` or decryption state.
+        unreachable, whatever its ``inner_kind`` or decryption state. The one
+        exception is drafts waiting for the signer app: none of them can be
+        opened yet, and the line over the list stands for all of them
+        (``_locked_drafts``).
         """
+        if self._signer_unreachable and record.state is DraftState.LOADING:
+            return False
         if not self._search_text:
             return True
         needle = self._search_text.lower()
@@ -2067,6 +2129,10 @@ class DraftsPanel(QFrame):
             return
         record = self._store.get(identifier)
         if record is None or not self._passes_filter(record):
+            # Not a row (outside a search, or waiting for the signer app),
+            # but counted in the line over the list all the same.
+            self._refresh_empty_state()
+            self._render_status()
             return
         # Insert in the natural store order (newest-first). Easiest is
         # to re-look-up the position from store.all(), N is small.

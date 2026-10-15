@@ -13,6 +13,12 @@
     decrypting one wrap at a time avoids slamming the signer with N
     approval prompts in parallel and matches the bunker's request /
     response cadence.
+  - Asking first: a signer app lives on a phone, which is often asleep.
+    Before the first draft (after a start, a refresh, a retry, or a
+    silence) the signer is asked a question no signer asks a person
+    about (``BunkerClient.check_alive``). Nothing comes back: the drafts
+    wait, quietly, and it is asked again every minute, so decrypting
+    goes on by itself the moment it answers.
   - An auto-refresh ``QTimer`` (5-minute default) that re-issues the
     REQ to pick up drafts produced from other devices, and reads the
     account's draft relay list again, so a list changed on another
@@ -35,7 +41,8 @@ Cancellation model:
 
 Failures are surfaced on the store as ``DraftState.FAILED`` rows so the
 user understands when the signer rejects a draft, rather than seeing a
-silent count mismatch.
+silent count mismatch. A signer that does not answer is no such failure:
+its drafts stay ``LOADING``, waiting for it.
 """
 
 from __future__ import annotations
@@ -79,18 +86,10 @@ _BUNKER_UNSUPPORTED_NEEDLES: Tuple[str, ...] = (
     "not implemented",
 )
 
-# A silent signer (see ``bunker.is_signer_silent``) is a recoverable
-# condition whose cure is on the user's phone, so it is latched
-# separately from an incapable one and can be cleared.
-#
-# What a row says once we have stopped asking on its behalf.
-_SIGNER_SILENT_REASON = _("Your signer app did not answer")
-
-# How many drafts in a row may time out before we stop asking. The queue
-# is serialized, so one timeout can be a single dropped reply but two in
-# a row means nothing is listening, and every further attempt costs the
-# user another 30 seconds of a progress line that cannot advance.
-_SILENCE_LIMIT: int = 2
+# How often a signer app that did not answer is asked again while drafts
+# wait for it: the person opening it on their phone is the cure, and the
+# drafts should follow without anyone pressing a button.
+SIGNER_RECHECK_MS: int = 60 * 1000
 
 
 class DraftSync(QObject):
@@ -101,10 +100,11 @@ class DraftSync(QObject):
       bunker_error(str)        terminal: signer rejected NIP-44 entirely;
                                panel should show the unsupported-signer
                                state.
-      signer_unreachable(bool) the signer is not answering at all. Unlike
-                               ``bunker_error`` this is recoverable, so it
-                               carries a flag rather than a message and is
-                               cleared once the signer replies again.
+      signer_unreachable(bool) the signer app is not answering, so the
+                               drafts not yet open wait for it. Unlike
+                               ``bunker_error`` this passes by itself, so
+                               it carries a flag rather than a message and
+                               is cleared once the signer answers a draft.
     """
 
     status_changed = Signal(str)
@@ -170,12 +170,18 @@ class DraftSync(QObject):
 
         # A signer that is not answering is a different condition from one
         # that cannot decrypt: it is temporary, and the cure is on the
-        # user's phone. We latch it so the queue stops rather than serving
-        # every remaining draft its own 30-second timeout, which for a
-        # 54-draft library is close to half an hour of a progress line
-        # that will never advance.
+        # user's phone. While it lasts the drafts wait, nobody is asked for
+        # a draft, and the signer is asked whether it is back every minute.
+        # ``_signer_answers``: it answered since the last start, refresh,
+        # retry or silence, so drafts go straight to it. ``_checking``: a
+        # question to it is out, and one at a time is enough.
         self._signer_unreachable: bool = False
-        self._consecutive_silences: int = 0
+        self._signer_answers: bool = False
+        self._checking: bool = False
+        self._recheck_timer = QTimer(self)
+        self._recheck_timer.setSingleShot(True)
+        self._recheck_timer.setInterval(SIGNER_RECHECK_MS)
+        self._recheck_timer.timeout.connect(self._check_signer)
 
         self._refresh_timer = QTimer(self)
         self._refresh_timer.setInterval(DEFAULT_REFRESH_INTERVAL_MS)
@@ -245,6 +251,7 @@ class DraftSync(QObject):
         # without touching the next profile's state.
         self._generation += 1
         self._refresh_timer.stop()
+        self._recheck_timer.stop()
         for mover in self._left_moves.values():
             mover.stop()
             mover.deleteLater()
@@ -257,7 +264,8 @@ class DraftSync(QObject):
         self._decrypt_inflight = None
         self._bunker_unsupported = False
         self._signer_unreachable = False
-        self._consecutive_silences = 0
+        self._signer_answers = False
+        self._checking = False
         self._profile = None
         self._bunker = None
         self._read_relays = []
@@ -277,8 +285,19 @@ class DraftSync(QObject):
             self._subscription = None
         self._store.set_loading(True)
         self.status_changed.emit(_("Refreshing drafts…"))
+        # What arrives now is asked for only once the signer app has
+        # answered again; drafts that wait for it ask now.
+        self._signer_answers = False
         self._follow_draft_list()
         self._open_subscription()
+        self.ask_signer_again()
+
+    def ask_signer_again(self) -> None:
+        """Drafts waiting for the signer app ask it now, not at the next
+        minute: the person may just have opened it (they came back to the
+        app, or showed the Drafts panel)."""
+        if self._signer_unreachable:
+            self._check_signer()
 
     def refresh_by_hand(self) -> None:
         """Refresh, asked for by the person: a draft relay list the signer
@@ -302,11 +321,10 @@ class DraftSync(QObject):
     def retry_decrypt(self, identifier: str) -> None:
         """Re-queue a previously-failed decryption.
 
-        Typical use: the signer (e.g. Amber) didn't approve the first
-        ``nip44_decrypt`` request in time, or the user dismissed the
-        prompt. The wrap is still in our store with its ciphertext, so
-        retrying is a single fresh bunker round-trip with no relay
-        re-fetch needed.
+        Typical use: the user dismissed the signer's prompt (Amber's, say)
+        for the ``nip44_decrypt`` request. The wrap is still in our store
+        with its ciphertext, so retrying is a single fresh bunker
+        round-trip with no relay re-fetch needed.
 
         Safe to call for any state; we only do work if the record
         actually has a ciphertext to decrypt.
@@ -315,12 +333,11 @@ class DraftSync(QObject):
             return
         if self._bunker_unsupported:
             return
-        # Retrying one row is the user telling us the signer is awake, so
-        # the whole queue gets to run again, not just this draft.
-        self._clear_signer_unreachable()
         record = self._store.get(identifier)
         if record is None or not record.ciphertext:
             return
+        # Asked whether it is there first, as after every retry.
+        self._signer_answers = False
         # Reset the failure marker so the panel re-renders the row as
         # loading; ``_after_decrypt`` will handle either outcome.
         if record.state is DraftState.FAILED:
@@ -337,32 +354,26 @@ class DraftSync(QObject):
             ciphertext=record.ciphertext,
         )
         self._enqueue_decrypt(meta)
+        # While drafts wait, a retry is the person saying the signer app
+        # is open: it is asked now, and this draft waits with the others.
+        self.ask_signer_again()
 
     def retry_signer(self) -> None:
-        """Ask again after the user tells us their signer is awake.
+        """Try Again: ask the signer app now whether it is there.
 
         There are two ways the signer can be missing and the caller
         should not have to know which one it is looking at: the handshake
         never completed, which needs a fresh session, or it completed and
-        the signer then went quiet, which only needs the queue restarted.
+        the signer then went quiet, which only needs the question asked
+        again (``_check_signer`` does either).
         """
         if self._profile is None or self._bunker_unsupported:
             return
-        self._clear_signer_unreachable()
         # The draft relay list too: it may have been left unread while
         # the signer app was away.
         if self._draft_list_reader is not None:
             self._draft_list_reader.ask_again()
-        if self._bunker is None:
-            gen = self._generation
-            self.status_changed.emit(_("Connecting to your signer app…"))
-            self._session_pool.get(
-                self._profile,
-                on_ready=lambda client, g=gen: self._on_bunker_ready(g, client),
-                on_error=lambda reason, g=gen: self._on_bunker_unavailable(g, reason),
-            )
-            return
-        self._requeue_failed_drafts()
+        self._check_signer()
 
     def _requeue_failed_drafts(self) -> None:
         """Re-queue every draft we stopped asking about.
@@ -396,11 +407,7 @@ class DraftSync(QObject):
         self._read_relays = list(relays)
 
         self.status_changed.emit(_("Connecting to your signer app…"))
-        self._session_pool.get(
-            self._profile,
-            on_ready=lambda client, g=gen: self._on_bunker_ready(g, client),
-            on_error=lambda reason, g=gen: self._on_bunker_unavailable(g, reason),
-        )
+        self._check_signer()
 
     def _on_relay_list_changed(self, pubkey: str) -> None:
         if self._profile is not None and pubkey == self._profile.user_pubkey.lower():
@@ -418,8 +425,8 @@ class DraftSync(QObject):
     def _on_bunker_ready(self, gen: int, client: BunkerClient) -> None:
         if not self._is_current(gen):
             return
+        self._checking = False
         self._bunker = client
-        self._clear_signer_unreachable()
         # A draft relay list that could not be read while the signer app
         # was away is read now that it answers; one still being read is
         # not asked for a second time.
@@ -432,19 +439,29 @@ class DraftSync(QObject):
         # them at that ``created_at``. Nothing else would ever ask again.
         self._requeue_failed_drafts()
         self._refresh_timer.start()
+        # The signer handed over may be one kept from earlier, which says
+        # nothing about the phone now: drafts that waited are asked for once
+        # it has answered a question (free right after a handshake).
+        self._pump_decrypt_queue()
+        self.ask_signer_again()
 
     def _on_bunker_unavailable(self, gen: int, reason: str) -> None:
         if not self._is_current(gen):
             return
-        # Without a signer we can't decrypt anything, so surface the
-        # failure but keep the wraps as skeleton rows: the user should
-        # see there *are* drafts, just locked.
-        self.status_changed.emit(_("Signer app unavailable: {reason}").format(reason=reason))
-        self._open_subscription()
+        self._checking = False
+        silent = is_signer_silent(reason)
+        if not silent:
+            self.status_changed.emit(
+                _("Signer app unavailable: {reason}").format(reason=reason))
+        # Without a signer we can't decrypt anything, but the drafts are
+        # read anyway: the user should see there *are* drafts, just
+        # locked. Once: a handshake asked again every minute does not read
+        # the relays again every minute.
+        if self._subscription is None:
+            self._open_subscription()
         # A handshake that went unanswered is the strongest evidence we
-        # ever get that nothing is listening, so there is no reason to
-        # spend two draft timeouts rediscovering it.
-        if is_signer_silent(reason):
+        # ever get that nothing is listening: the drafts wait for it.
+        if silent:
             self._latch_signer_unreachable()
 
     def _open_subscription(self) -> None:
@@ -597,15 +614,11 @@ class DraftSync(QObject):
     # -- internal: bunker decryption queue --------------------------------
 
     def _enqueue_decrypt(self, meta: DraftWrapMeta) -> None:
-        if self._bunker_unsupported or self._bunker is None:
-            # Nothing we can do until the signer is back.
+        if self._bunker_unsupported:
+            # This signer cannot decrypt at all.
             return
-        if self._signer_unreachable:
-            # Wraps keep arriving from the relays after we have given up
-            # asking. Marking them says so, where leaving them loading
-            # would show a row decrypting with nothing on its way.
-            self._store.set_failed(meta.identifier, _SIGNER_SILENT_REASON)
-            return
+        # Without a signer, or with one that is not answering, the draft
+        # waits in the queue like the others and is asked for once it is.
         # Latest-write wins: overwriting ``_pending[id]`` ensures the
         # newest ciphertext is what the pump picks up, even if an older
         # one is currently inflight. When the inflight completes we
@@ -626,7 +639,11 @@ class DraftSync(QObject):
             return
         if self._bunker is None or self._bunker_unsupported:
             return
-        if self._signer_unreachable:
+        if not self._signer_answers:
+            # Asked first whether anyone is there: a draft would spend 30
+            # seconds finding out, one at a time.
+            if self._pending:
+                self._check_signer()
             return
         while self._decrypt_queue:
             identifier = self._decrypt_queue.popleft()
@@ -673,7 +690,7 @@ class DraftSync(QObject):
         if not self._is_current(gen):
             return
         # Whatever the payload turns out to be, the signer replied, which
-        # is the only thing the unreachable latch is about.
+        # is the only thing the drafts were waiting for.
         self._clear_signer_unreachable()
         try:
             inner = parse_inner_event(plaintext)
@@ -722,42 +739,87 @@ class DraftSync(QObject):
             return
 
         if is_signer_silent(reason):
-            self._store.set_failed(identifier, _SIGNER_SILENT_REASON)
-            self._consecutive_silences += 1
-            if self._consecutive_silences >= _SILENCE_LIMIT:
-                self._latch_signer_unreachable()
-                return
-            self._after_decrypt(identifier)
+            # Nobody answered, which says nothing about the draft: it waits
+            # with the others, first in line (unless a newer version came
+            # meanwhile, which wins), until the signer app answers again.
+            self._decrypt_inflight = None
+            record = self._store.get(identifier)
+            if record is not None and record.ciphertext:
+                self._pending.setdefault(identifier, (record.event_id, record.ciphertext))
+                if identifier not in self._decrypt_queue:
+                    self._decrypt_queue.appendleft(identifier)
+            self._signer_answers = False
+            self._latch_signer_unreachable()
             return
 
-        # A reasoned refusal proves the signer is there, so it clears the
-        # silence tally even though this particular draft failed.
-        self._consecutive_silences = 0
+        # A reasoned refusal proves the signer is there, even though this
+        # particular draft failed.
+        self._clear_signer_unreachable()
         self._store.set_failed(identifier, reason or _("Could not decrypt"))
         self._after_decrypt(identifier)
 
-    def _latch_signer_unreachable(self) -> None:
-        """Stop asking a signer that is not there.
+    # -- internal: is the signer app there? ---------------------------------
 
-        Every draft still waiting is marked so the panel can offer a
-        retry per row, and the queue is emptied so a signer that comes
-        back does not first have to chew through a backlog of requests
-        the user has long stopped caring about.
+    def _check_signer(self) -> None:
+        """Ask the signer app whether it is there, one question at a time.
+
+        Without a signer yet (its handshake was not answered) the session
+        pool is asked for one, and its handshake is the same question. A
+        key kept on this computer is always there. A draft out for
+        decryption is a question already.
         """
+        if (self._profile is None or self._bunker_unsupported or self._checking
+                or self._decrypt_inflight is not None):
+            return
+        self._recheck_timer.stop()
+        self._checking = True
+        gen = self._generation
+        if self._bunker is None:
+            self._session_pool.get(
+                self._profile,
+                on_ready=lambda client, g=gen: self._on_bunker_ready(g, client),
+                on_error=lambda reason, g=gen: self._on_bunker_unavailable(g, reason),
+            )
+        elif isinstance(self._bunker, BunkerClient):
+            self._bunker.check_alive(
+                on_answer=lambda g=gen: self._on_signer_answered(g),
+                on_silence=lambda _reason, g=gen: self._on_signer_silent(g),
+            )
+        else:
+            self._on_signer_answered(gen)
+
+    def _on_signer_answered(self, gen: int) -> None:
+        if not self._is_current(gen):
+            return
+        self._checking = False
+        self._signer_answers = True
+        # Drafts that wait stay waiting until the signer answers one of
+        # them: an app that answers the question but leaves the draft
+        # unapproved on the phone would otherwise bring them back as rows
+        # for half a minute, every minute.
+        if not self._pending:
+            self._clear_signer_unreachable()
+        self._pump_decrypt_queue()
+
+    def _on_signer_silent(self, gen: int) -> None:
+        if not self._is_current(gen):
+            return
+        self._checking = False
+        self._signer_answers = False
+        self._latch_signer_unreachable()
+
+    def _latch_signer_unreachable(self) -> None:
+        """Nobody answered: the drafts not open yet wait, and the signer
+        app is asked again in a minute."""
+        self._recheck_timer.start()
         if self._signer_unreachable:
             return
         self._signer_unreachable = True
-        self._decrypt_queue.clear()
-        self._pending.clear()
-        self._decrypt_inflight = None
-        for record in list(self._store):
-            if record.state is DraftState.LOADING:
-                self._store.set_failed(record.identifier, _SIGNER_SILENT_REASON)
         self.signer_unreachable.emit(True)
 
     def _clear_signer_unreachable(self) -> None:
-        """The signer answered, so drop the latch and the tally."""
-        self._consecutive_silences = 0
+        """The signer answered: drafts are asked for as they come again."""
+        self._recheck_timer.stop()
         if not self._signer_unreachable:
             return
         self._signer_unreachable = False

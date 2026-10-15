@@ -290,6 +290,7 @@ class FakeRemote(QObject):
             self.is_connected = True
             on_success()
         self.answer = answer
+        self.silence = lambda: on_failure("timed out waiting for signer")
 
     def close(self, reason=""):
         self.closed = True
@@ -373,6 +374,17 @@ def test_a_dropped_signer_is_closed_and_deleted(tmp_path):
     pool.get(local_profile(pubkey), got.append, print)
     pool.close_all()
     assert deleted(got[1])
+
+
+def test_a_signer_app_that_did_not_answer_leaves_nothing_behind(tmp_path, fake_remote):
+    # Drafts ask again every minute while they wait for the signer app:
+    # each handshake nobody answered is closed and deleted, not kept.
+    pool = BunkerSessionPool(pool=None, vault=KeyVault(tmp_path / "nostr_keys.json"))
+    errors = []
+    pool.get(remote_profile("a" * 64), print, errors.append)
+    fake_remote[0].silence()
+    assert errors == ["timed out waiting for signer"]
+    assert fake_remote[0].closed and deleted(fake_remote[0])
 
 
 class BrokenRemote(FakeRemote):

@@ -321,8 +321,9 @@ def test_per_call_failure_does_not_latch():
 # --------------------------------------------------------------------------- #
 
 def test_retry_decrypt_resends_ciphertext_after_timeout():
-    """User missed the Amber prompt → decrypt timed out → retry must
-    re-send the exact same ciphertext without needing a relay re-fetch."""
+    """User missed the Amber prompt → decrypt timed out → the draft waits
+    → retry must re-send the exact same ciphertext without needing a
+    relay re-fetch."""
     sync = _make_sync()
     sync._profile = _make_profile(PK)
     sync._store.bind_profile(PK)
@@ -344,14 +345,14 @@ def test_retry_decrypt_resends_ciphertext_after_timeout():
         sync._generation, "x", "e1", "timed out waiting for signer",
     )
     record = sync._store.get("x")
-    assert record.state is DraftState.FAILED
-    # The row says who is not answering rather than quoting the transport,
-    # because the person reading it is holding the thing that has to change.
-    assert "signer" in record.failure_reason
+    # Nobody answering is not the draft's failure: it waits for the
+    # signer app, with nothing to say on its row.
+    assert record.state is DraftState.LOADING
+    assert record.failure_reason == ""
     # Ciphertext still cached
     assert record.ciphertext == "THE-CIPHERTEXT"
 
-    # User clicks retry, same ciphertext sent again, state flips to LOADING
+    # The person tries again: the same ciphertext is sent again
     sync.retry_decrypt("x")
     assert calls == ["THE-CIPHERTEXT", "THE-CIPHERTEXT"]
     assert sync._store.get("x").state is DraftState.LOADING
