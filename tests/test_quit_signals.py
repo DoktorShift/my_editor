@@ -97,7 +97,17 @@ def test_the_app_started_from_a_terminal_quits_on_the_signal(tmp_path, number, s
     app = subprocess.Popen([sys.executable, os.path.join(root, "main.py")], cwd=root, env=env,
                            stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
     try:
-        time.sleep(4)                              # up and in its event loop
+        # Up: its window takes a second launch's files (the local socket
+        # it listens on), however long a busy machine takes to start it.
+        from PySide6.QtNetwork import QLocalSocket
+        deadline = time.monotonic() + 60
+        while time.monotonic() < deadline and app.poll() is None:
+            probe = QLocalSocket()
+            probe.connectToServer(env["MYEDITOR_IPC_NAME"])
+            if probe.waitForConnected(200):
+                probe.disconnectFromServer()
+                break
+            time.sleep(0.2)
         assert app.poll() is None, app.stdout.read().decode(errors="replace")
         os.kill(app.pid, number)
         output, _ = app.communicate(timeout=20)
