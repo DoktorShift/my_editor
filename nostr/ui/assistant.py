@@ -573,7 +573,14 @@ class AssistantWindow(QDialog):
         narrowest = layout.totalMinimumSize().width()
         width = self._scroll.viewport().width()
         if not self.isVisible() or width <= 0:
-            width = max(self.width(), self.minimumWidth()) - sides
+            # Not on screen yet: measured at the width it opens at, its size
+            # hint's, unless it was given one. (Its own width is a child's
+            # first size until then, or its least width; measured there,
+            # the page's words wrapped more than they are shown, and the
+            # window opened taller than its page.)
+            opens_at = (self.width() if self.testAttribute(Qt.WidgetAttribute.WA_Resized)
+                        else self.sizeHint().width())
+            width = max(opens_at, self.minimumWidth()) - sides
         width = max(width, narrowest)
         if layout.hasHeightForWidth():
             needed = layout.totalHeightForWidth(width)

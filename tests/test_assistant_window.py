@@ -168,3 +168,60 @@ def test_a_menu_in_place_of_a_handler_makes_a_pull_down_button():
     window.show_page("page", [("done", "Done", DEFAULT, window.accept)])
     assert "manage" not in window.buttons
     assert menu.actions()[0].text() == "Copy"
+
+
+def test_a_window_opens_as_tall_as_its_page_needs():
+    # Every assistant the app opens has the main window as its parent, and
+    # such a window is laid out before it is shown at a width it is never
+    # shown at (its least width, or a child's first size): its wrapped
+    # words were measured narrower than they are shown, and it opened
+    # taller than its page, with an empty band above its buttons.
+    from PySide6.QtCore import QSize, Qt
+    from PySide6.QtWidgets import QWidget
+
+    class Row(QWidget):
+        """A row that would like more room than the window's least width
+        gives it (a row of controls), and makes do with less."""
+
+        def sizeHint(self):
+            return QSize(520, 10)
+
+        def minimumSizeHint(self):
+            return QSize(100, 10)
+
+    parent = QWidget()
+    window = AssistantWindow("Test", is_dark=False, parent=parent)
+    window.setWindowFlag(Qt.WindowType.Window, True)
+    body, column = page()
+    column.addWidget(Row())
+    window.add_page("page", body)
+    window.show_page("page", [("done", "Done", DEFAULT, window.accept)])
+    margins = window.layout().contentsMargins()
+    sides = margins.left() + margins.right()
+    least = window.minimumWidth() - sides
+    opens_at = window.sizeHint().width() - sides       # its size hint's, as a window opens
+    # Lines that wrap at the window's least width and fit on one line at
+    # the width it opens at (both differ from one system's fonts to the
+    # next), measured with the page's own labels and style.
+    lines = [text_label("", "") for _ in range(6)]
+    for line in lines:
+        column.addWidget(line)
+    first = lines[0]
+    first.ensurePolished()
+    pattern = "word " * 40
+    while first.heightForWidth(least) <= first.heightForWidth(opens_at):
+        assert len(first.text()) < len(pattern), "no line wraps only at the least width"
+        first.setText(pattern[:len(first.text()) + 1])
+    for line in lines:
+        line.setText(first.text())
+    settle()
+    # Measured at the width it opens at.
+    assert window.sizeHint().width() - sides == opens_at
+    assert window._stack.minimumHeight() == body.layout().totalHeightForWidth(opens_at)
+    window.show()
+    settle()
+    try:
+        assert window.height() == window.minimumHeight()
+        assert window._scroll.height() == window._stack.minimumHeight()
+    finally:
+        window.close()
