@@ -34,6 +34,11 @@ PAD: int = 14
 RADIUS: int = 8
 
 
+# What a cover's box says while its picture comes, and when it can't.
+IMAGE_WAITING = _("Loading image…")
+IMAGE_UNAVAILABLE = _("Image unavailable")
+
+
 # --------------------------------------------------------------------------- #
 # Style                                                                       #
 # --------------------------------------------------------------------------- #

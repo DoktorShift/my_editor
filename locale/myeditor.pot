@@ -4629,7 +4629,7 @@ msgid "The password is wrong."
 msgstr ""
 
 #: nostr/preview.py:451
-#: nostr/ui/drafts_preview.py:471
+#: nostr/ui/drafts_preview.py:468
 #: nostr/ui/publish_article_dialog.py:632
 #, python-brace-format
 msgid "{n} min read"
@@ -6980,7 +6980,7 @@ msgid "Press Return to retry"
 msgstr ""
 
 #: nostr/ui/drafts_panel.py:455
-#: nostr/ui/drafts_preview.py:425
+#: nostr/ui/drafts_preview.py:422
 #, python-brace-format
 msgid "Saved {time}"
 msgstr ""
@@ -7023,82 +7023,74 @@ msgstr ""
 msgid "View: {title}"
 msgstr ""
 
-#: nostr/ui/drafts_preview.py:249
-msgid "Loading image…"
-msgstr ""
-
-#: nostr/ui/drafts_preview.py:250
-msgid "Image unavailable"
-msgstr ""
-
-#: nostr/ui/drafts_preview.py:383
+#: nostr/ui/drafts_preview.py:380
 msgid "Expired"
 msgstr ""
 
-#: nostr/ui/drafts_preview.py:386
+#: nostr/ui/drafts_preview.py:383
 msgid "Expires today"
 msgstr ""
 
-#: nostr/ui/drafts_preview.py:472
-#: nostr/ui/drafts_preview.py:566
+#: nostr/ui/drafts_preview.py:469
+#: nostr/ui/drafts_preview.py:563
 #, python-brace-format
 msgid "{n} word"
 msgid_plural "{n} words"
 msgstr[0] ""
 msgstr[1] ""
 
-#: nostr/ui/drafts_preview.py:565
+#: nostr/ui/drafts_preview.py:562
 #, python-brace-format
 msgid "{n} minute read"
 msgid_plural "{n} minutes read"
 msgstr[0] ""
 msgstr[1] ""
 
-#: nostr/ui/drafts_preview.py:387
+#: nostr/ui/drafts_preview.py:384
 #, python-brace-format
 msgid "Expires in {n} day"
 msgid_plural "Expires in {n} days"
 msgstr[0] ""
 msgstr[1] ""
 
-#: nostr/ui/drafts_preview.py:947
+#: nostr/ui/drafts_preview.py:944
 msgid "Draft preview"
 msgstr ""
 
-#: nostr/ui/drafts_preview.py:956
+#: nostr/ui/drafts_preview.py:953
 msgid "Preview of one draft. Press Escape to close."
 msgstr ""
 
-#: nostr/ui/drafts_preview.py:435
+#: nostr/ui/drafts_preview.py:432
 #, python-brace-format
 msgid "+{n} more"
 msgid_plural "+{n} more"
 msgstr[0] ""
 msgstr[1] ""
 
-#: nostr/ui/drafts_preview.py:567
+#: nostr/ui/drafts_preview.py:564
 #, python-brace-format
 msgid "{reading_time}, {word_count}"
 msgstr ""
 
-#: nostr/ui/drafts_preview.py:573
+#: nostr/ui/drafts_preview.py:570
 #, python-brace-format
 msgid "Tagged {tags}"
 msgstr ""
 
-#: nostr/ui/drafts_preview.py:1159
+#: nostr/ui/drafts_preview.py:1156
 #: nostr/ui/reader_window.py:68
 #, python-brace-format
 msgid "Preview of {title}"
 msgstr ""
 
-#: nostr/ui/drafts_preview.py:409
-#: nostr/ui/drafts_preview.py:422
+#: nostr/ui/drafts_preview.py:406
+#: nostr/ui/drafts_preview.py:419
 #, python-brace-format
 msgid "Published {date}"
 msgstr ""
 
-#: nostr/ui/drafts_preview.py:2005
+#: nostr/ui/drafts_preview.py:2009
 msgid "Open in New Window"
 msgstr ""
 
@@ -8967,16 +8959,24 @@ msgstr ""
 msgid "Previous 30 Days"
 msgstr ""
 
-#: nostr/ui/preview_parts.py:246
+#: nostr/ui/preview_parts.py:38
+msgid "Loading image…"
+msgstr ""
+
+#: nostr/ui/preview_parts.py:39
+msgid "Image unavailable"
+msgstr ""
+
+#: nostr/ui/preview_parts.py:251
 msgid "Article image"
 msgstr ""
 
-#: nostr/ui/preview_parts.py:367
+#: nostr/ui/preview_parts.py:372
 msgid "Text"
 msgstr ""
 
-#: nostr/ui/preview_parts.py:427
-#: nostr/ui/preview_parts.py:428
+#: nostr/ui/preview_parts.py:432
+#: nostr/ui/preview_parts.py:433
 msgid "More"
 msgstr ""
 

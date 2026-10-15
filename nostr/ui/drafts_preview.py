@@ -108,7 +108,7 @@ from .drafts_common import (
     source_host,
 )
 from .preview_parts import (
-    PAD, RADIUS, ActionBar, ClampedLabel, HeroImage, PreviewAction, PreviewFields,
+    IMAGE_UNAVAILABLE, IMAGE_WAITING, PAD, RADIUS, ActionBar, ClampedLabel, HeroImage, PreviewAction, PreviewFields,
     PreviewReader, body_font, preview_css, title_font,
 )
 from .reader_window import ReaderWindow
@@ -245,9 +245,6 @@ _EXPIRY_HORIZON_DAYS: int = 14
 
 _NO_TITLE = _("(no title)")
 _SEP = " · "
-
-_IMAGE_WAITING = _("Loading image…")
-_IMAGE_UNAVAILABLE = _("Image unavailable")
 
 
 # --------------------------------------------------------------------------- #
@@ -1967,8 +1964,15 @@ class PreviewController(QObject):
                 owner.preview_act(post, key)
         window.action_chosen.connect(act)
         pixmap = popover.image_pixmap()
+        url = popover.fields().image_url
         if pixmap is not None:
             window.set_image(pixmap)
+        elif url and self._loader is not None and url not in self._image_failures:
+            # Not here yet: the window asks for it itself (from the cache
+            # when it has come meanwhile).
+            window.load_image(self._loader, url)
+        elif url:
+            window.set_image_note(IMAGE_UNAVAILABLE)
         where = popover.card_rect().topLeft()
         self.close()
         window.move(where)
@@ -2123,7 +2127,7 @@ class PreviewController(QObject):
             # then no box was reserved at all: the user did not ask for
             # an image and cannot act on the refusal. A box that was
             # reserved and cannot be filled is the only case that speaks.
-            popover.set_image_note(_IMAGE_UNAVAILABLE)
+            popover.set_image_note(IMAGE_UNAVAILABLE)
             return
         self._image_url = url
         self._slow.start(PREVIEW_IMAGE_SLOW_MS)
@@ -2134,7 +2138,7 @@ class PreviewController(QObject):
             # ``loading.md``: "Show something as soon as possible... show
             # placeholder text, graphics, or animations as content loads,
             # replacing these elements as content becomes available."
-            self._popover.set_image_note(_IMAGE_WAITING)
+            self._popover.set_image_note(IMAGE_WAITING)
 
     def _on_image_ready(self, url: str, _sha: str, pixmap) -> None:
         if url != self._image_url or self._popover is None:
@@ -2147,7 +2151,7 @@ class PreviewController(QObject):
         if url != self._image_url or self._popover is None:
             return
         self._slow.stop()
-        self._popover.set_image_note(_IMAGE_UNAVAILABLE)
+        self._popover.set_image_note(IMAGE_UNAVAILABLE)
 
     # -- helpers -----------------------------------------------------------
 
