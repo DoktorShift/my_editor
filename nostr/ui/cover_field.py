@@ -147,7 +147,11 @@ class _Well(QLabel):
         self._picture = QPixmap()
         self._wide = wide
         if wide:
-            self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+            # Its height follows its width (16:9), which a layout asks only
+            # when the size policy says so.
+            policy = QSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+            policy.setHeightForWidth(True)
+            self.setSizePolicy(policy)
             self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
 
     def setPixmap(self, picture: QPixmap) -> None:  # noqa: N802, Qt's name

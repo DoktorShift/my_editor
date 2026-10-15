@@ -74,7 +74,11 @@ class _CoverBanner(QWidget):
 
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
-        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        # Its height follows its width, which a layout asks only when the
+        # size policy says so.
+        policy = QSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        policy.setHeightForWidth(True)
+        self.setSizePolicy(policy)
         self._picture = QPixmap()
         self._words = ""
         self._dark = False
@@ -88,6 +92,25 @@ class _CoverBanner(QWidget):
 
     def sizeHint(self) -> QSize:  # noqa: N802, Qt's name
         return QSize(480, self.heightForWidth(480))
+
+    def resizeEvent(self, event) -> None:  # noqa: N802, Qt's name
+        super().resizeEvent(event)
+        self._place_corner()
+
+    def set_corner(self, widget: QWidget) -> None:
+        """``widget`` sits in the bottom right corner, over the picture. Placed
+        by hand: a layout of its own would answer for the banner's height
+        (Qt asks a widget's layout, not the widget, for it)."""
+        widget.setParent(self)
+        self._corner = widget
+        self._place_corner()
+
+    def _place_corner(self) -> None:
+        corner = getattr(self, "_corner", None)
+        if corner is not None:
+            size = corner.sizeHint()
+            corner.setGeometry(self.width() - size.width() - 10,
+                               self.height() - size.height() - 10, size.width(), size.height())
 
     def set_picture(self, picture: QPixmap, words: str = "") -> None:
         self._picture, self._words = picture, words
@@ -205,13 +228,10 @@ class ArticleHeader(HeaderWidget):
 
         self.banner = _CoverBanner(self)
         self.banner.setAccessibleName(_("Cover"))
-        bar = QHBoxLayout(self.banner)
-        bar.setContentsMargins(10, 10, 10, 10)
-        bar.addStretch(1)
-        self.change_cover = QPushButton(_("Change Cover…"), self.banner)
-        self.remove_cover = QPushButton(_("Remove"), self.banner)
-        self.remove_cover.setAccessibleName(_("Remove Cover"))
         self._cover_actions = QWidget(self.banner)
+        self.change_cover = QPushButton(_("Change Cover…"), self._cover_actions)
+        self.remove_cover = QPushButton(_("Remove"), self._cover_actions)
+        self.remove_cover.setAccessibleName(_("Remove Cover"))
         actions = QHBoxLayout(self._cover_actions)
         actions.setContentsMargins(0, 0, 0, 0)
         actions.setSpacing(6)
@@ -220,7 +240,7 @@ class ArticleHeader(HeaderWidget):
             button.setAutoDefault(False)
             button.setFocusPolicy(Qt.FocusPolicy.TabFocus)
             actions.addWidget(button)
-        bar.addWidget(self._cover_actions, 0, Qt.AlignmentFlag.AlignBottom)
+        self.banner.set_corner(self._cover_actions)
         self._cover_actions_look = QGraphicsOpacityEffect(self._cover_actions)
         self._cover_actions.setGraphicsEffect(self._cover_actions_look)
         self.change_cover.clicked.connect(self.cover_requested)

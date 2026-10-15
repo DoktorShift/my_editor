@@ -121,3 +121,13 @@ def test_the_summary_grows_with_its_lines_up_to_five(header):
 def test_every_control_has_a_name(header):
     header.show_article("", "", "https://cdn.example/cover.jpg")
     assert unnamed_controls(header) == []
+
+
+def test_a_cover_takes_its_16_by_9_room_on_the_page(header):
+    without = header.height_for(480)
+    header.show_article("Title", "", "https://cdn.example/cover.jpg")
+    QApplication.processEvents()
+    assert header.height_for(480) >= without + 480 * 9 // 16 - header.add_cover.sizeHint().height()
+    header.resize(480, header.height_for(480))
+    QApplication.processEvents()
+    assert header.banner.height() == 480 * 9 // 16
