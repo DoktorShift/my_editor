@@ -41,7 +41,8 @@ Edit > Speech reads a draft aloud.
 NIP-46, keep private encrypted drafts that sync across your devices, and manage
 media on your own Blossom servers. New to Nostr? Create an account in the app,
 with a password-protected backup. EINUNDZWANZIG membership lives in the Nostr
-menu too, and members get the members' relay and media server.
+menu too: members get the members' relay, media storage and a Nostr address,
+and see all of it at a glance.
 [Read the Nostr guide](docs/nostr.md).
 
 **Import from anywhere.** Nostr > Imports follows websites and keeps their new
