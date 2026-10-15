@@ -20,7 +20,7 @@ from PySide6.QtCore import (
 from PySide6.QtGui import (
     QPainter, QTextBlockFormat, QTextCursor, QTextCharFormat, QColor, QClipboard, QPen,
     QTextOption, QImage, QPixmap, QTextDocument, QTextDocumentFragment, QTextFormat,
-    QDesktopServices, QKeyEvent,
+    QDesktopServices, QFont, QKeyEvent,
 )
 from PySide6.QtWidgets import QTextEdit, QMenu, QApplication, QToolTip, QWidget
 from constants import (
@@ -664,11 +664,13 @@ class HtmlEditor(QTextEdit):
         self._update_paper_margins()
         self.viewport().update()
 
-    def set_writing_font(self, writing: bool) -> None:
-        """Writing (Markdown, drafts): the system's text font at a reading
-        size, in a column of a comfortable line length. Otherwise (code,
-        plain text): the monospace font across the whole width."""
-        self.setFont(writing_font() if writing else code_font())
+    def set_writing_font(self, writing: bool, font: Optional[QFont] = None) -> None:
+        """Writing (Markdown, drafts): a text font at a reading size, in a
+        column of a comfortable line length. Otherwise (code, plain text):
+        the monospace font across the whole width. ``font``: the one chosen
+        (Settings: the writing font, and the app's text size); the defaults
+        when not given."""
+        self.setFont(font if font is not None else (writing_font() if writing else code_font()))
         self._writing_measure_chars = WRITING_MEASURE if writing else None
         self._update_paper_margins()
         self.viewport().update()

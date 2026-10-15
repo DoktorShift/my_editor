@@ -67,8 +67,10 @@ import media_files
 import slash_menu
 from slash_menu import SlashItem
 from table_picker import TablePicker
+import fonts
 import spelling
 import preview_pane
+from text_size import ACTUAL as ACTUAL_TEXT_SIZE, text_size
 from preview_pane import (
     ARTICLE, DOCUMENT, NOTE, PREVIEW, SPLIT, SPLIT_MIN_WIDTH, WRITE, PreviewContent, PreviewPane,
     ViewSwitch,
@@ -1205,13 +1207,17 @@ class MainWindow(QMainWindow):
         menu.addSeparator()
 
     def _update_editor_font(self, editor) -> None:
-        """Writing in the system's text font, code and plain text in the
-        monospace font (View > Use Monospace Font for Writing sets all
-        writing in monospace too)."""
-        writing = (not self.monospace_writing
+        """Writing in the font chosen in Settings, code and plain text in
+        the monospace font (Monospace as the writing font, View > Use
+        Monospace Font for Writing, sets writing that way too); both at the
+        app's text size (text_size.py)."""
+        writing = (self.writing_family != fonts.MONOSPACE
                    and (self._editor_kind(editor) == "rich"
                         or getattr(editor, "_markdown_source", False)))
-        editor.set_writing_font(writing)
+        size = text_size()
+        font = (fonts.writing_font(size.pixels(fonts.WRITING_PIXEL_SIZE), self.writing_family)
+                if writing else fonts.code_font(size.pixels(fonts.CODE_PIXEL_SIZE)))
+        editor.set_writing_font(writing, font)
         headers = getattr(self, "_article_headers", None)
         if headers is not None:
             headers.update(editor)               # its head in the new font
@@ -1563,6 +1569,7 @@ class MainWindow(QMainWindow):
         self._update_status_bar()  # also calls _update_format_buttons
         self._update_knit_actions()
         self._update_print_actions()
+        self._update_zoom_commands()
         # The global find bar searches editors only; a PDF tab carries
         # its own find bar, so retire the editor one when switching over.
         if self.findbar.isVisible() and self.current_pdf_viewer() is not None:
@@ -2328,8 +2335,36 @@ class MainWindow(QMainWindow):
                                   checked=self.view_mode == SPLIT)
         for action in (self.act_view_write, self.act_view_preview, self.act_view_split):
             self._view_group.addAction(action)
-        # Writing in the monospace font, for those who prefer it (Q-K).
-        self.monospace_writing = bool(load_settings().get("monospace_writing", False))
+        # The writing font chosen in Settings (fonts.SYSTEM, SERIF, MONOSPACE
+        # or a family's name). Writing in the monospace font (Q-K) is its
+        # Monospace, remembered before there was a choice of fonts.
+        settings = load_settings()
+        family = settings.get("writing_font")
+        if not isinstance(family, str) or not family:
+            family = fonts.MONOSPACE if settings.get("monospace_writing") else fonts.SYSTEM
+        self.writing_family = family
+        # The font writing goes back to when Monospace is turned off.
+        self._proportional_family = family if family != fonts.MONOSPACE else fonts.SYSTEM
+        self.monospace_writing = family == fonts.MONOSPACE
+        # How big the documents' text reads (text_size.py), for the whole app.
+        stored = settings.get("text_size", ACTUAL_TEXT_SIZE)
+        text_size().set_percent(stored if isinstance(stored, (int, float)) else ACTUAL_TEXT_SIZE)
+        text_size().changed.connect(self._on_text_size_changed)
+        self.act_zoom_in = add(
+            Command("view.zoom_in", _("Zoom In"), VIEW,
+                    standard_and(QKeySequence.StandardKey.ZoomIn, "Ctrl+="),
+                    keywords=(_("bigger"), _("text size"), _("font size"))),
+            triggered=text_size().grow)
+        self.act_zoom_out = add(
+            Command("view.zoom_out", _("Zoom Out"), VIEW,
+                    standard_and(QKeySequence.StandardKey.ZoomOut),
+                    keywords=(_("smaller"), _("text size"), _("font size"))),
+            triggered=text_size().shrink)
+        # Command-0 on a Mac; elsewhere Ctrl+0 is Body (as in LibreOffice).
+        self.act_actual_size = add(
+            Command("view.actual_size", _("Actual Size"), VIEW, platform_keys("Ctrl+0", None),
+                    keywords=(_("text size"), _("font size"), _("reset"))),
+            triggered=text_size().reset)
         style = load_settings().get("caret_style", DEFAULT_CARET_STYLE)
         self.caret_style = style if style in CARET_STYLES else DEFAULT_CARET_STYLE
         self.act_monospace_writing = add(
@@ -2534,10 +2569,12 @@ class MainWindow(QMainWindow):
                     keywords=(_("focus"), _("panel"))),
             triggered=lambda: self._move_to_pane(-1))
         # The PDF reader's own keys never take a command's, but those of
-        # the editing commands, which are off in a PDF tab.
+        # the editing commands and of the text size (Zoom In, Zoom Out and
+        # Actual Size, the reader's own zoom keys there), which are off in a
+        # PDF tab.
         editor_only = {action.objectName() for action in (
             *self._editor_actions, *self._rich_actions, *self._block_actions,
-            *self._word_actions)}
+            *self._word_actions, self.act_zoom_in, self.act_zoom_out, self.act_actual_size)}
         self.commands.refuse_clashes(
             "the PDF reader",
             [keys for _s, _w, act, tab_keys, view_keys in pdf_reader_keys() if act is not None
@@ -2696,6 +2733,9 @@ class MainWindow(QMainWindow):
         m_view.addAction(self.act_view_split)
         m_view.addSeparator()
         m_view.addAction(self.act_show_toolbar)
+        m_view.addSeparator()
+        for action in (self.act_zoom_in, self.act_zoom_out, self.act_actual_size):
+            m_view.addAction(action)
         m_view.addSeparator()
         m_view.addAction(self.act_monospace_writing)
         m_view.addSeparator()
@@ -4966,7 +5006,8 @@ class MainWindow(QMainWindow):
                 appearance=self.act_appearance,
                 languages=list(zip(self._language_codes, self.act_languages)),
                 choose_language=lambda code: self._choose_language(code, tell=False),
-                monospace=self.act_monospace_writing,
+                writing_family=lambda: self.writing_family,
+                choose_writing_family=self.set_writing_family,
                 paste_choice=self._paste_choice,
                 choose_paste=self._store_paste_choice,
                 nostr_in_use=lambda: self.nostr_state.active,
@@ -5620,13 +5661,49 @@ class MainWindow(QMainWindow):
         save_setting("markdown_shortcuts", self.markdown_shortcuts)
 
     def _set_monospace_writing(self, on: bool) -> None:
-        """View > Use Monospace Font for Writing, remembered."""
-        self.monospace_writing = bool(on)
+        """View > Use Monospace Font for Writing: Monospace as the writing
+        font, or back to the one before it."""
+        self.set_writing_family(fonts.MONOSPACE if on else self._proportional_family)
+
+    def set_writing_family(self, family: str) -> None:
+        """The writing font (Settings), remembered, in every open document;
+        View > Use Monospace Font for Writing shows whether it is Monospace."""
+        family = family or fonts.SYSTEM
+        if family != fonts.MONOSPACE:
+            self._proportional_family = family
+        self.writing_family = family
+        self.monospace_writing = family == fonts.MONOSPACE
+        save_setting("writing_font", family)
         save_setting("monospace_writing", self.monospace_writing)
-        for i in range(self.tabs.count()):
-            ed = self._editor_from_widget(self.tabs.widget(i))
-            if ed is not None:
-                self._update_editor_font(ed)
+        if self.act_monospace_writing.isChecked() != self.monospace_writing:
+            # Shown, not acted on again: its toggled() is what called here.
+            self.act_monospace_writing.blockSignals(True)
+            self.act_monospace_writing.setChecked(self.monospace_writing)
+            self.act_monospace_writing.blockSignals(False)
+        self._update_all_editor_fonts()
+        if getattr(self, "_settings_window", None) is not None:
+            self._settings_window.refresh()
+
+    def _update_all_editor_fonts(self) -> None:
+        for ed in self._all_editors():
+            self._update_editor_font(ed)
+
+    def _on_text_size_changed(self, percent: int) -> None:
+        """The app's text size changed (View > Zoom In, Zoom Out, Actual
+        Size, or Settings): remembered, in every document, and said."""
+        save_setting("text_size", percent)
+        self._update_all_editor_fonts()
+        self._update_zoom_commands()
+        self.status.showMessage(_("Text Size: {percent} %").format(percent=percent), 2500)
+
+    def _update_zoom_commands(self) -> None:
+        """Zoom In, Zoom Out and Actual Size size a document's text; a PDF
+        tab zooms with its own keys, the same ones."""
+        text = self.current_editor() is not None and self.current_pdf_viewer() is None
+        size = text_size()
+        self.act_zoom_in.setEnabled(text and size.can_grow())
+        self.act_zoom_out.setEnabled(text and size.can_shrink())
+        self.act_actual_size.setEnabled(text and size.percent() != ACTUAL_TEXT_SIZE)
 
     def _set_web_reader(self, key: str) -> None:
         """Settings: the reading app published posts open in."""

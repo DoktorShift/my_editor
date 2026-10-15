@@ -12,11 +12,14 @@ on Windows names a generic family it cannot find), to the first
 installed family that has them. Style sheets cannot carry that fallback,
 so they use ``monospace_family()``, the family Qt really draws with.
 
-Writing (Markdown files and drafts) is set in ``writing_font()``: the
-system's own text font (San Francisco on a Mac, Segoe UI on Windows,
-the desktop's font on Linux), asked for as the system font rather than
-by a family name that may not be installed, at a size made for reading
-on screen.
+Writing (Markdown files and drafts) is set in ``writing_font()``, in the
+font chosen in Settings: the system's own text font by default (San
+Francisco on a Mac, Segoe UI on Windows, the desktop's font on Linux),
+asked for as the system font rather than by a family name that may not
+be installed; a serif made for reading on screen, the first each system
+ships (Iowan Old Style or Charter on a Mac, Georgia on Windows, Noto
+Serif or DejaVu Serif on Linux); the monospace font; or any installed
+family. The size is one made for reading on screen.
 """
 
 from __future__ import annotations
@@ -63,11 +66,35 @@ WRITING_PIXEL_SIZE = 16
 CODE_PIXEL_SIZE = 14
 
 
-def writing_font(pixel_size: int = WRITING_PIXEL_SIZE) -> QFont:
-    """The system's proportional text font, for writing. Needs a
-    QGuiApplication."""
-    font = QFontDatabase.systemFont(QFontDatabase.SystemFont.GeneralFont)
-    font.setStyleHint(QFont.StyleHint.SansSerif)
+# The writing fonts offered: the system's, a serif, the monospace font;
+# any other value is an installed family's name.
+SYSTEM, SERIF, MONOSPACE = "system", "serif", "monospace"
+
+# Serifs made for reading on screen, in the order looked for: what a Mac,
+# Windows and the common Linux desktops ship.
+SERIF_FAMILIES = ("Iowan Old Style", "Charter", "Georgia", "Cambria", "Noto Serif",
+                  "DejaVu Serif", "Liberation Serif")
+
+
+def serif_family() -> str:
+    """The first reading serif this system has; "" when it has none."""
+    return next((family for family in SERIF_FAMILIES if QFontDatabase.hasFamily(family)), "")
+
+
+def writing_font(pixel_size: int = WRITING_PIXEL_SIZE, family: str = SYSTEM) -> QFont:
+    """The font for writing at ``pixel_size``: ``family`` is SYSTEM, SERIF,
+    MONOSPACE or an installed family's name (the system's font when it is
+    not installed). Needs a QGuiApplication."""
+    if family == MONOSPACE:
+        font = monospace_font()
+    elif family == SERIF and serif_family():
+        font = QFont(serif_family())
+        font.setStyleHint(QFont.StyleHint.Serif)
+    elif family not in (SYSTEM, SERIF) and QFontDatabase.hasFamily(family):
+        font = QFont(family)
+    else:
+        font = QFontDatabase.systemFont(QFontDatabase.SystemFont.GeneralFont)
+        font.setStyleHint(QFont.StyleHint.SansSerif)
     font.setPixelSize(pixel_size)
     return font
 

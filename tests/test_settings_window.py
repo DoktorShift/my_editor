@@ -61,8 +61,7 @@ class Fixture:
         self.language_group, languages = group_of(("system", "en", "de"), "en")
         self.languages = list(languages.items())
         self.chosen_languages = []
-        self.monospace = QAction("Use Monospace Font for Writing")
-        self.monospace.setCheckable(True)
+        self.family = "system"
         self.paste = paste
         self.nostr = nostr
         self.format_bar = format_bar
@@ -71,7 +70,8 @@ class Fixture:
             action.triggered.connect(lambda _c=False, m=mode: self.triggered.append(m))
         self.window = SettingsWindow(
             appearance=self.appearance, languages=self.languages,
-            choose_language=self.chosen_languages.append, monospace=self.monospace,
+            choose_language=self.chosen_languages.append,
+            writing_family=lambda: self.family, choose_writing_family=self._store_family,
             paste_choice=lambda: self.paste, choose_paste=self._store_paste,
             nostr_in_use=lambda: self.nostr,
             format_bar=lambda: self.format_bar, choose_format_bar=self._store_format_bar,
@@ -79,6 +79,9 @@ class Fixture:
 
     def _store_format_bar(self, on):
         self.format_bar = on
+
+    def _store_family(self, family):
+        self.family = family
 
     def _store_paste(self, value):
         self.paste = value
@@ -96,8 +99,9 @@ def test_a_choice_in_the_menu_shows_in_the_window():
     f.appearance["light"].trigger()
     assert f.window.appearance_buttons["light"].isChecked()
     assert not f.window.appearance_buttons["system"].isChecked()
-    f.monospace.setChecked(True)
-    assert f.window.monospace.isChecked()
+    f.family = "monospace"                               # View > Use Monospace Font…
+    f.window.refresh()
+    assert f.window.font.currentData() == "monospace"
     f.languages[2][1].setChecked(True)
     assert f.window.language.currentData() == "de"
 
@@ -124,10 +128,47 @@ def test_the_language_shown_is_the_one_chosen_and_choosing_remembers_it():
     assert f.chosen_languages == ["de"]
 
 
-def test_the_writing_font_is_the_view_menu_command():
+@pytest.fixture(autouse=True)
+def actual_text_size():
+    # The text size is the app's: each test leaves it as it found it.
+    yield
+    from text_size import ACTUAL, text_size
+    text_size().set_percent(ACTUAL)
+
+
+def test_the_writing_font_is_chosen_from_fonts_named_in_themselves():
     f = Fixture()
-    f.window.monospace.click()
-    assert f.monospace.isChecked()
+    font = f.window.font
+    titles = [font.itemText(i) for i in range(font.count()) if font.itemText(i)]
+    assert titles == ["System", "Serif", "Monospace", "Other…"]
+    assert font.itemData(1, Qt.ItemDataRole.FontRole) is not None   # shown in itself
+    font.activated.emit(1)
+    assert f.family == "serif"
+
+
+def test_other_opens_the_systems_font_panel_and_shows_the_font_picked(monkeypatch):
+    from PySide6.QtGui import QFont
+    from PySide6.QtWidgets import QFontDialog
+    import fonts
+    family = fonts.monospace_family()                   # one installed everywhere
+    monkeypatch.setattr(QFontDialog, "getFont", staticmethod(
+        lambda *args, **kwargs: (QFont(family), True)))
+    f = Fixture()
+    f.window.font.activated.emit(f.window.font.findData("other"))
+    assert f.family == family
+    f.window.refresh()
+    assert f.window.font.currentText() == family
+
+
+def test_the_text_size_is_a_slider_the_view_menu_moves_too():
+    from text_size import STEPS, text_size
+    f = Fixture()
+    slider = f.window.text_size
+    assert slider.maximum() == len(STEPS) - 1 and STEPS[slider.value()] == 100
+    slider.setValue(STEPS.index(125))
+    assert text_size().percent() == 125 and f.window.text_size_value.text() == "125 %"
+    text_size().shrink()                                 # View > Zoom Out
+    assert STEPS[slider.value()] == 110 and f.window.text_size_value.text() == "110 %"
 
 
 def test_the_format_bar_over_a_selection_is_a_writing_choice():
@@ -221,7 +262,8 @@ def test_where_published_posts_open_is_offered_with_nostr_and_kept():
     nostr = {"on": False}
     window = SettingsWindow(
         appearance=appearance, languages=list(languages.items()),
-        choose_language=lambda code: None, monospace=QAction("Mono"),
+        choose_language=lambda code: None, writing_family=lambda: "system",
+        choose_writing_family=lambda family: None,
         paste_choice=lambda: "ask", choose_paste=lambda value: None,
         nostr_in_use=lambda: nostr["on"], format_bar=lambda: True,
         choose_format_bar=lambda on: None, web_reader=lambda: "discover",
