@@ -50,7 +50,7 @@ class SaveWindow(_Window):
 
     def __init__(self, cache_dir):
         super().__init__(cache_dir)
-        self._saving_paths = set()
+        self._saved_stamps = {}
         self._ed = None
         self.status = types.SimpleNamespace(showMessage=lambda *a, **k: None)
 

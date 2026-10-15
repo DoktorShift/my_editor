@@ -12,6 +12,10 @@ What must hold, as Pages locks a document:
   A locked document is not written as a PDF or RTF, which cannot be
   locked. After a crash, its sealed backup is restored with its password,
   and left on the disk when none is given.
+
+  Locking is the app's own save, however long sealing takes: it never
+  shows the bar that says the file was changed outside MyEditor, and a
+  change made outside afterwards still does.
 """
 
 from tests.app_process import run_window_script
@@ -163,3 +167,68 @@ def test_a_document_locked_with_a_password(tmp_path):
     assert r["changed"] and r["removed"] and r["title_removed"] == "Set Password…"
     assert r["backup_sealed"] and r["skipped"] and r["kept_on_disk"]
     assert r["restored"] and r["restored_locked"]
+
+
+OWN_SAVE_SCRIPT = r"""
+import json, os, sys, time
+sys.path.insert(0, sys.argv[1])
+os.environ["QT_QPA_PLATFORM"] = "offscreen"
+from PySide6.QtWidgets import QApplication
+app = QApplication(sys.argv[:1])
+import main_window, password_alert
+from locked_files import Lock
+main_window.MainWindow._maybe_auto_check_for_updates = lambda self: None
+
+diary = os.path.join(os.environ["HOME"], "diary.md")
+with open(diary, "w", encoding="utf-8") as f:
+    f.write("Dear diary, a secret.")
+
+
+class Answer:
+    def run(self):
+        return password_alert.SET
+
+    def text(self, name):
+        return "horse"
+
+
+password_alert.set_password_alert = lambda parent, **_: Answer()
+# Sealing slower than the moment the app's own write was once ignored for.
+seal = Lock.seal
+Lock.seal = lambda lock, data: (time.sleep(0.8), seal(lock, data))[1]
+
+
+def wait(done=lambda: False, seconds=10.0):
+    end = time.monotonic() + seconds
+    while not done() and time.monotonic() < end:
+        app.processEvents()
+        time.sleep(0.01)
+
+
+w = main_window.MainWindow()
+w.show()
+w.open_path(diary)
+bar = w._bar_from_widget(w.tabs.currentWidget())
+told = []
+w._watcher.fileChanged.connect(told.append)
+w.act_password.trigger()
+wait(lambda: told)                      # the watcher tells of the save
+wait(seconds=0.5)                       # and whatever more it reports of it
+r = {"told": bool(told), "locked": w.act_password.text() == "Change Password…",
+     "bar_after_locking": bar.isVisible()}
+with open(diary, "w", encoding="utf-8") as f:
+    f.write("Written in another app.")
+wait(bar.isVisible)
+r["bar_after_outside_change"] = bar.isVisible() and bar._text.text()
+for e in w._all_editors():
+    e.document().setModified(False)
+w.close()
+print("RESULT " + json.dumps(r))
+"""
+
+
+def test_locking_is_not_taken_for_a_change_made_outside(tmp_path):
+    r = run_window_script(OWN_SAVE_SCRIPT, tmp_path)
+    assert r["told"] and r["locked"]
+    assert r["bar_after_locking"] is False
+    assert r["bar_after_outside_change"] == "File was changed externally."
