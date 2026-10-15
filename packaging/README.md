@@ -50,10 +50,12 @@ Each OS can only build its own installer (no cross-compiling).
 
 A release installs exactly what `packaging/requirements-build.lock` names
 (every package at one version, checked against its hash), so two builds of
-the same commit ship the same libraries. Do the same locally:
+the same commit ship the same libraries. It installs wheels only: a package
+compiled on the build machine links against whatever libraries are there,
+and the app bundle may not load it. Do the same locally:
 
 ```bash
-pip install --require-hashes -r packaging/requirements-build.lock
+pip install --require-hashes --only-binary :all: -r packaging/requirements-build.lock
 pip install pillow      # only needed to regenerate icons/background
 ```
 
@@ -103,6 +105,12 @@ uv pip compile packaging/requirements-test.in --universal --python-version 3.12 
 
 `tests/test_dependency_locks.py` fails when a requirement is missing from a
 lock file.
+
+Every package in the build lock needs a wheel for each system the
+installers are built on. When a new version drops one, hold that system
+back in `requirements.txt` with an environment marker, as is done for
+cryptography on Intel Macs (from 49 on it ships macOS wheels for Apple
+Silicon only), and compile the locks again.
 
 ## Regenerating icons
 

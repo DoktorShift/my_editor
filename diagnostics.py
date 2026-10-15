@@ -152,6 +152,21 @@ def _hook_qt_messages() -> None:
             category = getattr(context, "category", None) or "default"
             qt_log.log(level, "%s: %s", category, message)
         # As before: Qt's messages also go to the terminal.
-        sys.stderr.write(message + "\n")
+        _to_terminal(message + "\n")
 
     qInstallMessageHandler(handler)
+
+
+def _to_terminal(text: str) -> None:
+    """Writes to the terminal the app was started from, if there is one.
+
+    A Windows build has none (sys.stderr is None), and a terminal closed
+    since refuses the write. Neither may raise: PySide6 raises an error of
+    the message handler again in the code that made Qt warn."""
+    terminal = sys.stderr
+    if terminal is None:
+        return
+    try:
+        terminal.write(text)
+    except (OSError, ValueError):       # closed, or no longer writable
+        pass
