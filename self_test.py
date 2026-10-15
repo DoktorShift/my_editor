@@ -127,6 +127,18 @@ def _multimedia() -> str:
     return "local playback backend and video widget"
 
 
+def _dictation() -> str:
+    # Dictation on this computer (dictation/on_device.py) on Windows and
+    # Linux: its engine, imported only when someone dictates.
+    if sys.platform == "darwin":
+        return "the system's own"
+    import sherpa_onnx
+    from dictation import on_device  # noqa: F401
+    if not hasattr(sherpa_onnx, "OfflineRecognizer"):
+        raise RuntimeError("the speech engine is incomplete")
+    return "on this computer"
+
+
 CHECKS: List[Check] = [
     ("translations", _translations),
     ("icon", _icon),
@@ -136,6 +148,7 @@ CHECKS: List[Check] = [
     ("spelling", _spelling),
     ("editor", _editor),
     ("media playback", _multimedia),
+    ("dictation", _dictation),
 ]
 
 

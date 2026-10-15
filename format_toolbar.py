@@ -5,7 +5,7 @@
 Undo and Redo, the paragraph style (Body, Heading 1 to 3), bold, italic,
 strikethrough, a link, the two kinds of list, a quote, and one Insert
 button that opens the Insert menu itself (as Pages' toolbar has), then a
-microphone for Start Dictation where the system has dictation. Everything
+microphone for Start Dictation wherever there is a way to dictate. Everything
 else is in the menus, and the menus hold everything; this bar repeats only
 what is used all the time, the way TextEdit's and Pages' format bars do.
 Underline has no button: Markdown and Nostr have no underline (it stays in
@@ -73,7 +73,7 @@ ICONS = {
     "reset": lambda ink: format_icons.clear_format(ink, pgettext("format button", "T")),
     "dictation": format_icons.microphone,
 }
-# After Insert, where the system has it: Start Dictation, as a microphone.
+# After Insert, wherever there is a way to dictate: Start Dictation, as a microphone.
 TRAILING = ("dictation",)
 
 

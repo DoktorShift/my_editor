@@ -34,10 +34,10 @@ def qt_app():
     yield QApplication.instance() or QApplication(sys.argv)
 
 
-def test_dictation_is_the_systems_on_a_mac_and_windows_only():
-    assert dictation.available("darwin") and dictation.available("win32")
-    assert not dictation.available("linux")
-    assert dictation.start("linux") is False
+def test_the_systems_dictation_is_there_on_a_mac_and_windows_only():
+    assert dictation.system_available("darwin") and dictation.system_available("win32")
+    assert not dictation.system_available("linux")
+    assert dictation.start_system("linux") is False
 
 
 def test_what_is_read_leaves_pictures_out_and_reads_paragraphs_as_lines():
@@ -69,8 +69,8 @@ import dictation, main_window, speech
 
 DICTATION = os.environ["TEST_DICTATION"] == "1"
 started = []
-dictation.available = lambda: DICTATION
-dictation.start = lambda: started.append(QApplication.focusWidget() is ed) or True
+dictation.ways = lambda *args, **kwargs: (dictation.SYSTEM,) if DICTATION else ()
+dictation.start_system = lambda: started.append(QApplication.focusWidget() is ed) or True
 said = []
 
 

@@ -58,6 +58,9 @@ import password_alert
 from locked_files import Lock, WrongPassword
 import diagnostics
 import dictation
+from dictation import models as dictation_models, on_device, setup as dictation_setup
+from dictation.indicator import DictationIndicator
+from dictation.preferences import Preferences
 import file_paths
 import i18n
 from i18n import N_, _, ngettext, pgettext
@@ -1568,6 +1571,8 @@ class MainWindow(QMainWindow):
         return None
 
     def _on_tab_changed(self, index=None):
+        # Dictation writes into the tab it started in: another tab stops it.
+        self._stop_dictation()
         self._show_backup_status()
         self._fill_article_details_panel()
         self._article_headers.update(self.current_editor())
@@ -1974,12 +1979,15 @@ class MainWindow(QMainWindow):
         self.act_stop_speaking.setEnabled(False)
         self.speech.speaking_changed.connect(self.act_stop_speaking.setEnabled)
         self.speech.failed.connect(lambda why: self.status.showMessage(why, 8000))
-        # Edit > Start Dictation…: the system's own, where it has one
-        # (dictation.py).
+        # Edit > Start Dictation…: the system's own, or on this computer
+        # (dictation/), where there is a way to dictate; Stop Dictation while
+        # dictating on this computer.
+        self.dictation_prefs = Preferences.from_settings(load_settings())
+        self._dictating = None              # (session, indicator) while dictating here
         self.act_start_dictation = add(
             Command("edit.start_dictation", _("Start Dictation…"), EDIT,
                     keywords=(_("voice"), _("dictate"), _("microphone"))),
-            triggered=self._start_dictation) if dictation.available() else None
+            triggered=self._start_dictation) if dictation.ways() else None
         self.act_delete = add(Command("edit.delete", _("Delete"), EDIT),
                               triggered=lambda: self._edit_focused("delete"))
         self.act_select_all = add(Command("edit.select_all", _("Select All"), EDIT,
@@ -5216,6 +5224,9 @@ class MainWindow(QMainWindow):
                 choose_caret_style=self._set_caret_style,
                 web_reader=lambda: self.web_reader,
                 choose_web_reader=self._set_web_reader,
+                dictation_ways=dictation.ways(),
+                dictation=lambda: self.dictation_prefs,
+                choose_dictation=self._set_dictation_prefs,
                 is_dark=self.is_dark_theme, parent=self)
             window.setAttribute(Qt.WA_DeleteOnClose, True)
             window.destroyed.connect(lambda _obj=None: setattr(self, "_settings_window", None))
@@ -5771,14 +5782,83 @@ class MainWindow(QMainWindow):
                               else ed.toPlainText())
 
     def _start_dictation(self) -> None:
-        """Edit > Start Dictation…: the system's dictation, into the text."""
+        """Edit > Start Dictation… (Stop Dictation while dictating here):
+        the way chosen in Settings > Dictation, into the text."""
+        if self._dictating is not None:
+            self._stop_dictation()
+            return
         ed = self.current_editor()
         if ed is None:
             return
         ed.setFocus()
-        if not dictation.start():
+        if dictation.chosen_way(self.dictation_prefs.way) == dictation.ON_DEVICE:
+            self._dictate_on_device(ed)
+        elif not dictation.start_system():
             self.status.showMessage(_("Dictation couldn’t be started. It can be turned on in "
                                       "the system’s keyboard settings."), 8000)
+
+    def _dictate_on_device(self, ed) -> None:
+        """Dictation on this computer: the speech model first, downloaded
+        when the person chooses to (dictation/setup.py), then each phrase
+        written at the insertion point as it is spoken."""
+        prefs = self.dictation_prefs
+        model = dictation_models.MODELS[prefs.model]
+        if not dictation_models.installed(model):
+            if dictation_setup.SetupAlert(self, model).run() != dictation_setup.INSTALLED:
+                return
+        on_device.prepare()
+        session = on_device.OnDeviceDictation(
+            lambda: on_device.load_whisper(model, prefs.language), parent=self)
+        indicator = DictationIndicator(ed, dark=self.is_dark_theme)
+        session.ready.connect(lambda: indicator.set_listening(True))
+        session.level.connect(indicator.set_level)
+        session.phrase.connect(lambda text: self._write_dictated(ed, text))
+        session.failed.connect(lambda why: inform(self, title=_("Dictation stopped"),
+                                                  message=why))
+        session.listening_changed.connect(
+            lambda listening: None if listening else self._dictation_ended())
+        indicator.done.connect(self._stop_dictation)
+        self._dictating = (session, indicator)
+        self.act_start_dictation.setText(_("Stop Dictation"))
+        indicator.open()
+        session.start()
+
+    def _write_dictated(self, ed, text: str) -> None:
+        """A phrase dictated, at the insertion point (over a selection, as
+        typing is), a space apart from the word before; one step of Undo.
+        The last phrase comes after dictation stops: its tab may be gone."""
+        if not shiboken6.isValid(ed):
+            return
+        cursor = ed.textCursor()
+        start = cursor.selectionStart()
+        before = ed.document().characterAt(start - 1) if start > 0 else " "
+        apart = not before.isspace() and text[:1] not in ",.;:!?)"
+        with ed.undo_step(N_("Dictation")):
+            cursor.insertText((" " if apart else "") + text)
+        ed.setTextCursor(cursor)
+
+    def _stop_dictation(self) -> None:
+        """Stop dictating on this computer; the phrase being spoken is still
+        written."""
+        dictating = getattr(self, "_dictating", None)     # a tab can change before it exists
+        if dictating is not None:
+            dictating[0].stop()
+
+    def _dictation_ended(self) -> None:
+        if self._dictating is None:
+            return
+        session, indicator = self._dictating
+        self._dictating = None
+        indicator.close_quietly()
+        indicator.deleteLater()
+        session.deleteLater()
+        self.act_start_dictation.setText(_("Start Dictation…"))
+
+    def _set_dictation_prefs(self, prefs: Preferences) -> None:
+        """Settings > Dictation, remembered."""
+        self.dictation_prefs = prefs
+        for key, value in prefs.to_settings().items():
+            save_setting(key, value)
 
     def _set_heading(self, level: int) -> None:
         ed = self.current_editor()
@@ -6790,8 +6870,12 @@ class MainWindow(QMainWindow):
             event.ignore()
             return
         # Quitting from here: a Save As still running stops, and its part
-        # file goes; nothing still on its way goes into a document.
+        # file goes; nothing still on its way goes into a document, nor a
+        # phrase still being dictated.
         self._media_saver.cancel()
+        dictating = getattr(self, "_dictating", None)
+        if dictating is not None:
+            dictating[0].shutdown()
         for i in range(self.tabs.count()):
             self._drop_media_reads(self._editor_from_widget(self.tabs.widget(i)))
         if hasattr(self, "_knit_runner"):
