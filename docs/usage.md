@@ -44,6 +44,10 @@ On macOS, `Ctrl` in these tables is the Command key (`⌘`) and `Alt` is Option 
 
 Writing (Markdown files, new documents and drafts) is set in your system's own text font at a reading size, in a column of a comfortable line length, with the thin insertion point of a word processor; plain text and code files keep the monospace font across the whole window, and its block caret. `View > Use Monospace Font for Writing` sets all writing in monospace.
 
+**Font and size.** `Settings > Font` chooses the writing font (System, Serif, Monospace, or any installed font with `Other…`) and its size in points, from 8 to 32 (10 and up on a Mac, where smaller text would be too small to read). `View > Zoom In` (`Cmd+=` on macOS, `Ctrl+=` elsewhere), `View > Zoom Out` and `View > Actual Size` step through the same sizes, for every document and preview at once. HTML documents open in your font and size too.
+
+**Bigger and smaller text.** `Format > Bigger` and `Format > Smaller`, and the two "A" buttons on the format bar over selected text, step the selected paragraphs from Body to Heading 3, 2 and 1 and back. Markdown and Nostr keep no font size for single words, so the size of a passage is its style: what you see is what is saved and published.
+
 The status bar says, quietly, how long the document is: its words and how long it takes to read (225 words a minute, as the long-form Nostr readers count), or how many words are selected. In code and plain text it also shows the language and the line the caret is on. Where a file is saved is in its tab's tooltip, and in the window's title bar as its name.
 
 The **format toolbar** above the document holds the controls used most: Undo and Redo, the paragraph style (Body, Heading 1 to 3), Bold, Italic, Strikethrough, Add Link, Bulleted List, Numbered List, Checklist and Quote, and the **Insert** button (+), which opens the Insert menu itself: the same items in the same order (Nostr's only while an account is in use), dimmed where they don't apply. Undo and Redo say what they take back when you hold the pointer over them ("Undo Typing (⌘Z)" on a Mac, "Undo Typing (Ctrl+Z)" on Windows and Linux), and are dimmed when there is nothing to take. The arrow beside each lists the steps, newest first, by name (up to 15): choose one to go back, or forward, to it in one go, exactly as that many Undos or Redos would. A right-click (Control-click on a Mac) opens the list too, and so does `Down` when the button has the keyboard focus. In the find field or another text field, the list holds the one step the button takes there. Everything else is in the `Format` and `Insert` menus. `View > Show Toolbar` (`Ctrl+Alt+T` on macOS) hides it; a PDF tab has none.
@@ -89,6 +93,16 @@ The `Edit` menu has what every Mac app has there, in the same order:
 | `Cmd+Delete` / `Fn+Cmd+Delete` on macOS | Delete to the start / end of the line |
 
 Cut, Copy, Paste and Select All act on whatever has the focus: the document, the find field, or the PDF reader.
+
+**Speech.** `Edit > Speech > Start Speaking` reads the selection, or the whole document, in your system's voice, and `Stop Speaking` stops. On Linux it needs `speech-dispatcher`; the status bar says so when it is missing.
+
+**Dictation.** `Edit > Start Dictation…`, or the microphone at the end of the format toolbar, starts dictation into the document:
+
+- **macOS:** your Mac's own dictation (it also starts with `Fn` twice). On a Mac with Apple silicon it works on the computer.
+- **Windows:** Voice typing (also `Windows+H`), which needs the internet; or, chosen in `Settings > Dictation`, dictation on this computer.
+- **Linux:** dictation on this computer.
+
+Dictation on this computer works offline. The first time, MyEditor offers to download a speech model (Standard, 161 MB, or More accurate, 376 MB, in `Settings > Dictation`) from its makers; nothing is downloaded until you choose to, and your voice never leaves the computer. While you dictate, a small indicator at the insertion point shows that it listens; each phrase is written as soon as you pause, and is one step of Undo. `Done`, `Escape`, `Edit > Stop Dictation` or another tab stops it. `Settings > Dictation` also sets the language you dictate in and removes the model.
 
 **Undo.** One Undo takes back a whole run of typing, as in TextEdit, Pages and Word: what you typed one character after another, new paragraphs among it (in a list, a checklist, a code block or after a heading too), and characters composed with a dead key or an input method, or typed with Option or AltGr. A run ends when you pause for two seconds, move the caret or the selection, format, paste, use any command or Undo, or save. A run of Backspace, or of Delete, is one step of its own; typing after it, or deleting the other way, starts a new one. Every step has a name. On a Mac, Edit > Undo and Redo say what they take back ("Undo Typing", "Undo Paste", "Undo Bold", "Undo Replace All", "Undo Correction", a slash command by its name, "Undo Drag" for text or pictures dragged in), as the Mac's own apps do. A command is named by its title ("Undo Increase Indent", also for `Tab` in a list, "Undo Add Row Above", "Undo Remove Link", "Undo Code Language", "Undo Delete"), what an Insert command puts in by what it is ("Undo Image", "Undo Audio or Video", "Undo Note or Article"), and a checklist box clicked "Undo Checklist", as Mark as Checked is. What keys do on their own is typing: `Tab` in a code block, `Backspace` or `Delete` taking a divider, a mention or audio and video away, and the row `Tab` or `Return` adds at the end of a table. What a Markdown Shortcut makes is named as the command that makes the same: "Undo Paragraph Style" for `# `, "Undo List" for `- ` or `1. `, "Undo Quote", "Undo Checklist", "Undo Bold" or "Undo Italic" for `**words**` and `*words*`, "Undo Divider" and "Undo Code Block". In German the Mac's Edit menu says "Tippen widerrufen", "Einsetzen widerrufen", "Ziehen widerrufen" and so on; on Windows and Linux they say Undo and Redo, as Notepad and GNOME's Text Editor do.
 
@@ -153,7 +167,7 @@ Lists are real lists, written to Markdown as `- item` and `1. item`, nested by f
 
 The **`View`** menu holds the appearance options: `View > Appearance` (Automatic follows your computer's light or dark appearance as it changes; Light and Dark stay as chosen), line numbers, syntax highlighting, background style (lined, dashed, dotted, grid), paper mode, and highlight current line. Nothing around the document repeats a menu: the window shows the format toolbar, the tabs and the text.
 
-**Settings** (`MyEditor > Settings…` on a Mac, `Cmd+,`; `Edit > Settings…` on Windows and Linux, `Ctrl+,`) gathers the choices you make once: the appearance, the language, the writing font, whether the format bar shows over text you select (`Show the format bar when selecting text`, on at first), and, while a Nostr account is in use, what happens to a pasted image (ask every time, upload it, or keep it local). Each choice applies at once, and each is also in its menu.
+**Settings** (`MyEditor > Settings…` on a Mac, `Cmd+,`; `Edit > Settings…` on Windows and Linux, `Ctrl+,`) gathers the choices you make once: the appearance, the language, the writing font and its size, the text cursor, whether the format bar shows over text you select (`Show the format bar when selecting text`, on at first), and, while a Nostr account is in use, what happens to a pasted image (ask every time, upload it, or keep it local), and on Windows and Linux how you dictate. Each choice applies at once.
 
 `Help > Keyboard Shortcuts` lists every shortcut as it is on the computer in use: on a Mac in Apple's symbols (`⇧⌘S`), elsewhere with your keyboard's key names (`Strg+Umschalt+S` on a German one). It is built from the same command list as the menus (`commands.py`), so the two always agree; the Nostr shortcuts appear there once an account is in use.
 
@@ -270,9 +284,13 @@ macOS shows a preview inside its print dialog. On Windows and Linux,
 | `.rtf` | Rich Text Format |
 | `.Rmd` | R Markdown: YAML frontmatter plus Pandoc markdown with headings, lists, links, strikethrough and inline code; colors and underline use Pandoc spans, images go into a `<name>_media/` folder next to the file |
 
+## Locked documents
+
+`File > Set Password…` locks the document with a password, as Pages does: it is encrypted in place, keeps its name and type, and asks for its password when it opens. Saving it again asks for nothing. `File > Change Password…` changes the password or removes it. The file is in the open age format, so `age -d` opens it without MyEditor. A forgotten password cannot be recovered, by MyEditor or anyone. A locked document is not saved as PDF or RTF, which cannot be locked, and is not knit, since R reads the file itself.
+
 ## Backups
 
-Files are saved when you choose Save. What you type is backed up as you go (two seconds after you stop typing, and every fifteen seconds while you type), in `~/.cache/my_editor/backups/`, and offered back exactly as it was after a crash. The status bar says nothing about it while it works. When a document's backup cannot be written (a full or read-only disk), it says "Couldn't keep a backup of this document." with **Try Again**, until a backup is written again; a document too large to back up says so instead.
+Files are saved when you choose Save. What you type is backed up as you go (two seconds after you stop typing, and every fifteen seconds while you type), in `~/.cache/my_editor/backups/`, and offered back exactly as it was after a crash. A locked document's backups are encrypted too, and ask for its password when they are offered back. The status bar says nothing about it while it works. When a document's backup cannot be written (a full or read-only disk), it says "Couldn't keep a backup of this document." with **Try Again**, until a backup is written again; a document too large to back up says so instead.
 
 ---
 

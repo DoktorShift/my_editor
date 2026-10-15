@@ -20,9 +20,22 @@ phone, where it can move any time.
 
 ## Highlights
 
-**Focused writing.** Dark and light themes, tabs, rich text, bullet lists, find,
-syntax highlighting, line numbers, and lined / dotted / grid backgrounds with a
-paper mode for a real sheet-of-paper feel.
+**Focused writing.** A real writing editor with each platform's own keys:
+headings, lists, checklists, quotes, tables, footnotes and code blocks, links,
+a slash menu, Markdown shortcuts as you type, and Write, Preview and Split
+views. Spelling is checked as you type with your system's own checker. Choose
+your font and its size, zoom the text, and pick light, dark or automatic
+appearance, tabs, line numbers, and lined / dotted / grid backgrounds with a
+paper mode for a real sheet-of-paper feel. In English or German.
+
+**Private when you need it.** Lock any document with a password: it is
+encrypted in place in the open age format (it opens without MyEditor too), and
+its crash backups are encrypted as well.
+
+**Dictate and listen.** Start Dictation uses your Mac's dictation or Windows
+Voice typing, and dictates offline on this computer where there is none (Linux,
+or Windows by choice) after a one-time download, your voice never leaving it.
+Edit > Speech reads a draft aloud.
 
 **Publish to Nostr.** Send notes or long-form articles signed on your phone via
 NIP-46, keep private encrypted drafts that sync across your devices, and manage
@@ -57,8 +70,7 @@ embedded, metadata, page numbers, Page Setup dialog).
 R Markdown, and knit to HTML or PDF; missing toolchain parts (R, pandoc,
 rmarkdown, TinyTeX) install on demand from their official sources.
 
-> Developed and tested on Linux. macOS and Windows work but may show minor visual
-> differences.
+> Tested on Windows, macOS and Linux with every change.
 
 ---
 
