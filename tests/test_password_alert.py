@@ -62,7 +62,7 @@ def test_a_wrong_password_is_said_and_the_alert_stays():
 
     alert = password_alert.open_alert(None, name="diary.md", check=check)
     alert.show()
-    assert QApplication.focusWidget() in (alert.fields["password"], None)
+    assert alert.focusWidget() is alert.fields["password"]      # the field it opens on
     type_in(alert, password="pony")
     alert.button_for(password_alert.OPEN).click()
     assert alert.isVisible() and alert.problem.text() == "The password is incorrect."
