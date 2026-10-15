@@ -233,6 +233,26 @@ def test_it_holds_the_style_popup_and_the_window_commands(w):
         assert widget.focusPolicy() == Qt.FocusPolicy.NoFocus, widget
 
 
+def test_its_buttons_are_grouped_paragraphs_words_link_and_clear(w):
+    """Asked for: the size of the selected text, and what else a selection
+    needs. The paragraphs (style, Bigger, Smaller, Quote), then the words
+    (Bold, Italic, Strikethrough, Code), Link, and Clear Formatting, each
+    group set apart."""
+    from PySide6.QtWidgets import QFrame
+    row = w.bar.layout()
+    order = []
+    for index in range(row.count()):
+        widget = row.itemAt(index).widget()
+        if widget is w.bar.style_button:
+            order.append("style")
+        elif isinstance(widget, QToolButton):
+            order.append(next(n for n, b in w.bar.buttons.items() if b is widget))
+        elif isinstance(widget, QFrame):
+            order.append("|")
+    assert order == ["style", "bigger", "smaller", "quote", "|", "bold", "italic", "strike",
+                     "code", "|", "link", "|", "reset"]
+
+
 def test_a_click_on_a_button_keeps_the_text_the_selection_and_the_bar(w):
     w.double_click(word_at(TEXT, "Another", 5) + 2)
     selection = w.selection()

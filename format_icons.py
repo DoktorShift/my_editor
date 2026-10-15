@@ -64,6 +64,54 @@ def letter(text: str, color: QColor, *, bold: bool = False, italic: bool = False
     return _icon(draw, color)
 
 
+def _sized_letter(text: str, pixels: int, mark: str) -> "callable":
+    """A letter at ``pixels`` with a small mark in the corner: an arrow up
+    or down (a size larger or smaller, as the system's text-size symbols
+    draw it), or a cross (formatting taken off)."""
+    def draw(painter: QPainter, ink: QColor) -> None:
+        font = QFont()
+        font.setPixelSize(pixels)
+        font.setBold(True)
+        painter.setFont(font)
+        painter.setPen(ink)
+        painter.drawText(QRectF(0, 1, SIZE - 5, SIZE - 1),
+                         Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignBottom, text)
+        if mark == "x":
+            painter.setPen(_pen(ink, 1.4))
+            painter.drawLine(QPointF(12.5, 12.5), QPointF(16.5, 16.5))
+            painter.drawLine(QPointF(16.5, 12.5), QPointF(12.5, 16.5))
+            return
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(ink)
+        path = QPainterPath()
+        if mark == "up":
+            path.moveTo(14.5, 2.5)
+            path.lineTo(17.5, 6.5)
+            path.lineTo(11.5, 6.5)
+        else:
+            path.moveTo(14.5, 16.5)
+            path.lineTo(17.5, 12.5)
+            path.lineTo(11.5, 12.5)
+        path.closeSubpath()
+        painter.drawPath(path)
+    return draw
+
+
+def bigger(color: QColor, text: str = "A") -> QIcon:
+    """Format > Bigger: a large letter, an arrow up."""
+    return _icon(_sized_letter(text, 15, "up"), color)
+
+
+def smaller(color: QColor, text: str = "A") -> QIcon:
+    """Format > Smaller: a small letter, an arrow down."""
+    return _icon(_sized_letter(text, 11, "down"), color)
+
+
+def clear_format(color: QColor, text: str = "T") -> QIcon:
+    """Format > Clear Formatting: a letter, crossed out at its foot."""
+    return _icon(_sized_letter(text, 14, "x"), color)
+
+
 def _pen(ink: QColor, width: float = 1.6) -> QPen:
     pen = QPen(ink, width)
     pen.setCapStyle(Qt.PenCapStyle.RoundCap)

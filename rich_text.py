@@ -336,6 +336,21 @@ BODY = 0
 # opened from a .md file look the same.
 HEADING_SIZE = {1: 3, 2: 2, 3: 1, 4: 0, 5: -1, 6: -1}
 
+# The paragraph styles the menus offer, smallest first: what Format >
+# Bigger and Smaller step through (step_style).
+STYLES_BY_SIZE = (0, 3, 2, 1)
+
+
+def step_style(level: int, *, larger: bool) -> Optional[int]:
+    """The style one size larger (or smaller) than heading ``level`` (0 for
+    body text), among the styles the menus offer; None when there is none.
+    A heading they do not offer (4 to 6, from a file) is between Body and
+    Heading 3: one larger is Heading 3, one smaller is Body."""
+    if level not in STYLES_BY_SIZE:
+        return STYLES_BY_SIZE[1] if larger else STYLES_BY_SIZE[0]
+    index = STYLES_BY_SIZE.index(level) + (1 if larger else -1)
+    return STYLES_BY_SIZE[index] if 0 <= index < len(STYLES_BY_SIZE) else None
+
 
 def _iter_blocks_of(cursor: QTextCursor):
     """The blocks the cursor's selection touches (the caret's block

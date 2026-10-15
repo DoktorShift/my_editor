@@ -138,6 +138,9 @@ _IMAGE_EXTS = image_safety.IMAGE_FILE_SUFFIXES
 # Persisted answer to the paste-upload prompt: "ask" | "always" | "never".
 _PASTE_UPLOAD_SETTING = "upload_pasted_images"
 
+# How much larger Format > Style names each heading than Body, by level: in
+# the order of the sizes the text has, kept within a menu's height.
+_STYLE_MENU_SCALE = {1: 1.45, 2: 1.25, 3: 1.1}
 # Extensions the Save As dialog can produce; used to decide whether the
 # typed filename already carries one.
 _SAVE_EXTS = ('.txt', '.html', '.htm', '.md', '.rtf', '.pdf', '.rmd')
@@ -1337,8 +1340,9 @@ class MainWindow(QMainWindow):
         ed.set_link_opener(self._open_link)
         ed.set_nostr_check(lambda: self.nostr_state.active)
         ed.selection_bar = SelectionBar(
-            ed, {"bold": self.act_bold, "italic": self.act_italic, "strike": self.act_strike,
-                 "code": self.act_code, "link": self.act_link},
+            ed, {"bigger": self.act_bigger, "smaller": self.act_smaller, "quote": self.act_quote,
+                 "bold": self.act_bold, "italic": self.act_italic, "strike": self.act_strike,
+                 "code": self.act_code, "link": self.act_link, "reset": self.act_reset_format},
             self.m_style, dark=lambda: self.is_dark_theme,
             wanted=lambda e=ed: self._wants_selection_bar(e))
         return ed
@@ -1832,6 +1836,7 @@ class MainWindow(QMainWindow):
         level = paragraphs.heading if paragraphs.code is None else -1
         for index, action in enumerate(self.act_styles):
             action.setChecked(index == level)
+        self._update_size_commands()
         for action in self.act_code_languages:
             action.setChecked(paragraphs.code is not None and action.data() == (
                 canonical_language(paragraphs.code) or paragraphs.code))
@@ -2013,6 +2018,22 @@ class MainWindow(QMainWindow):
                          triggered=lambda n=level: self._set_heading(n))
             self._style_group.addAction(action)
             self.act_styles.append(action)
+        # Each style named at its size, as Notes' style menu shows them; the
+        # pop-ups on the toolbar and over a selection are this menu too.
+        for level, action in enumerate(self.act_styles):
+            font = QApplication.font("QMenu")
+            if level:
+                font.setPointSizeF(font.pointSizeF() * _STYLE_MENU_SCALE[level])
+                font.setBold(True)
+            action.setFont(font)
+        # The size of selected text, as the style of its paragraphs: what
+        # Markdown keeps and Nostr publishes (rich_text.step_style).
+        self.act_bigger = add(Command("format.bigger", _("Bigger"), FORMAT,
+                                      keywords=(_("font size"), _("larger"))),
+                              triggered=lambda: self._step_style(larger=True))
+        self.act_smaller = add(Command("format.smaller", _("Smaller"), FORMAT,
+                                       keywords=(_("font size"),)),
+                               triggered=lambda: self._step_style(larger=False))
         # Lists: Google Docs' keys on every system (Ctrl+Shift+8 bulleted, 7
         # numbered, 9 checklist; Shift-Command on a Mac), since Notes'
         # Checklist key is MyEditor 3.3's Show Line Numbers.
@@ -2692,6 +2713,8 @@ class MainWindow(QMainWindow):
         self.m_style = m_format.addMenu(_("Style"))
         for action in self.act_styles:
             self.m_style.addAction(action)
+        m_format.addAction(self.act_bigger)
+        m_format.addAction(self.act_smaller)
         m_format.addSeparator()
         m_format.addAction(self.act_bold)
         m_format.addAction(self.act_italic)
@@ -5571,6 +5594,36 @@ class MainWindow(QMainWindow):
             ed.set_heading(level)
             self._update_format_buttons()
 
+    def _first_selected_style(self, ed) -> int:
+        """The heading level (0 for body text) of the first paragraph
+        selected, or of the one at the caret."""
+        cursor = ed.textCursor()
+        return ed.document().findBlock(cursor.selectionStart()).blockFormat().headingLevel()
+
+    def _step_style(self, *, larger: bool) -> None:
+        """Format > Bigger and Smaller: the selected paragraphs one style
+        larger or smaller than the first of them."""
+        ed = self.current_editor()
+        if ed is None:
+            return
+        level = rich_text.step_style(self._first_selected_style(ed), larger=larger)
+        if level is not None:
+            self._set_heading(level)
+
+    def _update_size_commands(self) -> None:
+        """Bigger and Smaller act where the styles do, outside code, while
+        there is a larger (or smaller) style to go to."""
+        if not hasattr(self, "act_bigger"):
+            return
+        ed = self.current_editor()
+        allowed = (ed is not None and self.act_styles[0].isEnabled()
+                   and not MainWindow._caret_in_code(ed))
+        level = self._first_selected_style(ed) if allowed else 0
+        self.act_bigger.setEnabled(allowed and rich_text.step_style(level, larger=True)
+                                   is not None)
+        self.act_smaller.setEnabled(allowed and rich_text.step_style(level, larger=False)
+                                    is not None)
+
     def _caret_context(self) -> tuple:
         """(in a code block, in a table): where the caret (or the selection)
         is, in a document with structure that is being edited."""
@@ -5865,6 +5918,7 @@ class MainWindow(QMainWindow):
         self.act_underline.setEnabled(bool(self._keeps_underline(self.current_editor()))
                                       and not reading and not in_code)
         self._update_clipboard_commands()
+        self._update_size_commands()
         if kind:
             self._update_undo_redo_buttons()
 

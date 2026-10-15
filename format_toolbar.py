@@ -67,6 +67,9 @@ ICONS = {
     "numbers": format_icons.numbered_list,
     "checklist": format_icons.checklist,
     "quote": format_icons.quote,
+    "bigger": lambda ink: format_icons.bigger(ink, pgettext("format button", "A")),
+    "smaller": lambda ink: format_icons.smaller(ink, pgettext("format button", "A")),
+    "reset": lambda ink: format_icons.clear_format(ink, pgettext("format button", "T")),
 }
 
 
