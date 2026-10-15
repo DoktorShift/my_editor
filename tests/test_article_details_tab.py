@@ -144,8 +144,8 @@ inner = build_inner_event(kind=30023, content="Body of the article.", pubkey_hex
 w._on_draft_stashed(ed, choice, "e" * 64, 1_800_000_000, inner)
 panel = w._article_details_panel
 r = {"summary": panel.summary_edit.toPlainText(), "cover": panel.cover.text(),
-     "tags": list(panel.hashtags.tags()), "rows": len(panel.authors.rows()),
-     "zaps": panel.authors.rows()["b2" * 32].field.value() == 50,
+     "tags": list(panel.hashtags.tags()), "rows": len(panel.authors.shares_shown()) - 1,
+     "zaps": panel.authors.shares_shown()["b2" * 32] == "50 %",
      "fixed": panel.identifier_edit.isReadOnly()}
 panel.title_edit.setText("My Title!")
 d = w._article_details_of(ed)

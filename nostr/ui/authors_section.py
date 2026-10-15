@@ -3,35 +3,37 @@
 """Article Details' Authors: who writes the article, and how much of the
 zaps to it each of them receives.
 
-    Alice · you                                   60%
-    Bob                                    [ 25 %]  ⊖
-    ━━━━━━━━━━●───────────────────────
-    Carol                                  [ 15 %]  ⊖
-    ━━━━●─────────────────────────────
-    Add Co-Author…                       Split Evenly
-    Alice 60% · Bob 25% · Carol 15%
-    Apps that support zap splits, like Amethyst and noStrudel, pay each
-    person their share. Other apps pay you.
+    ┌──────────────────────────────────────┐
+    │ Alice · you                     60 % │   everyone's share, once
+    │ Bob                             25 % │   (selected)
+    │ Carol                           15 % │
+    └──────────────────────────────────────┘
+    [+] [−]                     Split Evenly
+    Share for Bob
+    ━━━━━━━●━━━━━━━━━━━━━━━━━━━   [ 25 % ]   the selected person's share
+    Apps with zap splits pay each share; others pay you.
 
-You come first and keep what the others leave, so the shares always add
-up to 100 % (nostr/zap_shares.py). A co-author is credited and receives
-nothing until given a share, set with a slider or exactly in the field
-beside it, as Apple's guidelines advise for a precise value. A co-author
-whose profile has no lightning address can't be paid: their share stays
-at 0 and the row says why. The note only says what is true: whether a
-zap is shared depends on the reader's app.
-
-The rows are kept as they are while a share changes, so a slider being
-dragged is never rebuilt under the pointer.
+A list you add to and remove from, as a Mac's settings have them (Users,
+Login Items): the list, then + and − under it, then the controls for the
+row selected. Each person's share is said once, in the list; the slider
+and the exact value beside it (Apple's guidelines pair a slider with a
+field for a precise value) change the selected co-author's. You come
+first and keep what the others leave, so the shares always add up to
+100 % (nostr/zap_shares.py). A co-author is credited and receives nothing
+until given a share; one whose profile has no lightning address can't be
+paid, and the controls say so. The line under them only says what is
+true, and only while zaps are shared: whether a zap is split depends on
+the reader's app.
 """
 
 from __future__ import annotations
 
-from typing import Callable, Dict, Optional
+from typing import Callable, Dict, List, Optional
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import QEvent, Qt, Signal
 from PySide6.QtWidgets import (
-    QHBoxLayout, QLabel, QPushButton, QSlider, QSpinBox, QVBoxLayout, QWidget,
+    QAbstractButton, QAbstractItemView, QHBoxLayout, QHeaderView, QLabel, QPushButton, QSlider, QSpinBox,
+    QTableWidget, QTableWidgetItem, QToolButton, QVBoxLayout, QWidget,
 )
 
 from i18n import _
@@ -39,62 +41,9 @@ from i18n import _
 from .. import zap_shares
 from ..article_details import ArticleDetails
 from .coauthors import Coauthors
-from .eliding_label import ElidingLabel
 
-
-class _Row(QWidget):
-    """One co-author: their name, their share (a slider and the exact
-    value), Remove, and why they get no share when they can't be paid."""
-
-    share_set = Signal(str, int)
-    remove = Signal(str)
-
-    def __init__(self, pubkey: str, name: str, parent: Optional[QWidget] = None) -> None:
-        super().__init__(parent)
-        self.pubkey = pubkey
-        column = QVBoxLayout(self)
-        column.setContentsMargins(0, 2, 0, 2)
-        column.setSpacing(2)
-        top = QHBoxLayout()
-        top.setContentsMargins(0, 0, 0, 0)
-        top.setSpacing(6)
-        # Each made with its parent, in the order Tab reaches them: the
-        # slider, the exact value, Remove.
-        self.name = ElidingLabel(parent=self)
-        self.name.set_full_text(name)
-        top.addWidget(self.name, 1)
-        self.slider = QSlider(Qt.Orientation.Horizontal, self)
-        self.slider.setRange(0, 100)
-        self.slider.setAccessibleName(_("Share for {name}").format(name=name))
-        self.slider.valueChanged.connect(lambda value: self.share_set.emit(self.pubkey, value))
-        self.field = QSpinBox(self)
-        self.field.setRange(0, 100)
-        self.field.setSuffix(" %")
-        self.field.setAccessibleName(_("Share for {name}").format(name=name))
-        self.field.valueChanged.connect(lambda value: self.share_set.emit(self.pubkey, value))
-        top.addWidget(self.field)
-        self.remove_button = QPushButton(_("Remove"), self)
-        self.remove_button.setAutoDefault(False)
-        self.remove_button.setAccessibleName(_("Remove {name}").format(name=name))
-        self.remove_button.clicked.connect(lambda _checked=False: self.remove.emit(self.pubkey))
-        top.addWidget(self.remove_button)
-        column.addLayout(top)
-        column.addWidget(self.slider)
-        self.unpaid = QLabel(_("No lightning address in their profile, so they can’t be "
-                               "paid a share."), self)
-        self.unpaid.setObjectName("article_details_hint")
-        self.unpaid.setWordWrap(True)
-        self.unpaid.hide()
-        column.addWidget(self.unpaid)
-
-    def show_share(self, share: int, *, payable: bool, editable: bool) -> None:
-        for control in (self.slider, self.field):
-            control.blockSignals(True)
-            control.setValue(share)
-            control.blockSignals(False)
-            control.setEnabled(payable and editable)
-        self.remove_button.setEnabled(editable)
-        self.unpaid.setVisible(not payable)
+# The table's rows say whose they are in this role: "" for you.
+_PERSON = Qt.ItemDataRole.UserRole
 
 
 class AuthorsSection(QWidget):
@@ -114,38 +63,52 @@ class AuthorsSection(QWidget):
         self._pick_person = pick_person
         self._details = ArticleDetails()
         self._editable = True
-        self._rows: Dict[str, _Row] = {}
-
+        self._unpaid: set = set()
+        # Whose row was chosen ("" for you); None until one is, when the
+        # first co-author is shown.
+        self._chosen: Optional[str] = None
+        # Made in the order Tab reaches them: the list, its buttons, then
+        # the selected person's share.
         column = QVBoxLayout(self)
         column.setContentsMargins(0, 0, 0, 0)
-        column.setSpacing(4)
-        you = QHBoxLayout()
-        you.setContentsMargins(0, 0, 0, 0)
-        self.you = ElidingLabel()
-        you.addWidget(self.you, 1)
-        self.you_share = QLabel()
-        self.you_share.setObjectName("article_details_share")
-        you.addWidget(self.you_share)
-        column.addLayout(you)
-        self._row_column = QVBoxLayout()
-        self._row_column.setContentsMargins(0, 0, 0, 0)
-        self._row_column.setSpacing(4)
-        column.addLayout(self._row_column)
+        column.setSpacing(6)
 
-        self.add_button = QPushButton(_("Add Co-Author…"), self)
-        self.add_button.setAutoDefault(False)
+        self.table = QTableWidget(0, 2, self)
+        self.table.setObjectName("article_details_authors")
+        self.table.setAccessibleName(_("Authors"))
+        self.table.horizontalHeader().hide()
+        self.table.verticalHeader().hide()
+        self.table.setShowGrid(False)
+        self.table.setCornerButtonEnabled(False)
+        # Its corner button sits where the hidden headers meet: not there.
+        corner = self.table.findChild(QAbstractButton, "qt_tableview_cornerbutton")
+        if corner is not None:
+            corner.hide()
+        self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self.table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.table.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.table.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        self.table.horizontalHeader().setSectionResizeMode(
+            1, QHeaderView.ResizeMode.ResizeToContents)
+        # Rows as high as a Mac's lists draw them: the text and a little air.
+        self.table.verticalHeader().setDefaultSectionSize(self.fontMetrics().height() + 8)
+        self.table.itemSelectionChanged.connect(self._show_selected)
+        # Delete removes the selected co-author, as in a Mac's lists.
+        self.table.installEventFilter(self)
+        column.addWidget(self.table)
+
+        buttons = QHBoxLayout()
+        buttons.setContentsMargins(0, 0, 0, 0)
+        buttons.setSpacing(4)
+        self.add_button = self._list_button("+", _("Add Co-Author…"))
         self.add_button.clicked.connect(self._ask)
-        column.addSpacing(4)
-        column.addWidget(self.add_button, 0, Qt.AlignmentFlag.AlignLeft)
-
-        # Who gets what, and Split Evenly beside it: the line it changes.
-        shares = QHBoxLayout()
-        shares.setContentsMargins(0, 4, 0, 0)
-        shares.setSpacing(6)
-        self.sentence = QLabel(self)
-        self.sentence.setObjectName("article_details_share_sentence")
-        self.sentence.setWordWrap(True)
-        shares.addWidget(self.sentence, 1)
+        self.remove_button = self._list_button("−", _("Remove Co-Author"))
+        self.remove_button.clicked.connect(self._remove_selected)
+        buttons.addWidget(self.add_button)
+        buttons.addWidget(self.remove_button)
+        buttons.addStretch(1)
         self.even_button = QPushButton(_("Split Evenly"), self)
         self.even_button.setObjectName("article_details_link")
         self.even_button.setFlat(True)
@@ -154,13 +117,48 @@ class AuthorsSection(QWidget):
                                       "equal share of the zaps."))
         self.even_button.clicked.connect(
             lambda: self._hand_back(self._coauthors.split_evenly(self._details)))
-        shares.addWidget(self.even_button, 0, Qt.AlignmentFlag.AlignTop)
-        column.addLayout(shares)
-        self.note = QLabel(_("Apps that support zap splits, like Amethyst and noStrudel, "
-                             "pay each person their share. Other apps pay you."))
+        buttons.addWidget(self.even_button)
+        column.addLayout(buttons)
+
+        self.share_title = QLabel(self)
+        self.share_title.setObjectName("article_details_label")
+        self.share_title.setWordWrap(True)
+        column.addWidget(self.share_title)
+        self._share_row = QWidget(self)
+        share = QHBoxLayout(self._share_row)
+        share.setContentsMargins(0, 0, 0, 0)
+        share.setSpacing(8)
+        self.slider = QSlider(Qt.Orientation.Horizontal, self._share_row)
+        self.slider.setRange(0, 100)
+        self.slider.valueChanged.connect(self._share_set)
+        self.field = QSpinBox(self._share_row)
+        self.field.setRange(0, 100)
+        self.field.setSuffix(" %")
+        self.field.valueChanged.connect(self._share_set)
+        # Named for the person selected as one is (see _show_selected).
+        for control in (self.slider, self.field):
+            control.setAccessibleName(_("Share of the zaps"))
+        share.addWidget(self.slider, 1)
+        share.addWidget(self.field)
+        column.addWidget(self._share_row)
+
+        self.note = QLabel(_("Apps with zap splits pay each share; others pay you."), self)
+        self.note.setToolTip(_("Apps that support zap splits, like Amethyst and noStrudel, "
+                               "pay each person their share. Other apps pay you."))
         self.note.setObjectName("article_details_hint")
         self.note.setWordWrap(True)
         column.addWidget(self.note)
+
+    def _list_button(self, text: str, name: str) -> QToolButton:
+        """A list's + or −, small and square, as under a Mac's lists."""
+        button = QToolButton(self)
+        button.setObjectName("article_details_list_button")
+        button.setText(text)
+        button.setAccessibleName(name)
+        button.setToolTip(name)
+        button.setFixedSize(26, 22)
+        button.setFocusPolicy(Qt.FocusPolicy.TabFocus)
+        return button
 
     # -- showing ------------------------------------------------------------------
 
@@ -170,82 +168,124 @@ class AuthorsSection(QWidget):
         self._details, self._editable = details, editable
         own = self._own_pubkey()
         shares = self._coauthors.shares(details)
-        unpaid = set(self._coauthors.unzappable(details.coauthors))
-        self.you.set_full_text(_("{name} · you").format(name=self._name_of(own)) if own
-                               else _("You"))
-        self.you_share.setText(f"{zap_shares.author_share(shares)}%")
-        wanted = [pubkey for pubkey, _hint in details.coauthors]
-        for pubkey in list(self._rows):
-            if pubkey not in wanted:
-                row = self._rows.pop(pubkey)
-                row.hide()
-                row.deleteLater()
-        for index, pubkey in enumerate(wanted):
-            row = self._rows.get(pubkey) or self._add_row(pubkey)
-            self._row_column.insertWidget(index, row)
-            row.show_share(shares.get(pubkey, 0), payable=pubkey not in unpaid,
-                           editable=editable)
-        self._order_for_tab([self._rows[pubkey] for pubkey in wanted])
+        self._unpaid = set(self._coauthors.unzappable(details.coauthors))
+        people: List[tuple] = [("", (_("{name} · you").format(name=self._name_of(own))
+                                     if own else _("You")),
+                                    zap_shares.author_share(shares))]
+        people += [(pubkey, self._name_of(pubkey), shares.get(pubkey, 0))
+                   for pubkey, _hint in details.coauthors]
+        self.table.blockSignals(True)
+        self.table.setRowCount(len(people))
+        for row, (pubkey, name, share) in enumerate(people):
+            who = QTableWidgetItem(name)
+            who.setData(_PERSON, pubkey)
+            who.setToolTip(name)
+            amount = QTableWidgetItem(f"{share} %")
+            amount.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+            if pubkey in self._unpaid:
+                amount.setText("–")
+                amount.setToolTip(_("No lightning address in their profile, so they can’t "
+                                    "be paid a share."))
+                amount.setForeground(self.palette().placeholderText())
+            self.table.setItem(row, 0, who)
+            self.table.setItem(row, 1, amount)
+        rows = self.table.rowCount()
+        self.table.setFixedHeight(self.table.verticalHeader().length() + 2 * self.table.frameWidth()
+                                  if rows else 0)
+        chosen = self._chosen if any(p == self._chosen for p, _n, _s in people) else None
+        keep = chosen if chosen is not None else (people[1][0] if len(people) > 1 else "")
+        self.table.selectRow(next(i for i, (p, _n, _s) in enumerate(people) if p == keep))
+        self.table.blockSignals(False)
         self.add_button.setEnabled(self._pick_person is not None and editable)
-        payable = [pubkey for pubkey in wanted if pubkey not in unpaid]
+        payable = [pubkey for pubkey, _hint in details.coauthors if pubkey not in self._unpaid]
         self.even_button.setVisible(bool(payable))
         self.even_button.setEnabled(editable)
-        shared = any(share > 0 for share in shares.values())
-        self.sentence.setVisible(shared)
-        self.note.setVisible(shared)
-        if shared:
-            parts = ([f"{self._name_of(own)} {zap_shares.author_share(shares)}%"]
-                     if zap_shares.author_share(shares) else [])
-            parts += [f"{self._name_of(pubkey)} {share}%" for pubkey, share in shares.items()
-                      if share > 0]
-            self.sentence.setText(" · ".join(parts))
+        self.note.setVisible(any(share > 0 for share in shares.values()))
+        self._show_selected()
         # Last: an answer at once shows the authors again.
         self._coauthors.ask(details.coauthors, self._answered)
 
-    def _order_for_tab(self, rows) -> None:
-        """Tab goes through the rows as they are seen (rows made later would
-        come last), each slider, value and Remove, then the buttons."""
-        # What Tab reaches before the section: the rows follow it.
-        previous = self.previousInFocusChain()
-        while previous is not None and previous is not self and (
-                self.isAncestorOf(previous)
-                or not previous.focusPolicy() & Qt.FocusPolicy.TabFocus):
-            previous = previous.previousInFocusChain()
-        for row in rows:
-            if previous is not None:
-                QWidget.setTabOrder(previous, row.slider)
-            QWidget.setTabOrder(row.slider, row.field)
-            QWidget.setTabOrder(row.field, row.remove_button)
-            previous = row.remove_button
-        if previous is not None:
-            QWidget.setTabOrder(previous, self.add_button)
-        QWidget.setTabOrder(self.add_button, self.even_button)
+    def selected(self) -> str:
+        """The selected co-author's key; "" for you, or nobody."""
+        items = self.table.selectedItems()
+        return str(items[0].data(_PERSON) or "") if items else ""
 
-    def rows(self) -> Dict[str, _Row]:
-        """Each co-author's row, by their key."""
-        return dict(self._rows)
+    def select(self, pubkey: str) -> None:
+        for row in range(self.table.rowCount()):
+            if self.table.item(row, 0).data(_PERSON) == pubkey:
+                self.table.selectRow(row)
+                return
 
-    def _add_row(self, pubkey: str) -> _Row:
-        row = _Row(pubkey, self._name_of(pubkey), self)
-        row.share_set.connect(self._share_set)
-        row.remove.connect(lambda key: self._hand_back(self._coauthors.removed(self._details, key)))
-        self._rows[pubkey] = row
-        return row
+    def _show_selected(self) -> None:
+        """The controls for the row selected: a co-author's share, what you
+        keep, or why a co-author can't be paid."""
+        pubkey = self.selected()
+        if not self.table.signalsBlocked() and self.table.selectedItems():
+            self._chosen = pubkey
+        shares = self._coauthors.shares(self._details)
+        self.remove_button.setEnabled(bool(pubkey) and self._editable)
+        if not pubkey:
+            self.share_title.setText(_("You keep what the others leave.")
+                                     if self._details.coauthors else "")
+            self.share_title.setVisible(bool(self._details.coauthors))
+            self._share_row.hide()
+            return
+        name = self._name_of(pubkey)
+        self.share_title.show()
+        if pubkey in self._unpaid:
+            self.share_title.setText(_("{name} has no lightning address in their profile, so "
+                                       "they can’t be paid a share.").format(name=name))
+            self._share_row.hide()
+            return
+        self.share_title.setText(_("Share for {name}").format(name=name))
+        self._share_row.show()
+        for control in (self.slider, self.field):
+            control.blockSignals(True)
+            control.setValue(shares.get(pubkey, 0))
+            control.blockSignals(False)
+            control.setEnabled(self._editable)
+            control.setAccessibleName(_("Share for {name}").format(name=name))
 
     # -- changing -----------------------------------------------------------------
 
-    def _share_set(self, pubkey: str, share: int) -> None:
-        self._hand_back(self._coauthors.with_share(self._details, pubkey, share))
+    def eventFilter(self, watched, event) -> bool:  # noqa: N802, Qt's name
+        if (watched is self.table and event.type() == QEvent.Type.KeyPress
+                and event.key() in (Qt.Key.Key_Delete, Qt.Key.Key_Backspace)
+                and self.selected()):
+            self._remove_selected()
+            return True
+        return False
+
+    def _share_set(self, share: int) -> None:
+        pubkey = self.selected()
+        if not pubkey:
+            return
+        changed = self._coauthors.with_share(self._details, pubkey, share)
+        self._hand_back(changed)
+        # Held within what the others leave: the control shows what it got.
+        got = self._coauthors.shares(changed).get(pubkey, 0)
+        for control in (self.slider, self.field):
+            if control.value() != got:
+                control.blockSignals(True)
+                control.setValue(got)
+                control.blockSignals(False)
+
+    def _remove_selected(self) -> None:
+        pubkey = self.selected()
+        if pubkey and self._editable:
+            self._hand_back(self._coauthors.removed(self._details, pubkey))
 
     def _ask(self) -> None:
         if self._pick_person is not None:
             self._pick_person(self.add_button, self.add)
 
     def add(self, person) -> None:
-        """Add ``person`` (a Person) as a co-author, credited with no share."""
+        """Add ``person`` (a Person) as a co-author, credited with no share,
+        and select them."""
         details = self._coauthors.added(self._details, person)
         if details is not None:        # None: already there, or the author
             self._hand_back(details)
+            self.select(person.pubkey)
 
     def _answered(self, pubkey: str, able: Optional[bool]) -> None:
         """A co-author who can't receive zaps loses their share; one whose
@@ -264,3 +304,8 @@ class AuthorsSection(QWidget):
         self._details = details
         self.changed.emit(details)
         self.show_details(details, editable=self._editable)
+
+    def shares_shown(self) -> Dict[str, str]:
+        """What the list says each person gets, by key ("" for you)."""
+        return {str(self.table.item(row, 0).data(_PERSON) or ""): self.table.item(row, 1).text()
+                for row in range(self.table.rowCount())}

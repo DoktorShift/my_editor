@@ -31,8 +31,9 @@ INTERACTIVE = frozenset({
 
 
 # Qt's own parts of a control, named (or not) by Qt itself: the clear
-# button inside a search field.
-QT_INTERNALS = frozenset({"QLineEditIconButton"})
+# button inside a search field, the corner button where a table's headers
+# meet.
+QT_INTERNALS = frozenset({"QLineEditIconButton", "QTableCornerButton"})
 
 
 def unnamed_controls(root: QWidget) -> List[str]:
