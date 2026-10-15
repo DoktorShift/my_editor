@@ -269,6 +269,25 @@ def test_a_populated_current_year_does_not_ask_for_last_year():
     assert nam.requested == [2026]
 
 
+def test_the_roster_held_says_which_year_it_lists():
+    # Membership runs for a calendar year: the member page names the year
+    # of the roster that lists the member.
+    nam = FakeNam({2026: roster_bytes(MEMBER)})
+    d, _ = _directory(nam, year=2026)
+    assert d.roster_year is None                   # nothing held yet
+    _resolve(d, MEMBER)
+    assert d.roster_year == 2026
+
+
+def test_last_years_roster_says_last_year():
+    # In January, before the association rolls its roster over, last
+    # year's lists the members, and their membership is last year's.
+    nam = FakeNam({2026: b"[]", 2025: roster_bytes(MEMBER)})
+    d, _ = _directory(nam, year=2026)
+    _resolve(d, MEMBER)
+    assert d.roster_year == 2025
+
+
 # --------------------------------------------------------------------- #
 # Caching                                                               #
 # --------------------------------------------------------------------- #
@@ -316,6 +335,7 @@ def test_invalidate_forces_a_refetch():
     _resolve(d, MEMBER)
     d.invalidate()
     assert d.cached_membership(MEMBER) is None
+    assert d.roster_year is None
     _resolve(d, MEMBER)
     assert nam.requested == [2026, 2026]
 
@@ -503,6 +523,7 @@ def test_a_failed_refresh_keeps_the_roster_and_the_names():
     assert seen == [(MEMBER, True)]                # waiters hear the last known answer
     assert directory.last_known_membership(MEMBER) is True
     assert directory.cached_handle(MEMBER) == "u0"
+    assert directory.roster_year == 2026           # and the year it lists
     assert nam.requested == [2026, 2026]
 
 

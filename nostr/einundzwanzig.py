@@ -264,6 +264,9 @@ class MembershipDirectory(QObject):
         self._nam = nam or QNetworkAccessManager(self)
         self._clock = clock or time.monotonic
         self._roster: Optional[Set[str]] = None
+        # The year the roster held lists (last year's, right after New
+        # Year, until the association rolls it over).
+        self._roster_year: Optional[int] = None
         self._handles: Dict[str, Optional[str]] = {}
         # Pubkeys the association itself just confirmed (a signed status
         # answer), so a fresh member is recognized before the published
@@ -310,6 +313,16 @@ class MembershipDirectory(QObject):
         if self._roster is None:
             return None
         return self._match(key)
+
+    @property
+    def roster_year(self) -> Optional[int]:
+        """The year the roster held lists, or None before there is one.
+
+        Membership runs for a calendar year, and a member is a member of
+        the year whose roster lists them: this one's, or last year's in
+        January until the association rolls its roster over.
+        """
+        return self._roster_year
 
     def _is_fresh(self) -> bool:
         return (
@@ -361,6 +374,7 @@ class MembershipDirectory(QObject):
     def invalidate(self) -> None:
         """Drop the cached roster so the next resolve refetches."""
         self._roster = None
+        self._roster_year = None
         self._fetched_at = 0.0
 
     # -- resolving ---------------------------------------------------------
@@ -444,6 +458,7 @@ class MembershipDirectory(QObject):
         # every waiter hears "not a member".
         if ok:
             self._roster = roster
+            self._roster_year = year
             self._handles = records
             self._fetched_at = self._clock()
         waiting, self._waiting = self._waiting, []
