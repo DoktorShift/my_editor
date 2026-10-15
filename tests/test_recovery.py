@@ -801,3 +801,58 @@ def test_a_document_too_large_to_back_up_says_so(monkeypatch):
     backup = recovery.EditorBackup(ed, None)
     assert backup.write_now() is False
     assert backup.problem == recovery.TOO_LARGE
+
+
+# -- a document locked with a password (locked_files.py) -----------------------
+
+def test_a_locked_documents_backup_holds_nothing_in_the_clear():
+    from locked_files import Lock
+    ed = _editor("private words")
+    ed._lock = Lock("correct horse")
+    backup = recovery.EditorBackup(ed, "/tmp/diary.md")
+    assert backup.write_now()
+    with open(backup.path, "rb") as f:
+        written = f.read()
+    assert b"private words" not in written
+    record = _record_of(backup)
+    assert record["format"] == recovery.SEALED and recovery.is_restorable(record)
+    assert record["original_path"] == "/tmp/diary.md"        # where it goes back to
+    lock, opened = recovery.unseal_backup(record, "correct horse")
+    assert "private words" in opened["content"] and opened["format"] == "html"
+    assert lock.matches("correct horse")
+
+
+def test_a_sealed_backup_needs_the_password_and_older_builds_leave_it():
+    from locked_files import Lock, WrongPassword
+    ed = _editor("private words")
+    ed._lock = Lock("correct horse")
+    backup = recovery.EditorBackup(ed, None)
+    assert backup.write_now()
+    record = _record_of(backup)
+    with pytest.raises(WrongPassword):
+        recovery.unseal_backup(record, "wrong")
+    # A build before locking knew the "html" format only: it leaves this be.
+    assert record["format"] != "html"
+
+
+def test_a_locked_documents_pictures_stay_inside_its_sealed_backup():
+    from locked_files import Lock
+    ed = _editor("words")
+    ed._lock = Lock("correct horse")
+    handed_out = []
+    backup = recovery.EditorBackup(ed, None, externalize=lambda uri: handed_out.append(uri))
+    big = "data:image/png;base64," + "A" * (recovery.MIN_EXTERNALIZE_BYTES + 10)
+    ed.textCursor().insertHtml(f'<img src="{big}">')
+    assert backup.write_now()
+    assert handed_out == []
+
+
+def test_locking_a_document_seals_its_backup_at_once():
+    from locked_files import Lock
+    ed = _editor("private words")
+    backup = recovery.EditorBackup(ed, None)
+    assert backup.write_now()
+    assert _record_of(backup)["format"] == "html"
+    ed._lock = Lock("correct horse")
+    assert backup.write_now()                       # no word changed
+    assert _record_of(backup)["format"] == recovery.SEALED
