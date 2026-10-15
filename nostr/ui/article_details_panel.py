@@ -16,21 +16,24 @@ published article's) is shown, not edited: another address would be
 another article. A tab that holds no article (a note's draft, a PDF)
 says so instead of showing empty fields.
 
-Co-authors are chosen the way a mention is, from people whose Nostr
-address is confirmed; they are tagged as authors of the article. Zaps to
-it can be shared equally between the author and them.
+It is grouped in sections as Pages groups its inspector (Article, Cover,
+Hashtags, Authors, Advanced), each titled, with a line between them. The
+cover is one image well (cover_field.py). Co-authors are chosen the way
+a mention is, from people whose Nostr address is confirmed; they are
+tagged as authors of the article, and each can be given a share of the
+zaps to it (authors_section.py).
 
 It exists only while a Nostr account is in use (decision D-1).
 """
 
 from __future__ import annotations
 
-from typing import Callable, Optional, Tuple
+from typing import Callable, Optional
 
 from PySide6.QtCore import QDateTime, Qt, Signal
 from PySide6.QtWidgets import (
-    QCheckBox, QFrame, QHBoxLayout, QLabel, QLineEdit, QPlainTextEdit, QPushButton,
-    QScrollArea, QStackedWidget, QToolButton, QVBoxLayout, QWidget,
+    QFrame, QHBoxLayout, QLabel, QLineEdit, QPlainTextEdit, QScrollArea, QStackedWidget,
+    QToolButton, QVBoxLayout, QWidget,
 )
 
 import announce
@@ -39,7 +42,7 @@ from constants import (
     DARK_BG, DARK_BORDER, DARK_FG, DARK_MENU_BG, DARK_MUTED_FG, LIGHT_BG, LIGHT_BORDER, LIGHT_FG,
     LIGHT_MENU_BG, LIGHT_MUTED_FG,
 )
-from i18n import _, format_moment, ngettext
+from i18n import _, format_moment
 
 from ..article_details import ArticleDetails
 from ..blossom.store import MediaStore
@@ -49,9 +52,9 @@ from ..media.publish_copy import PublicCopyMaker
 from .media_saver import MediaSaver
 from ..profiles import Profile
 from ..publisher import link_name, slugify
+from .authors_section import AuthorsSection
 from .coauthors import Coauthors
 from .cover_field import CoverImageField
-from .eliding_label import ElidingLabel
 from .secret_key_check import slug_problem
 from .tag_field import TagField
 
@@ -60,24 +63,39 @@ DEFAULT_WIDTH = 300
 MAX_WIDTH = 420
 
 
-class _WrappingCheckBox(QWidget):
-    """A checkbox whose words wrap in a narrow panel (a QCheckBox's own text
-    never does, and would widen the panel past its edge); a click on the
-    words toggles it too, as on the checkbox's own text."""
+class _GrowingSummary(QPlainTextEdit):
+    """The summary: two lines to start, growing with what is written up to
+    five, as a field sized to what it is meant to hold."""
 
-    def __init__(self, text: str, parent: Optional[QWidget] = None) -> None:
+    LINES = (2, 5)
+
+    def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
-        row = QHBoxLayout(self)
-        row.setContentsMargins(0, 0, 0, 0)
-        row.setSpacing(6)
-        self.box = QCheckBox()
-        self.box.setAccessibleName(text)
-        row.addWidget(self.box, 0, Qt.AlignmentFlag.AlignTop)
-        self.words = QLabel(text)
-        self.words.setWordWrap(True)
-        self.words.mousePressEvent = lambda _event: (
-            self.box.isEnabled() and self.box.toggle())
-        row.addWidget(self.words, 1)
+        # Tab goes on to the next field, as in a form.
+        self.setTabChangesFocus(True)
+        self.textChanged.connect(self._fit)
+        self._fit()
+
+    def _fit(self) -> None:
+        # A plain text layout measures its document in lines.
+        lines = int(self.document().documentLayout().documentSize().height())
+        least, most = self.LINES
+        shown = max(least, min(most, lines))
+        # Scrolls only past the most lines it grows to.
+        self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded if lines > most
+                                        else Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        # Around the text: the frame and padding (the style's), as they are.
+        chrome = max(0, self.height() - self.viewport().height())
+        margin = 2 * int(self.document().documentMargin())
+        self.setFixedHeight(shown * self.fontMetrics().lineSpacing() + margin + chrome)
+
+    def resizeEvent(self, event) -> None:  # noqa: N802, Qt's name
+        super().resizeEvent(event)
+        self._fit()
+
+    def showEvent(self, event) -> None:  # noqa: N802, Qt's name
+        super().showEvent(event)
+        self._fit()                     # the style's padding is known now
 
 
 class ArticleDetailsPanel(QFrame):
@@ -122,6 +140,8 @@ class ArticleDetailsPanel(QFrame):
         # the one publishing would make when none is typed (a file's).
         self._kept_identifier = ""
         self._made_identifier = ""
+        # The title the article publishes with while none is typed.
+        self._derived_title = ""
         self._filling = False
         # The details the file writes in a way that is kept as written
         # (article_details.kept_in_file), and the line under each.
@@ -183,59 +203,46 @@ class ArticleDetailsPanel(QFrame):
         self._all_kept_note.hide()
         form.addWidget(self._all_kept_note)
 
+        # Grouped as Pages groups its inspector: a title over each section and
+        # a line between them, what is changed most often first.
+        self._section(form, _("Article"), first=True)
         self.title_edit = QLineEdit()
         self.title_edit.setPlaceholderText(_("Article title"))
         self._add_labeled(form, _("Title"), self.title_edit)
         self._add_kept_note(form, "title")
 
-        self.summary_edit = QPlainTextEdit()
-        self.summary_edit.setPlaceholderText(_("Short summary (one sentence)"))
-        # Tab goes on to the next field, as in a form; the summary is short.
-        self.summary_edit.setTabChangesFocus(True)
-        lines = self.summary_edit.fontMetrics().lineSpacing()
-        self.summary_edit.setFixedHeight(lines * 3 + 12)
+        self.summary_edit = _GrowingSummary()
+        self.summary_edit.setPlaceholderText(_("Shown under the title in feeds"))
         self._add_labeled(form, _("Summary"), self.summary_edit)
         self._add_kept_note(form, "summary")
 
+        self._section(form, _("Cover"))
         self.cover = CoverImageField(
             media_store=media_store, media_visibility=media_visibility,
             copy_maker=copy_maker, private_library=private_library, profile=profile,
             saver=media_saver, is_dark=self._is_dark, stacked=True)
         self.cover.problem.connect(self._say_cover_problem)
         self.cover.landed_for.connect(self.cover_uploaded)
-        form.addSpacing(6)
         form.addWidget(self.cover)
         self.cover_problem = self._problem_label()
         form.addWidget(self.cover_problem)
         self._add_kept_note(form, "image")
 
+        self._section(form, _("Hashtags"))
         self.hashtags = TagField(is_dark=self._is_dark)
-        self._add_labeled(form, _("Hashtags"), self.hashtags)
+        self.hashtags.setAccessibleName(_("Hashtags"))
+        form.addWidget(self.hashtags)
         self._add_kept_note(form, "tags")
 
-        form.addSpacing(6)
-        coauthors_label = QLabel(_("Co-Authors"))
-        coauthors_label.setObjectName("article_details_label")
-        form.addWidget(coauthors_label)
-        self.coauthor_rows = QVBoxLayout()
-        self.coauthor_rows.setContentsMargins(0, 0, 0, 0)
-        self.coauthor_rows.setSpacing(2)
-        form.addLayout(self.coauthor_rows)
-        self.add_coauthor_button = QPushButton(_("Add Co-Author…"))
-        self.add_coauthor_button.setAutoDefault(False)
-        self.add_coauthor_button.clicked.connect(self._ask_coauthor)
-        self.add_coauthor_button.setEnabled(self._pick_person is not None)
-        form.addWidget(self.add_coauthor_button, 0, Qt.AlignmentFlag.AlignLeft)
-        self._share_row = share = _WrappingCheckBox(_("Share zaps equally with co-authors"))
-        self.share_zaps = share.box
-        self.share_zaps.toggled.connect(self._share_zaps_toggled)
-        form.addWidget(share)
-        self.zaps_note = QLabel()
-        self.zaps_note.setObjectName("article_details_hint")
-        self.zaps_note.setWordWrap(True)
-        form.addWidget(self.zaps_note)
+        self._section(form, _("Authors"))
+        self.authors = AuthorsSection(
+            coauthors=self._coauthors, name_of=self._name_of, pick_person=self._pick_person,
+            own_pubkey=lambda: getattr(profile(), "user_pubkey", ""), parent=body)
+        self.authors.changed.connect(self._hand_back)
+        form.addWidget(self.authors)
         self._add_kept_note(form, "coauthors")
 
+        self._section(form, "")
         # Advanced: what most people never change, closed at first.
         self.advanced_toggle = QToolButton()
         self.advanced_toggle.setObjectName("article_details_disclosure")
@@ -244,8 +251,7 @@ class ArticleDetailsPanel(QFrame):
         self.advanced_toggle.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
         self.advanced_toggle.setArrowType(Qt.ArrowType.RightArrow)
         self.advanced_toggle.toggled.connect(self._show_advanced)
-        form.addSpacing(8)
-        form.addWidget(self.advanced_toggle)
+        form.addWidget(self.advanced_toggle, 0, Qt.AlignmentFlag.AlignLeft)
         self.advanced = QWidget()
         advanced = QVBoxLayout(self.advanced)
         advanced.setContentsMargins(0, 0, 0, 0)
@@ -274,6 +280,21 @@ class ArticleDetailsPanel(QFrame):
         self.summary_edit.textChanged.connect(self._edited)
         self.cover.changed.connect(self._edited)
         return scroll
+
+    def _section(self, layout, title: str, *, first: bool = False) -> None:
+        """A section's start: a line above it (but the first) and its title."""
+        if not first:
+            layout.addSpacing(8)
+            line = QFrame()
+            line.setObjectName("article_details_section_line")
+            line.setFixedHeight(1)
+            layout.addWidget(line)
+            layout.addSpacing(4)
+        if title:
+            heading = QLabel(title)
+            heading.setObjectName("article_details_section")
+            heading.setAccessibleName(title)
+            layout.addWidget(heading)
 
     @staticmethod
     def _add_labeled(layout, text: str, field) -> None:
@@ -315,6 +336,13 @@ class ArticleDetailsPanel(QFrame):
             + f"#article_details_header {{ background: {band};"
               f" border: none; border-bottom: 1px solid {border}; }}"
             + "#article_details_title { font-weight: 600; }"
+            # Each section's title over it, a hairline between sections.
+            + f"#article_details_section {{ font-weight: 600; color: {text}; }}"
+            + f"QFrame#article_details_section_line {{ background: {border}; border: none; }}"
+            + f"#article_details_share {{ color: {text}; font-weight: 600; }}"
+            + f"#article_details_share_sentence {{ color: {text}; }}"
+            + f"QPushButton#article_details_link {{ border: none; background: transparent;"
+              f" color: {theme.dialog_link_color(dark)}; padding: 0 2px; }}"
             + f"#article_details_scroll, #article_details_body {{ background: {background}; }}"
             + f"QLineEdit, QPlainTextEdit {{ background: {field}; color: {text};"
               f" border: 1px solid {border}; border-radius: 4px; padding: 3px 6px; }}"
@@ -412,6 +440,10 @@ class ArticleDetailsPanel(QFrame):
         self._kept_identifier = details.identifier
         self._show_people(details)
 
+    def shows_article(self) -> bool:
+        """Whether the fields are shown (not why there are none)."""
+        return self._pages.currentWidget() is self._form
+
     def show_no_article(self, reason: str) -> None:
         """The tab in front holds no article: ``reason`` instead of fields."""
         self.cover.set_owner(None)
@@ -425,6 +457,14 @@ class ArticleDetailsPanel(QFrame):
             if edit.isReadOnly():
                 edit.setCursorPosition(0)       # shown from its start
 
+    def set_derived_title(self, title: str) -> None:
+        """The title the article publishes with while none is typed (its
+        first heading or line, article_details.default_title), shown as
+        the Title's placeholder; the link name's placeholder follows it."""
+        self._derived_title = title
+        self.title_edit.setPlaceholderText(title or _("Article title"))
+        self._suggest_identifier()
+
     def _show_first_published(self, when: Optional[int]) -> None:
         if when:
             moment = QDateTime.fromSecsSinceEpoch(int(when))
@@ -433,101 +473,16 @@ class ArticleDetailsPanel(QFrame):
         else:
             self.first_published.setText(_("Not published yet."))
 
-    # -- co-authors -------------------------------------------------------------
+    # -- co-authors and their shares ---------------------------------------------
 
     def _show_people(self, details: ArticleDetails) -> None:
-        """The co-authors, each with Remove, and how zaps are shared."""
-        while self.coauthor_rows.count():
-            item = self.coauthor_rows.takeAt(0)
-            if item.widget() is not None:
-                # Gone from sight now, not when the event loop deletes it.
-                item.widget().hide()
-                item.widget().deleteLater()
-        # Tab reaches each Remove in turn, between the hashtags and Add
-        # Co-Author, where they are seen (rows made later would come last).
-        previous = self.hashtags.entry
-        for pubkey, _hint in details.coauthors:
-            row, remove = self._coauthor_row(pubkey)
-            remove.setEnabled("coauthors" not in self._kept)
-            self.coauthor_rows.addWidget(row)
-            QWidget.setTabOrder(previous, remove)
-            previous = remove
-        QWidget.setTabOrder(previous, self.add_coauthor_button)
-        self.add_coauthor_button.setEnabled(self._pick_person is not None
-                                            and "coauthors" not in self._kept)
-        self.share_zaps.blockSignals(True)
-        self.share_zaps.setChecked(bool(details.zaps))
-        self.share_zaps.blockSignals(False)
-        # Disabled as a whole: the box and its words.
-        unzappable = self._coauthors.unzappable(details.coauthors)
-        self._share_row.setEnabled((len(unzappable) < len(details.coauthors)
-                                    or bool(details.zaps)) and "zap_split" not in self._kept)
-        foreign = bool(details.zaps) and details.zaps != self._coauthors.equal_zaps(
-            details.coauthors)
-        if foreign:
-            note = _("Zaps are shared the way another app set them.")
-        elif unzappable:
-            note = ngettext(
-                "{names} can’t receive zaps: their profile has no lightning address. "
-                "They get no share.",
-                "{names} can’t receive zaps: their profiles have no lightning address. "
-                "They get no share.", len(unzappable)).format(
-                names=", ".join(self._name_of(pubkey) for pubkey in unzappable))
-        else:
-            note = ""
-        self.zaps_note.setText(note)
-        self.zaps_note.setVisible(bool(note))
-        # Last: an answer at once shows the co-authors again.
-        self._coauthors.ask(details.coauthors, self._zappable_answered)
-
-    def _zappable_answered(self, pubkey: str, able: Optional[bool]) -> None:
-        """A co-author who can't receive zaps loses their equal share; one
-        whose profile couldn't be read keeps it and says nothing."""
-        details = self._coauthors.learned(self._shown, pubkey, able)
-        if details is None:
-            return
-        if details != self._shown:
-            self._hand_back(details)
-        else:
-            self._show_people(details)
-
-    def _coauthor_row(self, pubkey: str) -> Tuple[QWidget, QPushButton]:
-        row = QWidget()
-        layout = QHBoxLayout(row)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(6)
-        name = self._name_of(pubkey)
-        label = ElidingLabel()
-        label.set_full_text(name)
-        layout.addWidget(label, 1)
-        remove = QPushButton(_("Remove"))
-        remove.setAutoDefault(False)
-        remove.setAccessibleName(_("Remove {name}").format(name=name))
-        remove.clicked.connect(lambda _checked=False, key=pubkey: self._remove_coauthor(key))
-        layout.addWidget(remove)
-        return row, remove
-
-    def _ask_coauthor(self) -> None:
-        if self._pick_person is not None:
-            self._pick_person(self.add_coauthor_button, self._add_coauthor)
-
-    def _add_coauthor(self, person) -> None:
-        details = self._coauthors.added(self._shown, person)
-        if details is not None:        # None: already there, or the author
-            self._hand_back(details)
-
-    def _remove_coauthor(self, pubkey: str) -> None:
-        self._hand_back(self._coauthors.removed(self._shown, pubkey))
-
-    def _share_zaps_toggled(self, shared: bool) -> None:
-        self._hand_back(self._coauthors.shared(self._shown, shared))
+        """The authors and how the zaps are shared (authors_section.py)."""
+        self.authors.show_details(details, editable=not ({"coauthors", "zap_split"}
+                                                         & self._kept))
 
     def _hand_back(self, details: ArticleDetails) -> None:
         self._shown = details
-        # Handed back before it is shown: showing it may learn at once that a
-        # co-author can't receive zaps, and hand back what follows from that.
         self.changed.emit(details)
-        self._show_people(details)
 
     # -- editing ----------------------------------------------------------------
 
@@ -565,8 +520,8 @@ class ArticleDetailsPanel(QFrame):
     def _suggest_identifier(self) -> None:
         """An empty address shows the one Publish as Article would start
         with, as a placeholder: a file's article the one made of the file's
-        name; any other the one made of the title, following it."""
-        title = self.title_edit.text().strip()
+        name; any other the one made of its title, following it."""
+        title = self.title_edit.text().strip() or self._derived_title
         self.identifier_edit.setPlaceholderText(
             self._made_identifier or (slugify(title) if title else _("my-article")))
 

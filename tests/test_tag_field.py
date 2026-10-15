@@ -139,3 +139,19 @@ def test_a_read_only_field_shows_its_tags_and_offers_no_change():
     field.setReadOnly(False)
     assert len(removers(field)) == 1 and not field.entry.isHidden()
     dialog.close()
+
+
+def test_a_tags_context_menu_copies_it_and_removes_it():
+    from PySide6.QtGui import QGuiApplication
+    field = TagField()
+    field.set_tags(["essay", "bitcoin"])
+    field.show()
+    chip = field.chips()[0]
+    menu = chip.menu()
+    assert [a.text() for a in menu.actions()] == ["Copy", "Remove"]
+    menu.actions()[0].trigger()
+    assert QGuiApplication.clipboard().text() == "#essay"
+    menu.actions()[1].trigger()
+    assert field.tags() == ("bitcoin",)
+    field.setReadOnly(True)
+    assert [a.text() for a in field.chips()[0].menu().actions()] == ["Copy"]

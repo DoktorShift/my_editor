@@ -304,18 +304,17 @@ class _AnyMediaStore:
         return lambda *args, **kwargs: None
 
 
-def test_a_cover_being_worked_on_lets_nothing_be_picked_and_keeps_its_hint(qt_app):
+def test_a_cover_being_worked_on_lets_nothing_be_picked(qt_app):
     """Round 10, M2: while the publish window worked, "Choose…" stayed
-    enabled; a cover kept as written says nothing of picking one (the hint
-    is under the stacked field, as Article Details has it)."""
+    enabled. Nothing is picked, typed or removed then, nor for a cover kept
+    as written; Choose says where a picture goes."""
     from nostr.ui.cover_field import CoverImageField
     cover = CoverImageField(media_store=_AnyMediaStore(), stacked=True)
     cover.show()
-    hint = cover._hint
+    assert "upload" in cover.pick_button.toolTip()
     cover.setBusy(True)
     assert not cover.pick_button.isEnabled() and cover.url_edit.isReadOnly()
     assert not cover.remove_button.isEnabled() and not cover.preview.isEnabled()
-    assert hint.isVisibleTo(cover)
     cover.setBusy(False)
     assert cover.pick_button.isEnabled() and not cover.url_edit.isReadOnly()
     assert cover.remove_button.isEnabled() and cover.preview.isEnabled()
@@ -324,7 +323,6 @@ def test_a_cover_being_worked_on_lets_nothing_be_picked_and_keeps_its_hint(qt_ap
     cover.setBusy(False)
     assert not cover.pick_button.isEnabled() and cover.url_edit.isReadOnly()
     assert not cover.preview.isEnabled()
-    assert not hint.isVisibleTo(cover)
     cover.close()
 
 

@@ -62,6 +62,9 @@ def window_with_draft(tags=DRAFT_TAGS):
     stand_in._set_article_details = lambda ed, d: MainWindow._set_article_details(
         stand_in, ed, d)
     stand_in.current_editor = lambda: None
+    # The tabs whose article changed, announced to all that show it.
+    stand_in.changed = []
+    stand_in._on_article_changed = stand_in.changed.append
     return stand_in
 
 
@@ -81,6 +84,7 @@ def test_details_set_in_the_tab_win_over_the_drafts():
     window._set_article_details(ed, OWN)
     assert window._article_details_of(ed) == OWN
     assert ed.document().isModified()
+    assert window.changed == [ed]
 
 
 def test_setting_what_the_tab_has_changes_nothing():
@@ -88,6 +92,7 @@ def test_setting_what_the_tab_has_changes_nothing():
     window._set_article_details(ed, window._article_details_of(ed))
     assert tab_details.set_in_tab(ed) is None
     assert not ed.document().isModified()
+    assert window.changed == []
 
 
 def test_saving_the_draft_again_takes_the_tabs_title_and_details():
@@ -139,8 +144,9 @@ inner = build_inner_event(kind=30023, content="Body of the article.", pubkey_hex
 w._on_draft_stashed(ed, choice, "e" * 64, 1_800_000_000, inner)
 panel = w._article_details_panel
 r = {"summary": panel.summary_edit.toPlainText(), "cover": panel.cover.text(),
-     "tags": list(panel.hashtags.tags()), "rows": panel.coauthor_rows.count(),
-     "zaps": panel.share_zaps.isChecked(), "fixed": panel.identifier_edit.isReadOnly()}
+     "tags": list(panel.hashtags.tags()), "rows": len(panel.authors.rows()),
+     "zaps": panel.authors.rows()["b2" * 32].field.value() == 50,
+     "fixed": panel.identifier_edit.isReadOnly()}
 panel.title_edit.setText("My Title!")
 d = w._article_details_of(ed)
 r["after"] = [d.title, d.summary, d.image, list(d.hashtags), len(d.coauthors), len(d.zaps)]
@@ -240,7 +246,8 @@ ed = w.new_tab()
 w.act_article_details.setChecked(True)
 app.processEvents()
 panel = w._article_details_panel
-panel._add_coauthor(Person(pubkey="b2" * 32, display_name="Bob"))
+panel.authors.add(Person(pubkey="b2" * 32, display_name="Bob"))
+panel.cover.show_address_field()                # Choose > Web Address…
 app.processEvents()
 r = {}
 for width in (260, 300):

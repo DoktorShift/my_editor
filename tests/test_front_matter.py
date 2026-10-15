@@ -293,7 +293,7 @@ KEPT_SCRIPT = r"""
 import json, os, sys
 sys.path.insert(0, sys.argv[1])
 os.environ["QT_QPA_PLATFORM"] = "offscreen"
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QLabel
 app = QApplication(sys.argv[:1])
 import main_window
 
@@ -309,7 +309,7 @@ app.processEvents()
 panel = w._article_details_panel
 r = {"cover read-only": panel.cover.url_edit.isReadOnly(),
      "title read-only": panel.title_edit.isReadOnly(),
-     "notes": [l.text() for l in panel.findChildren(type(panel.zaps_note))
+     "notes": [l.text() for l in panel.findChildren(QLabel)
                if l.isVisibleTo(panel) and l.text().startswith("Kept")]}
 w._set_article_details(ed, w._article_details_of(ed).with_changes(
     image="https://cdn.example/c.jpg"))

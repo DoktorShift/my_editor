@@ -11,7 +11,18 @@ address is the window's to place (under Show Details):
                   Remove
 
 In the narrow inspector everything stacks, as Pages stacks its controls:
-the well, the address, then the buttons.
+the well across the column in the article card's 16:9 framing, then
+Choose and Remove, then the address as a line of its own:
+
+    [ picture                ]
+    Choose ▾   Adjust…   Remove
+    cdn.example/cover.jpg
+
+There the well is an image well as Apple's guidelines describe one: it
+takes focus, a picture file dropped on it, and Paste (a picture file or
+a picture); Delete removes the cover, Copy copies its address, Return
+opens the Media Library. Choose is a pull-down: the Media Library, or a
+web address typed in the field it shows.
 
 Choose… is the Media Library's picker, which also uploads. A picture
 kept private cannot be a cover as it stands, since its bytes are
@@ -36,14 +47,15 @@ address typed would be a surprise.
 from __future__ import annotations
 
 import os
+import tempfile
 import uuid
 from dataclasses import dataclass
 from typing import Callable, Optional
 
-from PySide6.QtCore import QSize, Qt, Signal
-from PySide6.QtGui import QPixmap
+from PySide6.QtCore import QRectF, QSize, Qt, Signal
+from PySide6.QtGui import QGuiApplication, QKeySequence, QPainter, QPainterPath, QPixmap
 from PySide6.QtWidgets import (
-    QBoxLayout, QLabel, QLineEdit, QPushButton, QVBoxLayout, QWidget,
+    QBoxLayout, QLabel, QLineEdit, QMenu, QPushButton, QSizePolicy, QVBoxLayout, QWidget,
 )
 
 import media_files
@@ -58,11 +70,23 @@ from ..media.publish_copy import PublicCopyMaker
 from ..media.scrub import ScrubError, scrub_for_publication
 from ..profiles import Profile
 from .media_library_dialog import MediaLibraryDialog
+from .eliding_label import ElidingLabel
 from .media_saver import MediaSaver
 from .publish_copy_dialog import resolve_pick
 from .cover_crop_dialog import CoverCropDialog
 from .flow_layout import FlowLayout
 from .thumbnail_loader import ThumbnailLoader
+
+
+
+def library_picture_hash(media_store: Optional[MediaStore], address: str) -> str:
+    """The hash of the picture behind ``address`` when it is one of the
+    account's media library, whose own copy can be shown; "" otherwise.
+    An address typed is never downloaded to show it: that would be a
+    surprise (and a request to a server nobody chose)."""
+    sha = (hash_from_url(address.strip()) or "").lower() if address.strip() else ""
+    return sha if sha and media_store is not None and sha in media_store.files else ""
+
 
 THUMB = QSize(144, 81)             # the same 16:9 framing as the article card
 
@@ -105,13 +129,102 @@ def choose_picture(services: MediaServices, *, title: str, is_dark: bool, parent
 
 
 class _Well(QLabel):
-    """The picture, where a picture file can be dropped."""
+    """The picture, where a picture file can be dropped. Its picture is
+    shown filling the well, cropped from the middle; words in its place
+    while there is none. ``wide``: across its column at 16:9, an image well
+    with focus, Paste, Copy, Delete and Return (see the module)."""
 
     dropped = Signal(str)
+    cleared = Signal()
+    activated = Signal()
+    copied = Signal()
 
-    def __init__(self, parent: Optional[QWidget] = None) -> None:
+    RADIUS = 6
+
+    def __init__(self, parent: Optional[QWidget] = None, *, wide: bool = False) -> None:
         super().__init__(parent)
         self.setAcceptDrops(True)
+        self._picture = QPixmap()
+        self._wide = wide
+        if wide:
+            # Its height follows its width (16:9), which a layout asks only
+            # when the size policy says so.
+            policy = QSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+            policy.setHeightForWidth(True)
+            self.setSizePolicy(policy)
+            self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+
+    def setPixmap(self, picture: QPixmap) -> None:  # noqa: N802, Qt's name
+        self._picture = QPixmap(picture)
+        self.update()
+
+    def hasHeightForWidth(self) -> bool:  # noqa: N802, Qt's name
+        return self._wide
+
+    def heightForWidth(self, width: int) -> int:  # noqa: N802, Qt's name
+        # The article card's 16:9 framing, as the small well (THUMB).
+        return width * 9 // 16 if self._wide else super().heightForWidth(width)
+
+    def sizeHint(self) -> QSize:  # noqa: N802, Qt's name
+        return QSize(240, 135) if self._wide else super().sizeHint()
+
+    def pixmap(self) -> QPixmap:  # noqa: D102, Qt's name
+        """The picture as the well shows it: filling its frame, cropped from
+        the middle; null when it shows words."""
+        if self._picture.isNull():
+            return QPixmap()
+        frame = self.contentsRect().size()
+        scaled = self._picture.scaled(frame, Qt.AspectRatioMode.KeepAspectRatioByExpanding,
+                                      Qt.TransformationMode.SmoothTransformation)
+        return scaled.copy((scaled.width() - frame.width()) // 2,
+                           (scaled.height() - frame.height()) // 2,
+                           frame.width(), frame.height())
+
+    def paintEvent(self, event) -> None:  # noqa: N802, Qt's name
+        if self._picture.isNull():
+            super().paintEvent(event)
+            return
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        inner = self.contentsRect()
+        shape = QPainterPath()
+        shape.addRoundedRect(QRectF(inner), self.RADIUS, self.RADIUS)
+        painter.setClipPath(shape)
+        painter.drawPixmap(inner.topLeft(), self.pixmap())
+
+    def keyPressEvent(self, event) -> None:  # noqa: N802, Qt's name
+        if self._wide and self.isEnabled():
+            if event.key() in (Qt.Key.Key_Delete, Qt.Key.Key_Backspace):
+                self.cleared.emit()
+                return
+            if event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter, Qt.Key.Key_Space):
+                self.activated.emit()
+                return
+            if event.matches(QKeySequence.StandardKey.Paste):
+                self._paste()
+                return
+        if self._wide and event.matches(QKeySequence.StandardKey.Copy):
+            self.copied.emit()
+            return
+        super().keyPressEvent(event)
+
+    def _paste(self) -> None:
+        """A picture file copied in the Finder or Explorer, or a picture
+        itself, as if dropped."""
+        data = QGuiApplication.clipboard().mimeData()
+        if data is None:
+            return
+        for url in data.urls() if data.hasUrls() else ():
+            if url.isLocalFile():
+                self.dropped.emit(url.toLocalFile())
+                return
+        if data.hasImage():
+            image = QGuiApplication.clipboard().image()
+            if not image.isNull():
+                path = os.path.join(tempfile.mkdtemp(prefix="myeditor-cover-"),
+                                    "pasted-cover.png")
+                if image.save(path, "PNG"):
+                    self.dropped.emit(path)
 
     @staticmethod
     def _picture_path(event) -> str:
@@ -196,9 +309,10 @@ class CoverImageField(QWidget):
         self.url_edit.setAccessibleName(_("Cover image"))
         self.url_edit.textChanged.connect(self._on_url_changed)
 
-        self.preview = _Well()
+        self.preview = _Well(wide=stacked)
         self.preview.setObjectName("article_cover_preview")
-        self.preview.setFixedSize(THUMB)
+        if not stacked:
+            self.preview.setFixedSize(THUMB)
         self.preview.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.preview.setAccessibleName(_("Cover image"))
         self.preview.dropped.connect(self.drop)
@@ -226,30 +340,9 @@ class CoverImageField(QWidget):
         self.adjust_button.setEnabled(False)
 
         buttons = [button for button in (self.pick_button, self.adjust_button, self.remove_button) if button]
-        # Said under the field where there is room (stacked); never for a
-        # cover kept as written in its file (setReadOnly).
-        self._hint: Optional[QLabel] = None
+        self.address_line: Optional[ElidingLabel] = None
         if stacked:
-            column = QVBoxLayout(self)
-            column.setContentsMargins(0, 0, 0, 0)
-            column.setSpacing(6)
-            column.addWidget(self.preview, 0, Qt.AlignmentFlag.AlignLeft)
-            label = QLabel(_("Cover image"))
-            label.setObjectName("article_field_label")
-            label.setBuddy(self.url_edit)
-            column.addWidget(label)
-            column.addWidget(self.url_edit)
-            row = FlowLayout(spacing=6)
-            for button in buttons:
-                row.addWidget(button)
-            column.addLayout(row)
-            hint = QLabel(_("Pictures you pick are uploaded to your media servers.")
-                          if media_store is not None
-                          else _("Paste an image URL hosted anywhere on the public web."))
-            hint.setObjectName("article_field_hint")
-            hint.setWordWrap(True)
-            column.addWidget(hint)
-            self._hint = hint
+            self._stack(buttons)
         else:
             outer = QVBoxLayout(self)
             outer.setContentsMargins(0, 0, 0, 0)
@@ -324,8 +417,6 @@ class CoverImageField(QWidget):
         """A cover that stays as it is (kept as written in its file): read
         only, and nothing said of picking one."""
         self._read_only = read_only
-        if self._hint is not None:
-            self._hint.setVisible(not read_only)
         self._guidance.setVisible(not read_only)
         self.adjust_button.setVisible(not read_only and self._media_store is not None)
         self._enable()
@@ -344,6 +435,72 @@ class CoverImageField(QWidget):
             self.pick_button.setEnabled(not fixed)
         self.remove_button.setEnabled(not fixed)
         self.adjust_button.setEnabled(not fixed and not self.uploading() and not self._picture.isNull())
+
+    def _stack(self, buttons) -> None:
+        """The inspector's layout (see the module): the well across the
+        column, Choose and Remove, the address as a line."""
+        column = QVBoxLayout(self)
+        column.setContentsMargins(0, 0, 0, 0)
+        column.setSpacing(6)
+        column.addWidget(self.preview)
+        self.preview.cleared.connect(self._remove_if_any)
+        self.preview.activated.connect(self.choose)
+        self.preview.copied.connect(self._copy_address)
+        self.preview.setAccessibleDescription(_("Drop or paste a picture, or press Return to "
+                                                "choose one."))
+        if self.pick_button is not None:
+            # A pull-down: where the picture comes from.
+            self.pick_button.setText(_("Choose"))
+            self.pick_button.clicked.disconnect(self.choose)
+            menu = QMenu(self.pick_button)
+            menu.addAction(_("Media Library…"), self.choose)
+            menu.addAction(_("Web Address…"), self.show_address_field)
+            self.pick_button.setMenu(menu)
+        # Choose, Adjust… and Remove wrap where the column is narrow.
+        row = FlowLayout(spacing=6)
+        for button in buttons:
+            row.addWidget(button)
+        column.addLayout(row)
+        self.address_line = ElidingLabel()
+        self.address_line.setObjectName("article_field_hint")
+        self.address_line.setAccessibleName(_("Cover image"))
+        column.addWidget(self.address_line)
+        column.addWidget(self.url_edit)
+        # Typed only when asked for, unless there is no library to pick from.
+        self.url_edit.setVisible(self._media_store is None)
+        self.url_edit.editingFinished.connect(self._address_typed)
+        self.url_edit.textChanged.connect(self._show_address)
+        self._show_address()
+
+    def show_address_field(self) -> None:
+        """Web Address…: the field, with the address to edit or type."""
+        if self.address_line is None:
+            return
+        self.url_edit.show()
+        self._show_address()
+        self.url_edit.setFocus()
+        self.url_edit.selectAll()
+
+    def _address_typed(self) -> None:
+        if self.address_line is not None and self._media_store is not None:
+            self.url_edit.setVisible(False)
+            self._show_address()
+
+    def _show_address(self, *_args) -> None:
+        if self.address_line is None:
+            return
+        address = self.url_edit.text().strip()
+        self.address_line.set_full_text(address)
+        self.address_line.setToolTip(address)
+        self.address_line.setVisible(bool(address) and not self.url_edit.isVisible())
+
+    def _remove_if_any(self) -> None:
+        if self.url_edit.text() and self.remove_button.isEnabled():
+            self.url_edit.clear()
+
+    def _copy_address(self) -> None:
+        if self.url_edit.text().strip():
+            QGuiApplication.clipboard().setText(self.url_edit.text().strip())
 
     def set_dark(self, is_dark: bool) -> None:
         self._is_dark = is_dark
@@ -478,14 +635,13 @@ class CoverImageField(QWidget):
             self._uploading = ""
             self.uploading_changed.emit(False)
         address = text.strip()
-        sha = (hash_from_url(address) or "").lower() if address else ""
+        sha = library_picture_hash(self._media_store, address) if self._loader else ""
         self.remove_button.setVisible(bool(address))
         if not address:
             self._show_placeholder(_("No cover\nselected"))
         elif sha and sha == self._thumb_hash and not self._picture.isNull():
             pass                                   # this picture is shown
-        elif (sha and self._loader is not None and self._media_store is not None
-              and sha in self._media_store.files):
+        elif sha:
             # A picture of the library: its preview, from the library's copy.
             self._show_placeholder("")
             self._thumb_hash = sha
@@ -511,12 +667,8 @@ class CoverImageField(QWidget):
         if sha.lower() != self._thumb_hash or pix.isNull():
             return
         self._picture = pix
-        size = THUMB - QSize(2, 2)
-        filled = pix.scaled(size, Qt.AspectRatioMode.KeepAspectRatioByExpanding,
-                            Qt.TransformationMode.SmoothTransformation)
-        self.preview.setPixmap(filled.copy((filled.width() - size.width()) // 2,
-                                           (filled.height() - size.height()) // 2,
-                                           size.width(), size.height()))
+        # Whole: the well crops it to its own frame, at any size.
+        self.preview.setPixmap(pix)
         self.preview.setText("")
         self._dimensions.setText(_("Selected image: {width} × {height} px").format(
             width=pix.width(), height=pix.height()))

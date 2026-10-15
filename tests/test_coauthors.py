@@ -10,13 +10,14 @@ What must hold:
   co-author also mentioned in the text has one p tag, the one with the
   marker (with the mention's relay when the co-author's has none).
 
-  Zaps are shared only when chosen: then equally between the author and
-  the co-authors, a zap tag of four parts each, as every reader of zap
-  splits reads them, the author's with their relay. A co-author whose
-  profile has no lightning address can't receive zaps: they get no share,
-  and one plain line under the option says so (review M6). Zaps another app shared stay as it set them until
-  they are changed here. The author is never their own co-author, and
-  nobody is added twice.
+  A co-author is credited and receives no zaps until given a share: whole
+  percentages set with a slider or exactly, the author keeping what the
+  others leave (nostr/zap_shares.py), written as zap tags of four parts
+  each, the author's first, every one naming a relay. A co-author whose
+  profile has no lightning address can't be paid: their share stays at 0
+  and their row says why. A split another app made stays as it set it
+  until a share is changed here. The author is never their own
+  co-author, and nobody is added twice.
 
   A Markdown file keeps co-authors and zap shares in its front matter.
 """
@@ -35,7 +36,7 @@ from PySide6.QtWidgets import QApplication  # noqa: E402
 import front_matter  # noqa: E402
 from nostr import bech32  # noqa: E402
 from nostr.article_details import (  # noqa: E402
-    ArticleDetails, equal_zaps, from_front_matter, front_matter_with)
+    ArticleDetails, from_front_matter, front_matter_with)
 from nostr.known_people import Person  # noqa: E402
 from nostr.publisher import build_article  # noqa: E402
 from nostr.ui.article_details_panel import ArticleDetailsPanel  # noqa: E402
@@ -60,12 +61,6 @@ def test_co_authors_and_zap_shares_are_read_from_tags_and_written_back():
     assert details.zaps == (("zap", ME, "", "1"), ("zap", BOB, RELAY, "1"))
     assert ArticleDetails.from_tags(details.tags()) == details
     assert ["p", BOB, RELAY, "author"] in details.draft_tags("")
-
-
-def test_zaps_are_shared_equally_and_only_with_co_authors():
-    assert equal_zaps(ME, "", ()) == ()
-    assert equal_zaps(ME, "", ((BOB, RELAY), (ME, ""))) == (
-        ("zap", ME, "", "1"), ("zap", BOB, RELAY, "1"))
 
 
 def test_a_co_author_also_mentioned_has_one_tag_with_the_marker():
@@ -107,112 +102,101 @@ def panel_with(details, zappable=None, checks=None):
                                 can_receive_zaps=can_receive_zaps,
                                 relay_hint=lambda pubkey: {ME: "wss://mine.example"}.get(pubkey, ""),
                                 pick_person=lambda anchor, chosen: asked.append(chosen),
-                                name_of=lambda pubkey: {BOB: "Bob", CAROL: "Carol"}[pubkey])
+                                name_of=lambda pubkey: {ME: "Me", BOB: "Bob", CAROL: "Carol"}[pubkey])
     sent = []
     panel.changed.connect(sent.append)
     panel.show_article(details, fixed_identifier=False)
     return panel, sent, asked
 
 
+def rows(panel):
+    return panel.authors.rows()
+
+
 def test_a_co_author_is_added_and_removed_in_article_details():
     panel, sent, asked = panel_with(ArticleDetails(title="T"))
-    assert not panel.share_zaps.isEnabled()
-    panel.add_coauthor_button.click()
+    assert not panel.authors.even_button.isVisibleTo(panel)
+    panel.authors.add_button.click()
     asked[-1](Person(pubkey=BOB, display_name="Bob", relay_hint=RELAY))
-    assert sent[-1].coauthors == ((BOB, RELAY),) and sent[-1].zaps == ()
-    panel.add_coauthor_button.click()
+    assert sent[-1].coauthors == ((BOB, RELAY),) and sent[-1].zaps == ()   # credited, unpaid
+    panel.authors.add_button.click()
     asked[-1](Person(pubkey=BOB))                            # twice: nothing
     asked[-1](Person(pubkey=ME))                             # the author: nothing
     assert len(sent) == 1
-    remove = [b for b in panel.findChildren(type(panel.add_coauthor_button))
-              if b.accessibleName() == "Remove Bob"]
-    assert remove and unnamed_controls(panel) == []
-    remove[0].click()
+    assert unnamed_controls(panel) == []
+    rows(panel)[BOB].remove_button.click()
     assert sent[-1].coauthors == ()
 
 
-def test_remove_is_reached_with_tab_between_hashtags_and_add_co_author():
+def test_tab_goes_through_each_share_and_remove_then_the_buttons():
     panel, sent, asked = panel_with(ArticleDetails(title="T", coauthors=((BOB, ""), (CAROL, ""))))
     chain, widget = [], panel.hashtags.entry
-    for _step in range(4):
+
+    def tab_stop(widget):
+        # As Tab itself goes: a widget focused through another (a spin box's
+        # field) is no stop of its own.
+        return (widget.focusPolicy() & Qt.FocusPolicy.TabFocus and widget.isVisibleTo(panel)
+                and widget.focusProxy() is None)
+    for _step in range(8):
         widget = widget.nextInFocusChain()
-        while not (widget.focusPolicy() & Qt.FocusPolicy.TabFocus
-                   and widget.isVisibleTo(panel)):        # as Tab itself goes
+        while not tab_stop(widget):
             widget = widget.nextInFocusChain()
         chain.append(widget.accessibleName() or widget.text())
-    assert chain == ["Remove Bob", "Remove Carol", "Add Co-Author…",
-                     "Share zaps equally with co-authors"]
+    assert chain == ["Share for Bob", "Share for Bob", "Remove Bob",
+                     "Share for Carol", "Share for Carol", "Remove Carol",
+                     "Add Co-Author…", "Split Evenly"]
 
 
-def test_remove_is_reached_with_tab_between_hashtags_and_add_co_author():
-    panel, sent, asked = panel_with(ArticleDetails(title="T", coauthors=((BOB, ""), (CAROL, ""))))
-    chain, widget = [], panel.hashtags.entry
-    for _step in range(4):
-        widget = widget.nextInFocusChain()
-        while not (widget.focusPolicy() & Qt.FocusPolicy.TabFocus
-                   and widget.isVisibleTo(panel)):        # as Tab itself goes
-            widget = widget.nextInFocusChain()
-        chain.append(widget.accessibleName() or widget.text())
-    assert chain == ["Remove Bob", "Remove Carol", "Add Co-Author…",
-                     "Share zaps equally with co-authors"]
-
-
-@pytest.mark.parametrize("dark", [False, True])
-def test_the_share_words_dim_with_the_box(dark):
-    panel, sent, asked = panel_with(ArticleDetails(title="T"))
-    panel.set_dark(dark)
-    panel.show()
-    words = panel._share_row.words
-    assert not words.isEnabled()
-    dimmed = darkest_ink(words)
-    panel.show_article(ArticleDetails(title="T", coauthors=((BOB, ""),)), fixed_identifier=False)
-    assert words.isEnabled()
-    assert abs(darkest_ink(words) - dimmed) > 40      # visibly another ink
-
-
-def darkest_ink(label):
-    """How far the label's text ink is from its background (0 to 255)."""
-    image = label.grab().toImage()
-    background = image.pixelColor(0, 0).lightness()
-    return max(abs(image.pixelColor(x, y).lightness() - background)
-               for x in range(image.width()) for y in range(image.height()))
-
-
-def test_shared_zaps_follow_the_co_authors_equally():
+def test_a_share_is_set_with_the_slider_or_exactly_and_you_keep_the_rest():
     panel, sent, asked = panel_with(ArticleDetails(title="T", coauthors=((BOB, RELAY),)))
-    panel.share_zaps.setChecked(True)
-    assert sent[-1].zaps == (("zap", ME, "wss://mine.example", "1"), ("zap", BOB, RELAY, "1"))
-    panel.add_coauthor_button.click()
-    asked[-1](Person(pubkey=CAROL))
-    assert [tag[1] for tag in sent[-1].zaps] == [ME, BOB, CAROL]
-    panel.share_zaps.setChecked(False)
-    assert sent[-1].zaps == ()
+    rows(panel)[BOB].slider.setValue(30)
+    assert sent[-1].zaps == (("zap", ME, "wss://mine.example", "70"), ("zap", BOB, RELAY, "30"))
+    assert panel.authors.you_share.text() == "70%" and rows(panel)[BOB].field.value() == 30
+    rows(panel)[BOB].field.setValue(45)
+    assert [tag[3] for tag in sent[-1].zaps] == ["55", "45"]
+    assert panel.authors.sentence.text() == "Me 55% · Bob 45%"
+    assert not panel.authors.note.isHidden()               # who pays a split, honestly
+    rows(panel)[BOB].slider.setValue(0)
+    assert sent[-1].zaps == () and panel.authors.note.isHidden()
 
 
-def test_zaps_another_app_shared_stay_until_changed_here():
+def test_a_share_is_held_within_what_the_others_leave():
+    panel, sent, asked = panel_with(ArticleDetails(title="T", coauthors=((BOB, ""), (CAROL, ""))))
+    rows(panel)[BOB].slider.setValue(70)
+    rows(panel)[CAROL].slider.setValue(90)
+    assert rows(panel)[CAROL].slider.value() == 30 and rows(panel)[CAROL].field.value() == 30
+    assert panel.authors.you_share.text() == "0%"
+    assert [tag[1] for tag in sent[-1].zaps] == [BOB, CAROL]  # you keep nothing: no tag
+
+
+def test_split_evenly_and_a_removed_co_author_gives_their_share_back():
+    panel, sent, asked = panel_with(ArticleDetails(title="T", coauthors=((BOB, ""), (CAROL, ""))))
+    panel.authors.even_button.click()
+    assert [tag[3] for tag in sent[-1].zaps] == ["34", "33", "33"]
+    rows(panel)[CAROL].remove_button.click()
+    assert [(tag[1], tag[3]) for tag in sent[-1].zaps] == [(ME, "67"), (BOB, "33")]
+
+
+def test_a_split_another_app_made_stays_until_a_share_is_changed_here():
     foreign = (("zap", ME, "wss://mine.example", "3"), ("zap", BOB, "", "1"))
     panel, sent, asked = panel_with(ArticleDetails(title="T", coauthors=((BOB, ""),),
                                                    zaps=foreign))
-    assert panel.share_zaps.isChecked() and not panel.zaps_note.isHidden()
-    panel.add_coauthor_button.click()
+    assert rows(panel)[BOB].field.value() == 25 and panel.authors.you_share.text() == "75%"
+    panel.authors.add_button.click()
     asked[-1](Person(pubkey=CAROL))
     assert sent[-1].zaps == foreign                          # left as the other app set them
-    panel.share_zaps.setChecked(False)
-    assert sent[-1].zaps == ()
+    rows(panel)[BOB].slider.setValue(50)
+    assert [tag[3] for tag in sent[-1].zaps] == ["50", "50"]
 
 
-def test_a_co_author_who_cant_receive_zaps_gets_no_share():
+def test_a_co_author_who_cant_receive_zaps_gets_no_share_and_says_why():
     panel, sent, asked = panel_with(ArticleDetails(title="T", coauthors=((BOB, RELAY),)),
                                     zappable={CAROL: False})
-    panel.share_zaps.setChecked(True)
-    panel.add_coauthor_button.click()
+    panel.authors.add_button.click()
     asked[-1](Person(pubkey=CAROL))
-    assert [tag[1] for tag in sent[-1].zaps] == [ME, BOB]
-    assert not panel.zaps_note.isHidden()
-    assert panel.zaps_note.text() == ("Carol can’t receive zaps: their profile has no "
-                                      "lightning address. They get no share.")
-    panel.share_zaps.setChecked(False)
-    panel.share_zaps.setChecked(True)
+    carol = rows(panel)[CAROL]
+    assert not carol.slider.isEnabled() and not carol.unpaid.isHidden()
+    panel.authors.even_button.click()
     assert [tag[1] for tag in sent[-1].zaps] == [ME, BOB]
 
 
@@ -220,12 +204,12 @@ def test_an_answer_that_comes_later_takes_the_share_back():
     checks = []
     panel, sent, asked = panel_with(ArticleDetails(title="T", coauthors=((BOB, RELAY),)),
                                     checks=checks)
-    panel.share_zaps.setChecked(True)
-    assert [tag[1] for tag in sent[-1].zaps] == [ME, BOB]     # not known yet: shared
+    rows(panel)[BOB].slider.setValue(40)
+    assert [tag[1] for tag in sent[-1].zaps] == [ME, BOB]     # not known yet: paid
     [(pubkey, answer)] = checks
     answer(False)
-    assert sent[-1].zaps == () and panel.zaps_note.text().startswith("Bob can’t")
-    assert not panel.share_zaps.isEnabled()                    # nobody left to share with
+    assert sent[-1].zaps == () and not rows(panel)[BOB].unpaid.isHidden()
+    assert not panel.authors.even_button.isVisibleTo(panel)   # nobody left to share with
 
 
 @pytest.mark.parametrize("content, able", [
@@ -319,15 +303,12 @@ def test_a_profile_no_relay_answered_is_asked_again_with_backoff():
     assert never == [None] and len(asked) == 4                     # 5, 10, 20 ms, then given up
 
 
-def test_while_no_relay_answers_the_share_line_says_nothing():
+def test_while_no_relay_answers_the_share_stays_and_nothing_is_said():
     panel, sent, asked = panel_with(ArticleDetails(title="T", coauthors=((BOB, RELAY),)),
                                     zappable={BOB: None})
-    panel.share_zaps.setChecked(True)
+    rows(panel)[BOB].slider.setValue(20)
     assert [tag[1] for tag in sent[-1].zaps] == [ME, BOB]
-    assert panel.zaps_note.isHidden()
-    panel.show_article(ArticleDetails(title="T", coauthors=((BOB, RELAY),),
-                                      zaps=sent[-1].zaps), fixed_identifier=False)
-    assert panel.zaps_note.isHidden()                  # never "another app set them"
+    assert rows(panel)[BOB].unpaid.isHidden()
 
 
 def test_a_co_author_not_found_out_is_asked_again_next_time():

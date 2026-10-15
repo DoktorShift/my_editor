@@ -28,7 +28,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtCore import QBuffer, QIODevice, QObject, Qt, Signal  # noqa: E402
-from PySide6.QtGui import QColor, QImage, QPixmap  # noqa: E402
+from PySide6.QtGui import QColor, QImage, QKeySequence, QPixmap  # noqa: E402
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
 from nostr.blossom.store import MediaFile  # noqa: E402
@@ -358,3 +358,63 @@ def test_a_save_as_from_the_cover_picker_goes_on_when_the_picker_closes(tmp_path
     assert inspect.getsource(MainWindow).count("media_saver=self._media_saver") == 2
     sheet.close()
     panel.close()
+
+
+# --------------------------------------------------------------------------- #
+# The inspector's well                                                        #
+# --------------------------------------------------------------------------- #
+
+def stacked_field():
+    from nostr.ui.cover_field import CoverImageField
+    field = CoverImageField(media_store=None, stacked=True)
+    field.resize(300, 400)
+    field.show()
+    QApplication.processEvents()
+    return field
+
+
+def test_the_inspectors_well_spans_its_column_in_the_cards_16_by_9():
+    field = stacked_field()
+    well = field.preview
+    assert well.hasHeightForWidth() and well.heightForWidth(320) == 180
+    assert well.focusPolicy() & Qt.FocusPolicy.TabFocus
+
+
+def test_the_well_takes_delete_copy_and_return_as_an_image_well_does():
+    from PySide6.QtGui import QGuiApplication
+    from PySide6.QtTest import QTest
+    field = stacked_field()
+    field.setText("https://cdn.example/cover.jpg")
+    asked = []
+    field.preview.activated.connect(lambda: asked.append(True))
+    field.preview.setFocus()
+    QTest.keySequence(field.preview, QKeySequence(QKeySequence.StandardKey.Copy))
+    assert QGuiApplication.clipboard().text() == "https://cdn.example/cover.jpg"
+    QTest.keyClick(field.preview, Qt.Key_Return)
+    assert asked == [True]
+    QTest.keyClick(field.preview, Qt.Key_Delete)
+    assert field.text() == ""
+
+
+def test_the_address_is_a_line_until_web_address_is_chosen(monkeypatch):
+    from nostr.ui import cover_field
+    monkeypatch.setattr(cover_field, "ThumbnailLoader", FakeLoader)
+    made = cover_field.CoverImageField(media_store=FakeStore(), stacked=True)
+    made.resize(300, 400)
+    made.show()
+    made.setText("https://cdn.example/cover.jpg")
+    QApplication.processEvents()
+    assert made.address_line.isVisible() and not made.url_edit.isVisible()
+    assert [a.text() for a in made.pick_button.menu().actions()] == ["Media Library…",
+                                                                     "Web Address…"]
+    made.pick_button.menu().actions()[1].trigger()
+    assert made.url_edit.isVisible() and not made.address_line.isVisible()
+    made.url_edit.editingFinished.emit()
+    assert made.address_line.isVisible() and not made.url_edit.isVisible()
+
+
+def test_without_a_media_library_the_address_can_only_be_typed():
+    made = stacked_field()
+    made.setText("https://cdn.example/cover.jpg")
+    QApplication.processEvents()
+    assert made.url_edit.isVisible() and not made.address_line.isVisible()

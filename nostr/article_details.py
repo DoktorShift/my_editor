@@ -253,18 +253,6 @@ class ArticleDetails:
                 + [list(tag) for tag in self.zaps])
 
 
-def equal_zaps(author: str, author_relay: str,
-               coauthors: Sequence[Tuple[str, str]]) -> Tuple[Tuple[str, ...], ...]:
-    """Zaps shared equally between the author and ``coauthors``: a zap tag
-    of four parts each (pubkey, relay hint, weight), as every reader of
-    zap splits reads them. None without co-authors."""
-    if not coauthors:
-        return ()
-    people = [(author, author_relay)] + [person for person in coauthors
-                                          if person[0] != author]
-    return tuple(("zap", pubkey, hint or "", "1") for pubkey, hint in people)
-
-
 # -- a Markdown file's front matter -----------------------------------------------
 
 # Each detail's key, then the other keys it is read from (other apps' names).
