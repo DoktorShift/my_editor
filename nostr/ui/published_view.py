@@ -460,8 +460,9 @@ class PublishedView(QWidget):
                  parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
         self.setObjectName("published_view")
-        # Asks whether Discover has a page before it is opened
-        # (web_readers.PageCheck.check), or None: open without asking.
+        # Asks which of Standup's addresses for a post is there before it
+        # is opened (web_readers.PageCheck.first_found), or None: open the
+        # first without asking.
         self._page_check = page_check
         # The reading app chosen in Settings ("" for the first offered).
         self._reader_choice = reader_choice
@@ -685,44 +686,68 @@ class PublishedView(QWidget):
     def _default_reader(self, item: PublishedItem) -> web_readers.Reader:
         return web_readers.default_reader(web_kind(item), self._reader_choice())
 
-    def _link(self, item: PublishedItem, key: str) -> str:
-        return web_readers.link_for(web_readers.reader(key), web_kind(item),
-                                    entity=item.nostr_address() or "",
-                                    owner=item.pubkey, identifier=item.identifier)
+    def _post(self, item: PublishedItem) -> web_readers.Post:
+        """``item`` as the reading apps address it: an article with the
+        Standup site it is read in (the account's curation listing it)."""
+        site = self._model.site_of(item)
+        return web_readers.Post(
+            kind=web_kind(item), entity=item.nostr_address() or "", author=item.pubkey,
+            identifier=item.identifier,
+            site=web_readers.Site(site.pubkey, site.identifier) if site is not None else None)
 
-    def _open_on(self, item: PublishedItem, key: str) -> None:
-        """Open the post in the reading app ``key``. Standup Discover is
-        asked first whether it has the page yet; where it does not, the
-        post opens on njump and the status line says why."""
-        link = self._link(item, key)
-        if not link:
+    def _link(self, item: PublishedItem, key: str) -> str:
+        return web_readers.link_for(web_readers.reader(key), self._post(item))
+
+    def _resolve(self, item: PublishedItem, key: str, use) -> None:
+        """``use(link, fallen_back)`` with where the post opens in ``key``:
+        Standup's first address that is there (asked for in turn), or njump
+        when none is (``fallen_back`` True); any other app's own link."""
+        links = web_readers.links_for(web_readers.reader(key), self._post(item))
+        if not links:
             self.status_message.emit(_("That link cannot be opened."))
             return
         if key != web_readers.DISCOVER or self._page_check is None:
-            QDesktopServices.openUrl(QUrl(link))
+            use(links[0], False)
             return
         fallback = self._link(item, web_readers.NJUMP)
 
-        def answered(found) -> None:
+        def answered(link: str, found) -> None:
             if found is False and fallback:
-                self.status_message.emit(
-                    _("Standup Discover doesn’t show this curation yet, so it opened on njump.")
-                    if item.is_curation else
-                    _("Standup Discover doesn’t show this article yet, so it opened on njump."))
-                QDesktopServices.openUrl(QUrl(fallback))
+                use(fallback, True)
+            elif found is False:
+                # Not on Standup, and no Nostr address to open elsewhere.
+                self.status_message.emit(_("Standup doesn’t show this post yet."))
             else:
-                QDesktopServices.openUrl(QUrl(link))
-        self._page_check(link, answered)
+                use(link, False)
+        self._page_check(links, answered)
+
+    def _open_on(self, item: PublishedItem, key: str) -> None:
+        """Open the post in the reading app ``key``. Where Standup has no
+        page for it yet, it opens on njump and the status line says why."""
+        def use(link: str, fallen_back: bool) -> None:
+            if fallen_back:
+                self.status_message.emit(self._not_on_standup(item))
+            QDesktopServices.openUrl(QUrl(link))
+        self._resolve(item, key, use)
 
     def _copy_link(self, item: PublishedItem) -> None:
         """The default reading app's link, so a shared link opens where
-        the person reads (Standup Discover, for an article)."""
-        link = self._link(item, self._default_reader(item).key)
-        if not link:
-            self.status_message.emit(_("That link cannot be opened."))
-            return
-        QGuiApplication.clipboard().setText(link)
-        self.status_message.emit(_("Link copied."))
+        the person reads (Standup, for an article): the one that is there."""
+        def use(link: str, fallen_back: bool) -> None:
+            QGuiApplication.clipboard().setText(link)
+            self.status_message.emit(self._not_on_standup(item, copied=True) if fallen_back
+                                     else _("Link copied."))
+        self._resolve(item, self._default_reader(item).key, use)
+
+    @staticmethod
+    def _not_on_standup(item: PublishedItem, *, copied: bool = False) -> str:
+        if copied:
+            return (_("Standup doesn’t show this curation yet, so its njump link was copied.")
+                    if item.is_curation else
+                    _("Standup doesn’t show this article yet, so its njump link was copied."))
+        return (_("Standup doesn’t show this curation yet, so it opened on njump.")
+                if item.is_curation else
+                _("Standup doesn’t show this article yet, so it opened on njump."))
 
     def _ask_to_delete(self, item: PublishedItem) -> None:
         if self._model.deletion_state(item.id) == DELETING:

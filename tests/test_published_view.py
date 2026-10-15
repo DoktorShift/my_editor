@@ -253,16 +253,22 @@ def test_return_opens_an_article_for_editing_and_a_note_in_the_browser(opened):
     assert len(opened) == 1 and opened[0].startswith("https://njump.me/nevent1")
 
 
-def test_an_article_without_a_link_still_has_its_menu():
-    """Review F17: an identifier over 255 bytes has no address; the menu
-    opens all the same, with Open in Browser and Copy Link dimmed."""
+def test_an_article_without_a_nostr_address_still_opens_on_standup():
+    """Review F17: an identifier over 255 bytes has no Nostr address, so
+    no app that reads one can show it; Standup addresses an article by its
+    author and identifier, so it can, and the menu offers it."""
     view, _model, relays, _said, _edited = make(article("ü" * 130, "Long"))
     view.set_account(Profile())
     relays.run()
     menu = view.menu_for(view._rows.index(0))
     enabled = {a.text(): a.isEnabled() for a in menu.actions() if not a.isSeparator()}
-    assert enabled == {"Edit Article": True, "Open in Standup Discover": False,
-                       "Open With": False, "Copy Link": False, "Delete from Nostr…": True}
+    assert enabled == {"Edit Article": True, "Open in Standup Discover": True,
+                       "Open With": True, "Copy Link": True, "Delete from Nostr…": True}
+    said = []
+    view.status_message.connect(said.append)
+    view._page_check = served()                      # not on Standup, and no njump
+    next(a for a in menu.actions() if a.text() == "Open in Standup Discover").trigger()
+    assert said == ["Standup doesn’t show this post yet."]
 
 
 def test_a_row_and_its_confirmation_name_a_markdown_note_in_words(answered_alerts):
@@ -302,40 +308,84 @@ def test_the_menu_of_an_article_and_of_a_note():
     assert view.menu_for(view._rows.index(5)) is None
 
 
-def test_copy_link_puts_the_web_address_on_the_clipboard():
+SITES = "https://media.einundzwanzig.space"
+DISCOVER = "https://discover.einundzwanzig.space"
+
+
+def served(*prefixes):
+    """A page check (web_readers.PageCheck.first_found) for a Standup that
+    serves the addresses starting with ``prefixes``; it notes what it was
+    asked, in order."""
+    def first_found(urls, done):
+        first_found.asked.append(list(urls))
+        for url in urls:
+            if any(url.startswith(prefix) for prefix in prefixes):
+                return done(url, True)
+        done(urls[-1], False)
+    first_found.asked = []
+    return first_found
+
+
+def test_copy_link_puts_the_address_that_is_there_on_the_clipboard():
     view, _model, relays, said, _edited = make(article("essay", "Essay"))
+    view._page_check = served(f"{DISCOVER}/a/")
     view.set_account(Profile())
     relays.run()
     menu = view.menu_for(view._rows.index(0))
     next(a for a in menu.actions() if a.text() == "Copy Link").trigger()
-    # The default app's link, so a shared link points to Standup Discover.
-    assert QGuiApplication.clipboard().text().startswith(
-        "https://discover.einundzwanzig.space/a/naddr1")
+    # The default app's link, so a shared link points to Standup.
+    assert QGuiApplication.clipboard().text() == f"{DISCOVER}/a/{PK}/essay"
     assert said[-1] == "Link copied."
 
 
-def test_discover_is_asked_first_and_njump_opens_when_it_has_no_page(opened):
-    """Discover shows an article once it has indexed it; until then the
-    article opens on njump and the status line says why."""
-    asked = []
+def test_an_article_in_no_site_opens_in_discover_and_njump_where_standup_has_none(opened):
+    """Seen in the app: every article opened on njump, because Discover
+    serves no /a/<naddr> page; it serves /a/<author>/<d> for any article it
+    has collected."""
     view, _model, relays, said, _edited = make(article("essay", "Essay"))
-    view._page_check = lambda url, done: (asked.append(url), done(False))
+    view._page_check = served()                       # Standup has no page for it
     view.set_account(Profile())
     relays.run()
     view.preview_act(view._rows.item_at(0).id, "open:discover")
-    assert asked and asked[0].startswith("https://discover.einundzwanzig.space/a/")
+    assert view._page_check.asked == [[f"{DISCOVER}/a/{PK}/essay"]]
     assert opened and opened[0].startswith("https://njump.me/naddr1")
-    assert said[-1] == ("Standup Discover doesn’t show this article yet, so it opened on "
-                        "njump.")
+    assert said[-1] == "Standup doesn’t show this article yet, so it opened on njump."
     opened.clear()
-    view._page_check = lambda url, done: done(True)
+    view._page_check = served(f"{DISCOVER}/a/")
     view.preview_act(view._rows.item_at(0).id, "open:discover")
-    assert opened[0].startswith("https://discover.einundzwanzig.space/a/")
+    assert opened == [f"{DISCOVER}/a/{PK}/essay"]
     # Another app is not checked first.
     opened.clear()
-    view._page_check = lambda url, done: (_ for _ in ()).throw(AssertionError("asked"))
+    view._page_check = lambda urls, done: (_ for _ in ()).throw(AssertionError("asked"))
     view.preview_act(view._rows.item_at(0).id, "open:primal")
     assert opened == [opened[0]] and opened[0].startswith("https://primal.net/a/naddr1")
+
+
+def test_an_article_in_a_site_opens_on_the_sites_page(opened):
+    """An article a Standup site lists is read on the site's page, as
+    Discover's own cards link it: the owner-qualified address where
+    Standup serves it (from 1.5), else the site's short one, else
+    Discover's page for the article."""
+    site = signed(30004, [["d", "buho-ecosystem"], ["title", "Buho-Ecosystem"],
+                          ["a", f"30023:{PK}:essay"]], "", created_at=NOW - 9000)
+    view, _model, relays, _said, _edited = make(article("essay", "Essay"), site)
+    view.set_account(Profile())
+    relays.run()
+    essay = next(index for index in range(view._rows.rowCount())
+                 if view._rows.item_at(index).is_article)
+    key = "YnVoby1lY29zeXN0ZW0"                       # buho-ecosystem, URL-safe base64
+    for served_now, expected in (
+            ((f"{SITES}/s/buho-ecosystem/", f"{DISCOVER}/a/"),        # Standup today
+             f"{SITES}/s/buho-ecosystem/essay"),
+            ((f"{SITES}/s/by/", f"{SITES}/s/buho-ecosystem/"),       # Standup 1.5
+             f"{SITES}/s/by/{PK}/{key}/essay")):
+        opened.clear()
+        view._page_check = served(*served_now)
+        view.preview_act(view._rows.item_at(essay).id, "open:discover")
+        assert view._page_check.asked == [[f"{SITES}/s/by/{PK}/{key}/essay",
+                                           f"{SITES}/s/buho-ecosystem/essay",
+                                           f"{DISCOVER}/a/{PK}/essay"]]
+        assert opened == [expected]
 
 
 def test_delete_asks_first_with_the_owners_words_and_cancel_as_the_default(answered_alerts):
@@ -569,6 +619,7 @@ def test_a_curation_is_listed_and_opens_in_standup_discover_first(opened):
     menu = view.menu_for(view._rows.index(0))
     words = [a.text() for a in menu.actions() if not a.isSeparator()]
     assert words[0] == "Open in Standup Discover" and "Edit Article" not in words
+    view._page_check = served(f"{SITES}/s/my-blog")   # Standup today: the short address
     menu.defaultAction().trigger()
-    assert opened[0].startswith("https://media.einundzwanzig.space/s/by/")
-    assert opened[0].endswith("/bXktYmxvZw") and edited == []
+    assert view._page_check.asked == [[f"{SITES}/s/by/{PK}/bXktYmxvZw", f"{SITES}/s/my-blog"]]
+    assert opened == [f"{SITES}/s/my-blog"] and edited == []

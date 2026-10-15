@@ -2902,7 +2902,7 @@ class MainWindow(QMainWindow):
             PublishedList(relay_pool=self._relay_pool, relay_directory=self._relay_directory,
                           session_pool=self._session_pool,
                           entitled_relays=self._entitled_relays, parent=self),
-            is_dark=self.is_dark_theme, page_check=self._page_check.check,
+            is_dark=self.is_dark_theme, page_check=self._page_check.first_found,
             reader_choice=lambda: self.web_reader)
         self._published_view.set_preview_image_loader(self._media_image_loader)
         add_published_view(self._drafts_panel, self._published_view)
