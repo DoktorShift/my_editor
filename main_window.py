@@ -70,7 +70,7 @@ from table_picker import TablePicker
 import fonts
 import spelling
 import preview_pane
-from text_size import ACTUAL as ACTUAL_TEXT_SIZE, text_size
+from text_size import points_from_percent, text_size
 from preview_pane import (
     ARTICLE, DOCUMENT, NOTE, PREVIEW, SPLIT, SPLIT_MIN_WIDTH, WRITE, PreviewContent, PreviewPane,
     ViewSwitch,
@@ -2347,8 +2347,11 @@ class MainWindow(QMainWindow):
         self._proportional_family = family if family != fonts.MONOSPACE else fonts.SYSTEM
         self.monospace_writing = family == fonts.MONOSPACE
         # How big the documents' text reads (text_size.py), for the whole app.
-        stored = settings.get("text_size", ACTUAL_TEXT_SIZE)
-        text_size().set_percent(stored if isinstance(stored, (int, float)) else ACTUAL_TEXT_SIZE)
+        # Kept in points; before that, in percent ("text_size").
+        stored = settings.get("writing_size")
+        text_size().set_points(
+            stored if isinstance(stored, (int, float)) and not isinstance(stored, bool)
+            else points_from_percent(settings.get("text_size", 100), text_size()))
         text_size().changed.connect(self._on_text_size_changed)
         self.act_zoom_in = add(
             Command("view.zoom_in", _("Zoom In"), VIEW,
@@ -5688,13 +5691,13 @@ class MainWindow(QMainWindow):
         for ed in self._all_editors():
             self._update_editor_font(ed)
 
-    def _on_text_size_changed(self, percent: int) -> None:
+    def _on_text_size_changed(self, points: int) -> None:
         """The app's text size changed (View > Zoom In, Zoom Out, Actual
         Size, or Settings): remembered, in every document, and said."""
-        save_setting("text_size", percent)
+        save_setting("writing_size", points)
         self._update_all_editor_fonts()
         self._update_zoom_commands()
-        self.status.showMessage(_("Text Size: {percent} %").format(percent=percent), 2500)
+        self.status.showMessage(_("Text Size: {size} pt").format(size=points), 2500)
 
     def _update_zoom_commands(self) -> None:
         """Zoom In, Zoom Out and Actual Size size a document's text; a PDF
@@ -5703,7 +5706,7 @@ class MainWindow(QMainWindow):
         size = text_size()
         self.act_zoom_in.setEnabled(text and size.can_grow())
         self.act_zoom_out.setEnabled(text and size.can_shrink())
-        self.act_actual_size.setEnabled(text and size.percent() != ACTUAL_TEXT_SIZE)
+        self.act_actual_size.setEnabled(text and size.points() != size.actual())
 
     def _set_web_reader(self, key: str) -> None:
         """Settings: the reading app published posts open in."""
