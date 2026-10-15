@@ -12,8 +12,26 @@ every installer, so this fails until the locks are compiled again.
 import pathlib
 import re
 
+from packaging.markers import Marker
+from packaging.version import Version
+
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 _NAME = re.compile(r"^\s*([A-Za-z0-9][A-Za-z0-9._-]*)")
+_PIN = re.compile(r"^(?P<name>[a-z0-9][a-z0-9._-]*)==(?P<version>[^\s;\\]+)"
+                  r"\s*(?:;\s*(?P<marker>[^\\]*?))?\s*\\?$")
+
+# An Intel Mac as environment markers see it, with the Python that the
+# installers are built with.
+INTEL_MAC = {
+    "implementation_name": "cpython",
+    "platform_python_implementation": "CPython",
+    "python_version": "3.12",
+    "python_full_version": "3.12.10",
+    "os_name": "posix",
+    "sys_platform": "darwin",
+    "platform_system": "Darwin",
+    "platform_machine": "x86_64",
+}
 
 
 def names(path, *, pinned=False):
@@ -30,6 +48,18 @@ def names(path, *, pinned=False):
     return found
 
 
+def pinned(lock, name, system):
+    """The version of ``name`` that ``lock`` installs on ``system``."""
+    versions = []
+    for line in (ROOT / "packaging" / lock).read_text(encoding="utf-8").splitlines():
+        match = _PIN.match(line)
+        if match and match["name"] == name and (
+                not match["marker"] or Marker(match["marker"]).evaluate(system)):
+            versions.append(Version(match["version"]))
+    assert len(versions) == 1, f"{lock}: {name} {versions}"
+    return versions[0]
+
+
 def test_every_requirement_is_in_the_build_lock():
     missing = names(ROOT / "requirements.txt") - names(
         ROOT / "packaging" / "requirements-build.lock", pinned=True)
@@ -44,6 +74,15 @@ def test_every_requirement_and_sidecar_requirement_is_in_the_test_lock():
 
 def test_the_bundler_is_pinned_for_release_builds():
     assert "pyinstaller" in names(ROOT / "packaging" / "requirements-build.lock", pinned=True)
+
+
+def test_intel_macs_install_a_cryptography_made_for_them():
+    # From 49 on, cryptography ships macOS wheels for Apple Silicon only.
+    # Built from source on an Intel Mac, it linked against Homebrew's
+    # OpenSSL, and the app bundle, which carries an older libssl, did not
+    # start.
+    for lock in ("requirements-build.lock", "requirements-test.lock"):
+        assert pinned(lock, "cryptography", INTEL_MAC) < Version("49"), lock
 
 
 def test_every_pinned_package_carries_a_hash():
