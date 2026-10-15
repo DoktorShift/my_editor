@@ -1023,6 +1023,13 @@ class PreviewPopover(QWidget):
         self._bar = ActionBar(card, is_dark=self._is_dark)
         self._bar.chosen.connect(self.action_chosen)
         self._bar.hide()
+        # Their way to the pointer: Qt routes no press or wheel into the
+        # children of a widget transparent for it, so the surface and the
+        # card that hold them take the pointer again. The short preview's
+        # labels stay out of its way, and a press on them reaches the
+        # window (dragging the full preview by its header).
+        for holder in (self._surface, card):
+            holder.setAttribute(Qt.WA_TransparentForMouseEvents, False)
         card_layout.insertWidget(card_layout.indexOf(self._reader) + 1, self._bar)
 
         # One effect for the widget's lifetime, recoloured on a theme

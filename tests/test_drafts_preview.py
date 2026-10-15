@@ -32,7 +32,7 @@ import pytest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtCore import QBuffer, QEvent, QIODevice, QPoint, QPointF, QRect, QSize, Qt
+from PySide6.QtCore import QBuffer, QEvent, QIODevice, QObject, QPoint, QPointF, QRect, QSize, Qt
 from PySide6.QtGui import QColor, QFont, QHelpEvent, QImage, QMouseEvent
 from PySide6.QtWidgets import QApplication, QToolTip, QVBoxLayout, QWidget
 
@@ -880,16 +880,37 @@ def test_leaving_the_popover_closes_it_after_its_own_delay(panel, monkeypatch):
 def test_nothing_in_the_short_preview_swallows_the_pointer(panel):
     # The short preview has no tasks: every part of its header hands its
     # mouse events to the window. Only the full preview's text and its
-    # commands take the pointer, and they are hidden here.
+    # commands take the pointer, and they are hidden here; the surface
+    # and card holding them take it only to pass it on to their children.
+    from PySide6.QtTest import QTest
     open_preview(panel, 0)
     popover = panel._preview.popover()
     interactive = (popover.reader(), popover.action_bar())
     assert not any(part.isVisible() for part in interactive)
-    children = [child for child in popover.findChildren(QWidget)
-                if not any(child is part or part.isAncestorOf(child) for part in interactive)]
-    assert children
-    for child in children:
+    holders = [widget for widget in popover.findChildren(QWidget)
+               if any(widget.isAncestorOf(part) for part in interactive)]
+    parts = [child for child in popover.findChildren(QWidget)
+             if child not in holders
+             and not any(child is part or part.isAncestorOf(child) for part in interactive)]
+    assert parts
+    for child in parts:
         assert child.testAttribute(Qt.WA_TransparentForMouseEvents) is True
+    # A press on the header still reaches the window.
+    pressed = []
+
+    class Presses(QObject):
+        def eventFilter(self, watched, event):
+            if event.type() == QEvent.MouseButtonPress:
+                pressed.append(watched)
+            return False
+    watcher = Presses()
+    popover.installEventFilter(watcher)
+    title = [label for name, label in popover.labels() if name == "title"][0]
+    at = title.mapTo(popover, title.rect().center())
+    QTest.mousePress(popover.windowHandle(), Qt.LeftButton, Qt.NoModifier, QPoint(at))
+    QTest.mouseRelease(popover.windowHandle(), Qt.LeftButton, Qt.NoModifier, QPoint(at))
+    popover.removeEventFilter(watcher)
+    assert popover in pressed
 
 
 def test_moving_to_an_ineligible_row_closes_after_the_grace(panel):
@@ -1824,3 +1845,26 @@ def test_the_full_preview_is_never_narrower_than_its_commands():
     for button in bar.buttons.values():
         assert button.sizeHint().width() <= size.width()
     popover.setParent(None)
+
+
+def test_the_full_previews_text_and_buttons_take_the_pointer(panel):
+    """Seen in the app: the full preview could be neither scrolled nor
+    clicked. Its text and bar sat inside the card the short preview makes
+    transparent for the pointer, and Qt routes no press or wheel into a
+    transparent widget's children. Here the press goes to the window, as
+    the pointer's does, and Qt finds what is under it."""
+    from PySide6.QtTest import QTest
+    controller = panel._preview
+    press(panel, 0)
+    popover = controller.popover()
+    reader, bar = popover.reader(), popover.action_bar()
+    for target in (reader.viewport(), bar.primary):
+        at = target.mapTo(popover, target.rect().center())
+        assert popover.childAt(at) is target or target.isAncestorOf(popover.childAt(at)), target
+    opened = []
+    panel.open_draft.connect(opened.append)
+    window = popover.windowHandle()
+    at = bar.primary.mapTo(popover, bar.primary.rect().center())
+    QTest.mouseClick(window, Qt.LeftButton, Qt.NoModifier, QPoint(at))
+    QApplication.processEvents()
+    assert opened == [identifier_at(panel, 0)]
