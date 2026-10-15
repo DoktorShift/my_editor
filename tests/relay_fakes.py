@@ -12,8 +12,8 @@ CHALLENGE = "a-challenge"
 
 
 class FakeRelay(Relay):
-    def __init__(self, url, parent=None):
-        super().__init__(url, parent)
+    def __init__(self, url, parent=None, **kwargs):
+        super().__init__(url, parent, **kwargs)
         self.sent = []
 
     def open(self):
@@ -41,11 +41,12 @@ class FakeRelay(Relay):
         self.drop()                   # as the real socket reports its close
 
 
-def fake_relay_pool(monkeypatch) -> RelayPool:
+def fake_relay_pool(monkeypatch, **kwargs) -> RelayPool:
     """A real RelayPool whose relays are FakeRelays (``monkeypatch``, the
-    pytest fixture, puts the real relay back after the test)."""
+    pytest fixture, puts the real relay back after the test); ``kwargs``
+    go to the pool, its ``clock`` say."""
     monkeypatch.setattr(relay_module, "Relay", FakeRelay)
-    return RelayPool()
+    return RelayPool(**kwargs)
 
 
 def refused_read(pool, url, *, challenge=CHALLENGE, filters=None):
