@@ -336,7 +336,13 @@ def read_text_as_written(path: PathLike, *, encoding: str = "utf-8") -> Tuple[st
     of it written back as it was (a Markdown file's front matter: see
     ``save_text_document``'s ``head``). Raises as ``read_text_document``."""
     with open(path, "rb") as f:
-        text = f.read().decode(encoding)
+        return decode_text_as_written(f.read(), encoding=encoding)
+
+
+def decode_text_as_written(data: bytes, *, encoding: str = "utf-8") -> Tuple[str, str]:
+    """``read_text_as_written`` for a file's bytes already read (a locked
+    document's, unlocked: locked_files.py)."""
+    text = data.decode(encoding)
     return text, newline_of(text)
 
 
@@ -366,8 +372,16 @@ def save_text_document(path: PathLike, text: str, *, encoding: str = "utf-8",
     file had when it was read (see ``read_text_document``); a new file gets
     this system's. ``head`` goes before them as it is, each of its lines
     with the ending it has (a front matter as it was written)."""
+    save_document(path, encode_text_document(text, encoding=encoding, newline=newline,
+                                             head=head))
+
+
+def encode_text_document(text: str, *, encoding: str = "utf-8", newline: Optional[str] = None,
+                         head: str = "") -> bytes:
+    """The bytes ``save_text_document`` writes (a locked document seals them
+    first: locked_files.py)."""
     text = text.replace("\r\n", "\n")
-    save_document(path, (head + text.replace("\n", newline or os.linesep)).encode(encoding))
+    return (head + text.replace("\n", newline or os.linesep)).encode(encoding)
 
 
 def read_json(path: PathLike, kind: Type[T]) -> T:

@@ -50,9 +50,12 @@ from format_toolbar import FormatToolbar, tooltip_for
 from selection_bar import SelectionBar
 from speech import Speech
 from atomic_file import (
-    newline_of, read_json, read_text_as_written, save_document, save_text_document,
-    with_newlines, write_json,
+    decode_text_as_written, encode_text_document, newline_of, read_json, save_document,
+    save_text_document, with_newlines, write_json,
 )
+import locked_files
+import password_alert
+from locked_files import Lock, WrongPassword
 import diagnostics
 import dictation
 import file_paths
@@ -158,8 +161,8 @@ def _extension_from_filter(selected_filter: str) -> Optional[str]:
     m = re.search(r'\(\*(\.[0-9A-Za-z]+)', selected_filter)
     return m.group(1) if m else None
 from recovery import (
-    KEPT, TOO_LARGE, EditorBackup, classify_backup, find_all_backups, is_restorable,
-    load_backup_content,
+    KEPT, SEALED, TOO_LARGE, EditorBackup, classify_backup, find_all_backups, is_restorable,
+    load_backup_content, unseal_backup,
 )
 import workspace
 import workspace_restore
@@ -1898,6 +1901,11 @@ class MainWindow(QMainWindow):
         # ``_on_save_as_pressed`` for the full decision tree.
         self.act_save_as = add(Command("file.save_as", _("Save As…"), FILE, "Ctrl+Shift+S"),
                                triggered=self._on_save_as_pressed)
+        # Lock the document with a password, as Pages' File > Set Password…
+        # does; Change Password… once it is locked (locked_files.py).
+        self.act_password = add(Command("file.password", _("Set Password…"), FILE,
+                                        keywords=(_("lock"), _("encrypt"), _("protect"))),
+                                triggered=self._choose_password)
         # Shift-Command-P on a Mac, the key Apple's guidelines give Page
         # Setup (MyEditor 3.3's Publish as Note key moves off it there).
         self.act_page_setup = add(Command("file.page_setup", _("Page Setup…"), FILE,
@@ -2660,6 +2668,7 @@ class MainWindow(QMainWindow):
         m_file.addSeparator()
         m_file.addAction(self.act_save)
         m_file.addAction(self.act_save_as)
+        m_file.addAction(self.act_password)
         m_file.addSeparator()
         m_file.addAction(self.act_page_setup)
         if printing.OFFERS_PRINT_PREVIEW:
@@ -3150,6 +3159,12 @@ class MainWindow(QMainWindow):
             # Written by a newer build. Leave it on disk untouched rather
             # than guess at a format this build does not know.
             return None
+        lock = None
+        if backup.get("format") == SEALED:
+            unsealed = self._unseal_backup(backup)
+            if unsealed is None:
+                return None              # kept on the disk, for its password another time
+            lock, backup = unsealed
 
         # Possibly written by an older version, in another spelling.
         original_path = file_paths.normalize(backup.get("original_path") or "") or None
@@ -3162,6 +3177,7 @@ class MainWindow(QMainWindow):
         # Set before the content: image names beside the original file
         # resolve against it.
         ed._file_path = None if freshness == "stale" else original_path
+        ed._lock = lock
         load_backup_content(ed, backup, modified=True)
         # The draft it was bound to and the article it edited come back
         # too, so saving or publishing it goes on under its identifier.
@@ -3748,20 +3764,24 @@ class MainWindow(QMainWindow):
             return self._open_pdf_tab(path)
 
         try:
-            content, newline = read_text_as_written(path)
+            opened = MainWindow._read_document(self, path)
         except (OSError, ValueError) as e:
             inform(self, title=_("Couldn't open \u201c{name}\u201d").format(
                        name=os.path.basename(path)),
                    message=str(e))
             return None
+        if opened is None:
+            return None                     # locked, and no password given
+        content, newline, lock = opened
 
         ed = self._new_wired_editor()
         # The path first: image names in the content resolve against the
         # document's own directory, and Qt caches whatever the first
         # lookup answered.
         ed._file_path = path
-        # Saved back with the line endings it came with.
+        # Saved back with the line endings it came with, and its password.
         ed._newline = newline
+        ed._lock = lock
         self._set_editor_content(ed, path, content)
 
         ed.document().setModified(False)
@@ -4151,6 +4171,12 @@ class MainWindow(QMainWindow):
         front = None
         head = ""                   # a Markdown file's front matter, as written
         try:
+            if ext.endswith(('.pdf', '.rtf')) and getattr(ed, "_lock", None) is not None:
+                inform(self, title=_("A locked document can’t be saved as PDF or RTF"),
+                       message=_("Those files can’t be locked. Save it as Markdown, HTML or "
+                                 "plain text to keep it locked, or remove its password "
+                                 "first (File > Change Password…)."))
+                return False
             if ext.endswith('.pdf'):
                 return self._save_as_pdf(ed, path)
             elif ext.endswith('.rtf'):
@@ -4194,8 +4220,8 @@ class MainWindow(QMainWindow):
                 # placeholder the old toPlainText call wrote out.
                 content = serialize_plain_with_images(ed.document(), lambda fmt: None)
 
-            save_text_document(path, content, newline=getattr(ed, "_newline", None),
-                               head=head)
+            MainWindow._write_document(self, ed, path, encode_text_document(
+                content, newline=getattr(ed, "_newline", None), head=head))
             if ext.endswith('.md'):
                 ed._front_matter = front
                 ed._details_not_saved = front.refused if front is not None else frozenset()
@@ -4331,17 +4357,129 @@ class MainWindow(QMainWindow):
                         bar.show_deleted()
                 break
 
+    # -- documents locked with a password (locked_files.py) ---------------------
+
+    def _read_document(self, path: str, lock: Optional[Lock] = None):
+        """A document's text as written, its line ending, and its lock (None
+        when it has no password). A locked one opens with ``lock`` (the
+        password it had when read before) or asks for its password; None
+        when it is not given. Raises OSError, and ValueError for text that
+        is not UTF-8."""
+        with open(path, "rb") as f:
+            data = f.read()
+        if locked_files.is_locked(data):
+            opened = MainWindow._unlock(self, os.path.basename(path), data, lock)
+            if opened is None:
+                return None
+            lock, data = opened
+        else:
+            lock = None
+        text, newline = decode_text_as_written(data)
+        return text, newline, lock
+
+    def _unlock(self, name: str, data: bytes, lock: Optional[Lock]):
+        """(lock, bytes) of a locked document: with the password ``lock``
+        has, else the one the person gives; None when none is given."""
+        if lock is not None:
+            try:
+                return lock, lock.unseal(data)
+            except WrongPassword:
+                pass                         # locked with another password since
+
+        def check(password):
+            try:
+                return Lock.open(data, password)
+            except WrongPassword:
+                return None
+        alert = password_alert.open_alert(self, name=name, check=check)
+        return alert.result if alert.run() == password_alert.OPEN else None
+
+    def _unseal_backup(self, backup: dict):
+        """(lock, record) of a locked document's backup, opened with the
+        password the person gives; None when none is given."""
+        name = os.path.basename(backup.get("original_path") or "") or _("Untitled")
+
+        def check(password):
+            try:
+                return unseal_backup(backup, password)
+            except WrongPassword:
+                return None
+        alert = password_alert.open_alert(
+            self, name=name, check=check,
+            message=_("Enter its password to recover the changes that were not saved."))
+        return alert.result if alert.run() == password_alert.OPEN else None
+
+    def _write_document(self, ed, path: str, data: bytes) -> None:
+        """Save a text document's bytes, locked when it has a password."""
+        lock = getattr(ed, "_lock", None)
+        if lock is not None:
+            QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)   # scrypt's moment
+            try:
+                data = lock.seal(data)
+            finally:
+                QApplication.restoreOverrideCursor()
+        save_document(path, data)
+
+    def _choose_password(self) -> None:
+        """File > Set Password… (or Change Password…): lock the document,
+        change its password, or take it off, and save it so at once, as
+        Pages does: no copy of it in the clear stays behind."""
+        ed = self.current_editor()
+        if ed is None:
+            return
+        name = os.path.basename(getattr(ed, "_file_path", None) or "") or _("Untitled")
+        lock = getattr(ed, "_lock", None)
+        if lock is None:
+            alert = password_alert.set_password_alert(self, name=name)
+            if alert.run() != password_alert.SET:
+                return
+            new_password = alert.text("password")
+        else:
+            alert = password_alert.change_alert(self, name=name, check=lock.matches)
+            choice = alert.run()
+            if choice == password_alert.CHANGE:
+                new_password = alert.text("new")
+            elif choice == password_alert.REMOVE:
+                new_password = None
+            else:
+                return
+        QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+        try:
+            ed._lock = Lock(new_password) if new_password else None
+        finally:
+            QApplication.restoreOverrideCursor()
+        backup = getattr(ed, "_backup", None)
+        if backup is not None:
+            backup.write_now()
+        path = getattr(ed, "_file_path", None)
+        if path and not self._save_to(path):
+            return
+        self._update_password_command()
+        self.status.showMessage(_("Locked with a password.") if ed._lock is not None
+                                else _("Password removed."), 4000)
+
+    def _update_password_command(self) -> None:
+        """Set Password… for a document without one, Change Password… for a
+        locked one; off where there is no document to lock (a PDF)."""
+        ed = self.current_editor()
+        locked = getattr(ed, "_lock", None) is not None
+        self.act_password.setText(_("Change Password…") if locked else _("Set Password…"))
+        self.act_password.setEnabled(ed is not None and self.current_pdf_viewer() is None)
+
     def _reload_from_disk(self, ed, bar: FileChangedBar):
         path = getattr(ed, '_file_path', None)
         if not path or not os.path.exists(path):
             return
         try:
-            content, newline = read_text_as_written(path)
+            opened = self._read_document(path, getattr(ed, "_lock", None))
         except (OSError, ValueError) as e:
             inform(self, title=_("Couldn't reload \u201c{name}\u201d").format(
                        name=os.path.basename(path)),
                    message=str(e))
             return
+        if opened is None:
+            return                          # locked anew, and no password given
+        content, newline, ed._lock = opened
         ed._newline = newline
 
         self._set_editor_content(ed, path, content)
@@ -4848,6 +4986,12 @@ class MainWindow(QMainWindow):
     def _on_knit(self, fmt: str):
         ed = self.current_editor()
         if ed is None:
+            return
+        if getattr(ed, "_lock", None) is not None:
+            # R reads the file from the disk, where it is locked.
+            inform(self, title=_("A locked document can’t be knit"),
+                   message=_("R reads the file itself and can’t open it while it is locked. "
+                             "Remove its password first (File > Change Password…)."))
             return
         path = self._current_rmd_path()
         if path is None:
@@ -5967,6 +6111,7 @@ class MainWindow(QMainWindow):
                                       and not reading and not in_code)
         self._update_clipboard_commands()
         self._update_size_commands()
+        self._update_password_command()
         if kind:
             self._update_undo_redo_buttons()
 

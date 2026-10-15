@@ -69,6 +69,10 @@ _MAX_INTERVAL_MS = 15_000
 # Current record format. Readers must skip anything higher (see
 # is_restorable) rather than guess at its meaning.
 BACKUP_VERSION = 2
+# The format of a locked document's record (locked_files.py): its HTML
+# record, sealed, with only where it goes and when beside it. A build that
+# knows "html" alone leaves it on disk, as it leaves any it does not know.
+SEALED = "sealed"
 
 # Truncated HTML is corrupt HTML, so an oversized snapshot is skipped
 # whole and the previous backup is kept. The cooldown stops a huge
@@ -159,7 +163,26 @@ def is_restorable(record: dict) -> bool:
     if version is None:
         return True
     return (isinstance(version, int) and not isinstance(version, bool)
-            and version <= BACKUP_VERSION and record.get("format") == "html")
+            and version <= BACKUP_VERSION and record.get("format") in ("html", SEALED))
+
+
+def unseal_backup(record: dict, password: str):
+    """A sealed record's own (an "html" record), and the lock its document
+    goes on with. Raises locked_files.WrongPassword."""
+    from locked_files import Lock
+    lock, data = Lock.open_backup(record["locked"], password)
+    opened = json.loads(data.decode("utf-8"))
+    opened["_backup_file"] = record.get("_backup_file")
+    return lock, opened
+
+
+def _sealed(record: dict, lock) -> dict:
+    """``record`` sealed with its document's lock: in the clear only where
+    the document goes and when it was kept, to tell a stale backup from a
+    fresh one (classify_backup) before the password is asked for."""
+    data = json.dumps(record, ensure_ascii=False).encode("utf-8")
+    return {"version": BACKUP_VERSION, "format": SEALED, "locked": lock.seal_backup(data),
+            **{key: record[key] for key in ("original_path", "saved_at", "source_mtime_ns")}}
 
 
 def load_backup_content(editor, record: dict, *, modified: bool = True) -> None:
@@ -439,6 +462,10 @@ class EditorBackup:
             return
         self._write()
 
+    def _lock(self):
+        """The document's lock when it is locked with a password, else None."""
+        return getattr(self._editor, "_lock", None)
+
     def _snapshot(self) -> str:
         """The HTML to persist, with big inline images externalized.
 
@@ -446,7 +473,8 @@ class EditorBackup:
         whatever spelling it had, so nothing the user can see changes.
         """
         content = self._editor.document().toHtml()
-        if self._externalize is None:
+        # A locked document's pictures stay inside its sealed record.
+        if self._externalize is None or self._lock() is not None:
             return content
 
         def replace(match) -> str:
@@ -468,7 +496,10 @@ class EditorBackup:
         # idle tab costs nothing on the timer's ticks.
         revision = doc.revision()
         identity = tab_identity(self._editor)
-        if (revision, identity) == self._written_revision and os.path.exists(self.path):
+        # Locking a document (or taking its lock off) writes its backup anew,
+        # sealed (or not), though no word changed.
+        locked = self._lock() is not None
+        if (revision, identity, locked) == self._written_revision and os.path.exists(self.path):
             return True
 
         content = self._snapshot()
@@ -477,7 +508,7 @@ class EditorBackup:
         # a change only they show (a paragraph turned into a quote, a draft
         # saved under another identifier) is still written.
         content_key = (content + "\n" + json.dumps(structure, sort_keys=True)
-                       + "\n" + json.dumps(identity, sort_keys=True))
+                       + "\n" + json.dumps(identity, sort_keys=True) + f"\n{locked}")
         fingerprint = hashlib.sha256(
             f"{self._file_path or ''}\n{content_key}".encode("utf-8")
         ).hexdigest()
@@ -486,7 +517,7 @@ class EditorBackup:
         # removed it, and skipping the write then would leave the
         # document unprotected until the next keystroke.
         if fingerprint == self._last_hash and os.path.exists(self.path):
-            self._written_revision = (revision, identity)
+            self._written_revision = (revision, identity, locked)
             return True  # already on disk, byte for byte
 
         record = {
@@ -503,7 +534,9 @@ class EditorBackup:
         if getattr(self._editor, "_markdown_source", False):
             record["markdown_source"] = True
         record.update(identity)
-        payload = json.dumps(record, ensure_ascii=False)
+        lock = self._lock()
+        payload = json.dumps(_sealed(record, lock) if lock is not None else record,
+                             ensure_ascii=False)
         if len(payload.encode("utf-8")) > MAX_BACKUP_BYTES:
             self._oversize_until = time.monotonic() + _OVERSIZE_RETRY_S
             self._report(TOO_LARGE)
@@ -519,7 +552,7 @@ class EditorBackup:
             self._report(WRITE_FAILED)
             return False
         self._last_hash = fingerprint
-        self._written_revision = (revision, identity)
+        self._written_revision = (revision, identity, locked)
         self._report(KEPT)
         return True
 

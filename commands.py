@@ -110,6 +110,9 @@ NO_SHORTCUT: Tuple[Tuple[str, str, str], ...] = (
      "The system's own key starts it: Fn twice on a Mac, Windows+H on Windows."),
     ("edit.speech.", "all", "Apple's Edit > Speech has no keys; the system's Speak "
      "Selection key reads any selection."),
+    ("file.password", "all",
+     "Set once for a document, as Pages' File > Set Password… is; it asks for a password "
+     "each time anyway."),
     ("view.actual_size", "other",
      "Ctrl+0 is Body there, as in LibreOffice; Zoom Out and Zoom In step back to it, and "
      "Settings shows the size."),
