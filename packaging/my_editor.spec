@@ -54,6 +54,9 @@ hiddenimports = [
     # hooks collect the multimedia backend plugins and their libraries.
     "PySide6.QtMultimedia",
     "PySide6.QtMultimediaWidgets",
+    # Edit > Speech (speech.py), imported at the first word read; the Qt
+    # hook brings the system's voice engines (texttospeech plugins).
+    "PySide6.QtTextToSpeech",
     # Full-text recovery (nostr/imports/fulltext.py): readability-lxml
     # rides on lxml's compiled extensions, which static analysis can
     # only partially see.
