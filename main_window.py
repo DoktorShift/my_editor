@@ -281,6 +281,16 @@ def _number(n: int) -> str:
     return i18n.display_locale().toString(n)
 
 
+def _file_stamp(path: str) -> Optional[tuple]:
+    """The size and modification time of the file at ``path``, which a
+    write to it changes; None when there is no file to read them of."""
+    try:
+        status = os.stat(path)
+    except (OSError, ValueError):
+        return None
+    return status.st_size, status.st_mtime_ns
+
+
 # --------------------------------------------------------------------------- #
 # Per-tab Nostr-draft binding                                                 #
 # --------------------------------------------------------------------------- #
@@ -445,7 +455,9 @@ class MainWindow(QMainWindow):
 
         self._watcher = QFileSystemWatcher(self)
         self._watcher.fileChanged.connect(self._on_file_changed)
-        self._saving_paths: set[str] = set()
+        # Each file as this window last saved it (_file_stamp): while it is
+        # so, what the watcher reports is that save, not a change made outside.
+        self._saved_stamps: dict[str, Optional[tuple]] = {}
 
         self.setAcceptDrops(True)
 
@@ -4171,10 +4183,6 @@ class MainWindow(QMainWindow):
         if not ed:
             return False
 
-        # Suppress the watcher trigger caused by our own write
-        self._saving_paths.add(path)
-        QTimer.singleShot(500, lambda: self._saving_paths.discard(path))
-
         ext = path.lower()
         front = None
         head = ""                   # a Markdown file's front matter, as written
@@ -4245,6 +4253,11 @@ class MainWindow(QMainWindow):
                        name=os.path.basename(path)),
                    message=f"{e}\n\n{_SAVE_FAILED_HINT}", caution=True)
             return False
+        finally:
+            # The watcher reports this write after it, however long it took
+            # (sealing a locked document takes a while): finding the file as
+            # written here, _on_file_changed knows the change is this save.
+            self._saved_stamps[path] = _file_stamp(path)
 
     def _say_saved(self, ed, path: str) -> None:
         """Say a document was saved, and whether audio or video in it is
@@ -4338,12 +4351,14 @@ class MainWindow(QMainWindow):
                          for detail in order if detail in details)
 
     def _on_file_changed(self, path: str):
-        if path in self._saving_paths:
-            return
-
         # Re-add path: some OS implementations remove it after a change event
+        # (Linux whenever a save puts a new file in its place, ours too)
         if os.path.exists(path):
             self._watcher.addPath(path)
+
+        stamp = _file_stamp(path)
+        if stamp is not None and stamp == self._saved_stamps.get(path):
+            return                          # the file as this window saved it
 
         # A regenerated PDF reloads in place: the viewer holds no user
         # edits, so there is nothing to protect behind a prompt.
