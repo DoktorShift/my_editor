@@ -17,6 +17,7 @@ import diagnostics
 import file_paths
 import i18n
 from main_thread_gc import GuiThreadCollector
+from quit_signals import QuitOnSignal
 import theme
 
 # The language is chosen before any module that holds texts is imported:
@@ -135,7 +136,9 @@ def main():
     win = MainWindow(initial_path)
     win.show()
     app.register_main_window(win)
-    sys.exit(app.exec())
+    # Ctrl+C in the terminal, or a request to stop, quits as Quit does.
+    quitting = QuitOnSignal(win.quit_application, parent=app)
+    sys.exit(quitting.exit_status(app.exec()))
 
 
 if __name__ == "__main__":
