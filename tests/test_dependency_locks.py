@@ -85,6 +85,18 @@ def test_intel_macs_install_a_cryptography_made_for_them():
         assert pinned(lock, "cryptography", INTEL_MAC) < Version("49"), lock
 
 
+def test_release_builds_install_wheels_only():
+    # A package with no wheel for a system is compiled there, against
+    # whatever libraries the runner happens to have, as cryptography was
+    # on the Intel Mac. A release build fails at the install instead.
+    workflow = ROOT / ".github" / "workflows" / "build-installers.yml"
+    installs = [line for line in workflow.read_text(encoding="utf-8").splitlines()
+                if "pip install" in line and "requirements-build.lock" in line]
+    assert installs
+    for line in installs:
+        assert "--only-binary :all:" in line, line
+
+
 def test_every_pinned_package_carries_a_hash():
     for lock in ("requirements-build.lock", "requirements-test.lock"):
         text = (ROOT / "packaging" / lock).read_text(encoding="utf-8")
