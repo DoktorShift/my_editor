@@ -1918,7 +1918,7 @@ class MainWindow(QMainWindow):
                                  triggered=self._close_current_tab)
         self.act_quit = add(Command("file.quit", _("Quit"), FILE, "Ctrl+Q",
                                     role=QAction.MenuRole.QuitRole),
-                            triggered=self._quit_application)
+                            triggered=self.quit_application)
 
         # Edit, as in every Mac app. Cut, Copy, Paste and Select All act on
         # whatever has the keyboard focus: the document, the find field,
@@ -3356,11 +3356,13 @@ class MainWindow(QMainWindow):
         if idx >= 0:
             self.close_tab(idx)
 
-    def _quit_application(self):
+    def quit_application(self) -> bool:
+        """Quit: File > Quit, and Ctrl+C or a request to stop from outside
+        (quit_signals.py). False when the person kept editing."""
         # closeEvent owns the unsaved-work question, so quitting from the
         # menu and closing the window ask it once, the same way. (It used
         # to be asked here and then again, differently, by closeEvent.)
-        self.close()
+        return self.close()
 
     def _resolve_unsaved_before_closing(self) -> bool:
         """Save, discard or keep unsaved documents. True means close."""
