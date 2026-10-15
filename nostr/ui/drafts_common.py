@@ -25,6 +25,7 @@ from PySide6.QtGui import QFont, QFontInfo
 from PySide6.QtWidgets import QApplication
 
 import i18n
+import theme
 from constants import (
     DARK_BG,
     DARK_BORDER,
@@ -88,6 +89,7 @@ THEME_TOKENS = {
         "accent": "#007ACC",                # focus ring
         "text_selection_bg": DARK_SELECTION,
         "error_fg": "#F48771",
+        "link": theme.dialog_link_color(True),    # 6.28 list
     },
     False: {
         "panel_bg": LIGHT_BG,
@@ -106,6 +108,7 @@ THEME_TOKENS = {
         "accent": "#0078D4",
         "text_selection_bg": LIGHT_SELECTION,
         "error_fg": "#C8412A",
+        "link": theme.dialog_link_color(False),   # 4.53 list
     },
 }
 

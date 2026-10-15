@@ -644,6 +644,8 @@ class MainWindow(QMainWindow):
         self._draft_sync.signer_unreachable.connect(
             self._on_draft_sync_signer_unreachable
         )
+        QGuiApplication.instance().applicationStateChanged.connect(
+            self._on_application_state_changed)
         # Deletions other apps announce as NIP-09 requests (STANDUP does),
         # which the wraps alone would not show (nostr/draft_deletions.py).
         self._draft_deletions = DraftDeletions(
@@ -6933,6 +6935,11 @@ class MainWindow(QMainWindow):
             # The inbox closes and its lock goes, so the next start (or a
             # second MyEditor) finds it free.
             imports.shutdown()
+        # Drafts stop asking the signer app (every minute while they wait
+        # for it) before it goes, so nothing answers into a closing window.
+        draft_sync = getattr(self, "_draft_sync", None)
+        if draft_sync is not None:
+            draft_sync.stop()
         # Close any warm relay sockets and bunker channels so the WebSocket
         # layer can flush close frames before the QApplication tears down.
         if hasattr(self, "_session_pool"):
@@ -9210,15 +9217,18 @@ class MainWindow(QMainWindow):
             self._drafts_panel.set_status(text)
 
     def _on_draft_sync_signer_unreachable(self, unreachable: bool) -> None:
+        # Drafts waiting for the signer app are the panel's one quiet line
+        # and nothing more: a phone that is asleep is ordinary, and the
+        # drafts follow by themselves once it answers. Publishing says so
+        # itself, when the signer is asked for something.
         if self._drafts_panel is not None:
             self._drafts_panel.set_signer_unreachable(unreachable)
-        if unreachable:
-            # The panel may be closed, and this is the same condition that
-            # makes publishing fail, so it belongs in the window too.
-            self.status.showMessage(
-                _("Your signer app is not responding. Open it and make sure it is "
-                  "running."), 8000,
-            )
+
+    def _on_application_state_changed(self, state) -> None:
+        if state == Qt.ApplicationState.ApplicationActive:
+            # Back from the phone, where the signer app was opened: drafts
+            # that wait for it ask now, not at the next minute.
+            self._draft_sync.ask_signer_again()
 
     def _on_draft_sync_bunker_error(self, message: str) -> None:
         if self._drafts_panel is not None:
