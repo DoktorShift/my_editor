@@ -28,7 +28,7 @@ from __future__ import annotations
 from typing import Callable, Dict, List, Optional, Tuple
 
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QAction, QFont, QFontInfo, QKeySequence, QShortcut
+from PySide6.QtGui import QAction, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -38,7 +38,6 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QRadioButton,
-    QSlider,
     QVBoxLayout,
     QWidget,
 )
@@ -48,7 +47,7 @@ import theme
 from constants import DARK_MUTED_FG, LIGHT_MUTED_FG
 from i18n import _
 from nostr import web_readers
-from text_size import STEPS as TEXT_SIZES, text_size
+from text_size import text_size
 
 # The pop-up's item that asks for another installed font.
 _OTHER_FONT = "other"
@@ -163,56 +162,33 @@ class SettingsWindow(QDialog):
             _("MyEditor uses a new language the next time it opens.")))
         form.addRow(self._label(_("Language:"), self.language), language_box)
 
-        # The writing font: a pop-up menu, each font named in itself, as a
-        # Mac's font menus show them; Other… is the system's font panel.
+        # The writing font and its size, side by side, as a Mac's settings
+        # name a font ("Helvetica 12"): each font named in itself, Other…
+        # the system's font panel; the sizes in points. View > Zoom In and
+        # Zoom Out step through the sizes too.
         self.font = QComboBox()
         self.font.activated.connect(self._font_activated)
+        self.font_size = QComboBox()
+        self.font_size.setAccessibleName(_("Font size"))
+        self.font_size.view().setAccessibleName(_("Font size"))
+        self.font_size.activated.connect(
+            lambda index: text_size().set_points(self.font_size.itemData(index)))
+        text_size().changed.connect(self._show_font_size)
+        font_row = QHBoxLayout()
+        font_row.setContentsMargins(0, 0, 0, 0)
+        font_row.setSpacing(8)
+        font_row.addWidget(self.font)
+        font_row.addWidget(self.font_size)
+        font_row.addStretch(1)
         font_box = QWidget()
         font_column = QVBoxLayout(font_box)
         font_column.setContentsMargins(0, 0, 0, 0)
         font_column.setSpacing(4)
-        font_column.addWidget(self.font, 0, Qt.AlignLeft)
+        font_column.addLayout(font_row)
         font_column.addWidget(self._help(
-            _("The font you write in. Code and plain text stay in the monospace font.")))
+            _("The font you write in and its size. Code and plain text stay in the "
+              "monospace font.")))
         form.addRow(self._label(_("Font:"), self.font), font_box)
-
-        # The text size: a slider from a small A to a large A, the size
-        # beside it; View > Zoom In and Zoom Out move it too.
-        self.text_size = QSlider(Qt.Orientation.Horizontal)
-        self.text_size.setRange(0, len(TEXT_SIZES) - 1)
-        self.text_size.setPageStep(1)
-        self.text_size.setTickPosition(QSlider.TickPosition.TicksBelow)
-        self.text_size.setTickInterval(1)
-        self.text_size.setFixedWidth(180)
-        self.text_size.valueChanged.connect(
-            lambda index: text_size().set_percent(TEXT_SIZES[index]))
-        self.text_size_value = QLabel()
-        self.text_size_value.setMinimumWidth(44)
-        small, large = QLabel("A"), QLabel("A")
-        base = QFontInfo(small.font()).pixelSize()
-        for glyph, scale in ((small, 0.8), (large, 1.5)):
-            glyph_font = QFont(glyph.font())
-            glyph_font.setPixelSize(max(8, round(base * scale)))
-            glyph.setFont(glyph_font)
-        size_row = QHBoxLayout()
-        size_row.setContentsMargins(0, 0, 0, 0)
-        size_row.setSpacing(8)
-        for widget in (small, self.text_size, large, self.text_size_value):
-            size_row.addWidget(widget, 0, Qt.AlignVCenter)
-        size_row.addStretch(1)
-        size_box = QWidget()
-        size_column = QVBoxLayout(size_box)
-        size_column.setContentsMargins(0, 0, 0, 0)
-        size_column.setSpacing(4)
-        size_column.addLayout(size_row)
-        size_column.addWidget(self._help(
-            _("How big the documents’ text and their previews read. View > Zoom In and "
-              "Zoom Out change it too.")))
-        size_label = QLabel(_("Text size:"))
-        size_label.setBuddy(self.text_size)
-        self.text_size.setAccessibleName(_("Text size"))
-        form.addRow(size_label, size_box)
-        text_size().changed.connect(self._show_text_size)
 
         # Writing: the format bar over text selected with the pointer.
         self.format_bar = QCheckBox(_("Show the format bar when selecting text"))
@@ -359,21 +335,25 @@ class SettingsWindow(QDialog):
         family = self.font.itemData(index)
         if family == _OTHER_FONT:
             current = fonts.writing_font(fonts.WRITING_PIXEL_SIZE, self._writing_family())
+            current.setPointSize(text_size().points())
             picked, accepted = QFontDialog.getFont(current, self, _("Writing Font"))
             if accepted:
+                # The panel sets a size with the font, as on a Mac.
                 self._choose_writing_family(picked.family())
+                if picked.pointSizeF() > 0:
+                    text_size().set_points(picked.pointSizeF())
             self._show_fonts()                    # Other… is never the choice
             return
         if family:
             self._choose_writing_family(family)
 
-    def _show_text_size(self, *_args) -> None:
-        percent = text_size().percent()
-        self.text_size.blockSignals(True)
-        self.text_size.setValue(TEXT_SIZES.index(percent))
-        self.text_size.blockSignals(False)
-        self.text_size_value.setText(_("{percent} %").format(percent=percent))
-        self.text_size.setAccessibleDescription(self.text_size_value.text())
+    def _show_font_size(self, *_args) -> None:
+        """The sizes offered, in points, the current one chosen."""
+        size = text_size()
+        self.font_size.clear()
+        for points in size.sizes():
+            self.font_size.addItem(_("{size} pt").format(size=points), points)
+        self.font_size.setCurrentIndex(self.font_size.findData(size.points()))
 
     def refresh(self) -> None:
         """Read again what can change elsewhere: whether Nostr is in use, the
@@ -381,7 +361,7 @@ class SettingsWindow(QDialog):
         format bar's setting, and the pasted-image setting (an alert's
         Remember This Choice sets it)."""
         self._show_fonts()
-        self._show_text_size()
+        self._show_font_size()
         self.format_bar.setChecked(bool(self._format_bar_shown()))
         shown = bool(self._nostr_in_use())
         self._paste_label.setVisible(shown)

@@ -643,8 +643,10 @@ def test_a_note_comes_back_without_new_blank_lines():
 
 
 def test_an_html_document_keeps_its_html_formatting():
-    # Alignment, a size, sub- and superscript and a merged cell, next to
-    # inline code: the HTML keeps them, the structure list adds the code.
+    # Alignment, sub- and superscript and a merged cell, next to inline
+    # code: the HTML keeps them, the structure list adds the code. A size
+    # the page set is not kept: the text size is the person's (export_html,
+    # _drop_page_fonts), as it is when the file is saved and opened.
     from PySide6.QtGui import QTextCursor
     ed = HtmlEditor()
     ed.setHtml('<p align="center"><span style="font-size:20pt">Big</span> H<sub>2</sub>O '
@@ -663,7 +665,7 @@ def test_an_html_document_keeps_its_html_formatting():
     first = restored.begin()
     assert first.blockFormat().alignment() & __import__("PySide6.QtCore").QtCore.Qt.AlignHCenter
     sizes = [f.charFormat().fontPointSize() for f in _fragments(first)]
-    assert 20 in sizes
+    assert set(sizes) == {0}
     aligns = [f.charFormat().verticalAlignment() for f in _fragments(first)]
     from PySide6.QtGui import QTextCharFormat
     assert QTextCharFormat.VerticalAlignment.AlignSubScript in aligns

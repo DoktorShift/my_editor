@@ -132,8 +132,8 @@ def test_the_language_shown_is_the_one_chosen_and_choosing_remembers_it():
 def actual_text_size():
     # The text size is the app's: each test leaves it as it found it.
     yield
-    from text_size import ACTUAL, text_size
-    text_size().set_percent(ACTUAL)
+    from text_size import text_size
+    text_size().reset()
 
 
 def test_the_writing_font_is_chosen_from_fonts_named_in_themselves():
@@ -151,24 +151,36 @@ def test_other_opens_the_systems_font_panel_and_shows_the_font_picked(monkeypatc
     from PySide6.QtWidgets import QFontDialog
     import fonts
     family = fonts.monospace_family()                   # one installed everywhere
+    from text_size import text_size
+    bigger = text_size().sizes()[-1]
     monkeypatch.setattr(QFontDialog, "getFont", staticmethod(
-        lambda *args, **kwargs: (QFont(family), True)))
+        lambda *args, **kwargs: (QFont(family, bigger), True)))
     f = Fixture()
     f.window.font.activated.emit(f.window.font.findData("other"))
     assert f.family == family
+    assert text_size().points() == bigger                # the panel sets the size too
     f.window.refresh()
     assert f.window.font.currentText() == family
+    assert f.window.font_size.currentData() == bigger
 
 
-def test_the_text_size_is_a_slider_the_view_menu_moves_too():
-    from text_size import STEPS, text_size
+def test_the_font_size_is_chosen_in_points_beside_the_font_and_the_view_menu_moves_it():
+    """Asked for: "an option to change the size of the font, like 8, 10, 12".
+    The size sits beside the font, as a Mac's settings name a font
+    ("Helvetica 12")."""
+    from text_size import text_size
     f = Fixture()
-    slider = f.window.text_size
-    assert slider.maximum() == len(STEPS) - 1 and STEPS[slider.value()] == 100
-    slider.setValue(STEPS.index(125))
-    assert text_size().percent() == 125 and f.window.text_size_value.text() == "125 %"
+    sizes = f.window.font_size
+    offered = [sizes.itemData(i) for i in range(sizes.count())]
+    assert offered == list(text_size().sizes()) and 12 in offered and 24 in offered
+    assert sizes.currentData() == text_size().actual()
+    assert sizes.itemText(sizes.findData(12)) == "12 pt"
+    sizes.activated.emit(sizes.findData(24))
+    assert text_size().points() == 24
     text_size().shrink()                                 # View > Zoom Out
-    assert STEPS[slider.value()] == 110 and f.window.text_size_value.text() == "110 %"
+    assert sizes.currentData() == offered[offered.index(24) - 1]
+    font_row = f.window.font.parentWidget()
+    assert sizes.parentWidget() is font_row              # on the font's row
 
 
 def test_the_format_bar_over_a_selection_is_a_writing_choice():

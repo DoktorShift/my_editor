@@ -185,8 +185,15 @@ def load_backup_content(editor, record: dict, *, modified: bool = True) -> None:
     if record.get("markdown_source"):
         # Opened as its Markdown text: it is still saved as written.
         editor._markdown_source = True
-    editor.document().clearUndoRedoStacks()
-    editor.document().setModified(modified)
+    doc = editor.document()
+    doc.clearUndoRedoStacks()
+    # Set from the other state, so it holds: Qt remembers the undo step that
+    # was saved, and setModified does nothing when the document already
+    # says so. A backup the tidy-up changed (its fonts taken off) already
+    # says modified, and clearing the stacks would bring back the step
+    # setHtml saved, and with it "unmodified".
+    doc.setModified(not modified)
+    doc.setModified(modified)
 
 
 def _text_print(doc) -> str:

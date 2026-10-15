@@ -194,7 +194,8 @@ def test_code_in_the_systems_own_fixed_font_arrives_as_code(monkeypatch):
     # Drawn on a real screen, Qt gives a code element the system's fixed
     # font (Menlo on a Mac, Courier New on Windows), not the generic
     # family the offscreen platform of these tests names.
-    monkeypatch.setattr(paste, "_system_fixed_family", lambda: "Menlo")
+    import fonts
+    monkeypatch.setattr(fonts, "system_fixed_family", lambda: "Menlo")
     assert pasted(html('<p>run <span style="font-family:Menlo">git log</span> '
                        'in <span style="font-family:Georgia">prose</span></p>')) == (
         "run `git log` in prose\n")

@@ -35,6 +35,7 @@ from PySide6.QtGui import (
     QTextBlockFormat,
     QTextCharFormat,
     QTextCursor,
+    QTextFormat,
     QTextImageFormat,
     QTextListFormat,
 )
@@ -42,6 +43,7 @@ from PySide6.QtGui import (
 import media_files
 import rich_text
 from constants import DARK_BG, DARK_FG, LIGHT_BG, LIGHT_FG, MONO_FONT
+from fonts import names_monospace
 from i18n import _
 from doc_walk import (
     bullet_depth,
@@ -445,6 +447,52 @@ def _quote_depths(doc) -> None:
     cursor.endEditBlock()
 
 
+# What a page sets about its text that this editor has its own choice for:
+# the font and the size are the person's (Settings, View > Zoom In).
+_PAGE_FONT = (QTextFormat.Property.FontFamilies, QTextFormat.Property.FontFamily,
+              QTextFormat.Property.FontPointSize, QTextFormat.Property.FontPixelSize)
+
+
+def _drop_page_fonts(doc) -> None:
+    """Take off the fonts and sizes the page set, as a paste does (paste.py):
+    the text is in the font and at the size the person chose, and grows
+    with the text size, headings staying larger by their own measure (Apple:
+    "maintain the relative hierarchy ... when people adjust text sizes").
+    Nothing is lost by it: the writer keeps no fonts or sizes. This file's
+    own CSS for browsers (_head_css) is one such page font.
+
+    Words in a monospace font of their own, apart from the page's, are code
+    (a code element, or code this editor wrote); text all in one monospace
+    font is the page's font."""
+    runs = []
+    page_counts = {}
+    for block in iter_blocks(doc):
+        it = block.begin()
+        while not it.atEnd():
+            fragment = it.fragment()
+            fmt = fragment.charFormat()
+            if fragment.isValid() and not fmt.isImageFormat():
+                families = tuple(fmt.fontFamilies() or ())
+                runs.append((fragment.position(), fragment.length(), fmt, families))
+                page_counts[families] = page_counts.get(families, 0) + fragment.length()
+            it += 1
+    if not runs:
+        return
+    page = max(page_counts, key=page_counts.get)
+    cursor = QTextCursor(doc)
+    for position, length, fmt, families in runs:
+        if not any(fmt.hasProperty(prop) for prop in _PAGE_FONT):
+            continue
+        for prop in _PAGE_FONT:
+            fmt.clearProperty(prop)
+        if families != page and names_monospace(families):
+            fmt.setFontFixedPitch(True)
+            fmt.setFontFamilies(rich_text.CODE_FAMILIES)
+        cursor.setPosition(position)
+        cursor.setPosition(position + length, QTextCursor.MoveMode.KeepAnchor)
+        cursor.setCharFormat(fmt)
+
+
 def normalize_after_set_html(doc) -> None:
     """Tidy a document Qt's HTML reader just read (a file being opened, a
     crash backup restored).
@@ -453,9 +501,11 @@ def normalize_after_set_html(doc) -> None:
     <p>&nbsp;</p>, because Qt drops <p></p> and doubles <p><br></p>.
     Whitespace that pretty-printed HTML leaves at the end of a list item,
     or after </html>, is trimmed. Lists stay real lists. Quotes get their
-    depth back (see _quote_depths).
+    depth back (see _quote_depths). The page's fonts and sizes go, code
+    staying code (see _drop_page_fonts).
     """
     _quote_depths(doc)
+    _drop_page_fonts(doc)
     NBSP = "\u00a0"
     nbsp_targets = []
     items = []
