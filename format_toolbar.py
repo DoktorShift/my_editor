@@ -354,10 +354,17 @@ class FormatToolbar(QToolBar):
             menu.removeAction(entry)
         self._popup_entries = []
         first = next((a for a in menu.actions() if not a.isSeparator()), None)
+        # The window's menus, by their menu action: given to insertMenu or
+        # addMenu, PySide makes this menu their owner, and they would go
+        # with it when Qt makes it anew.
         if not self.style_button.isVisible():
-            self._popup_entries.append(menu.insertMenu(first, self._style_menu))
+            entry = self._style_menu.menuAction()
+            menu.insertAction(first, entry)
+            self._popup_entries.append(entry)
         if not self.insert_button.isVisible():
-            self._popup_entries.append(menu.addMenu(self._insert_menu))
+            entry = self._insert_menu.menuAction()
+            menu.addAction(entry)
+            self._popup_entries.append(entry)
 
     def add_trailing(self, widget: QWidget) -> QWidget:
         """Put ``widget`` right of the toolbar, outside it, in the holder

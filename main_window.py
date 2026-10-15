@@ -6246,16 +6246,19 @@ class MainWindow(QMainWindow):
         for action in (self.act_cut, self.act_copy, self.act_paste, self.act_paste_plain):
             menu.addAction(action)
         menu.addSeparator()
+        # The Format menu's own submenus, by their menu action: given to
+        # addMenu, PySide makes this menu, built for one click, their owner,
+        # and they would go with it.
         if self._editor_kind(editor) == "rich" and editor.textCursor().currentTable() is not None:
             # In a table: its rows and columns.
-            menu.addMenu(self.m_table)
+            menu.addAction(self.m_table.menuAction())
             menu.addSeparator()
         for action in (self.act_bold, self.act_italic, self.act_underline, self.act_strike,
                        self.act_code):
             menu.addAction(action)
-        menu.addMenu(self.m_color)
+        menu.addAction(self.m_color.menuAction())
         menu.addSeparator()
-        menu.addMenu(self.m_style)
+        menu.addAction(self.m_style.menuAction())
         menu.addAction(self.act_reset_format)
 
 
