@@ -12,7 +12,9 @@ What every assistant gets, following Apple's Human Interface Guidelines:
 - One default button, at the trailing edge, where Return lands; buttons
   that back out (Cancel, Not Now) beside it; Go Back at the leading edge.
   A page lists its buttons as ``(key, label, placement, handler)`` and the
-  window lays them out, so no page can put them anywhere else.
+  window lays them out, so no page can put them anywhere else. A menu in
+  place of the handler makes a pull-down button (Manage), whose click
+  opens the menu's commands.
 - Text that comes from outside (names, keys, server words) is plain text,
   never markup.
 - Progress is shown where the work happens: an indeterminate bar while
@@ -33,7 +35,7 @@ from __future__ import annotations
 
 import atexit
 import sys
-from typing import Callable, Dict, Iterable, List, Optional, Tuple
+from typing import Callable, Dict, Iterable, List, Optional, Tuple, Union
 
 import shiboken6
 from PySide6.QtCore import QEvent, QMimeData, QSize, Qt, QTimer
@@ -44,10 +46,13 @@ from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
     QLabel,
+    QMenu,
     QProgressBar,
     QPushButton,
     QScrollArea,
     QStackedWidget,
+    QStyle,
+    QStyleOptionButton,
     QVBoxLayout,
     QWidget,
 )
@@ -55,9 +60,10 @@ from PySide6.QtWidgets import (
 import theme
 from alerts import answer_return_as_the_system_does
 from constants import (
-    DARK_BORDER, DARK_MENU_BG, DARK_MUTED_FG,
-    LIGHT_BORDER, LIGHT_MENU_BG, LIGHT_MUTED_FG, LIGHT_SELECTION,
+    DARK_BORDER, DARK_FG, DARK_MENU_BG, DARK_MUTED_FG,
+    LIGHT_BORDER, LIGHT_FG, LIGHT_MENU_BG, LIGHT_MUTED_FG, LIGHT_SELECTION,
 )
+from format_toolbar import Disclosure, PopupButton
 from i18n import _
 from popup_placement import available_area
 
@@ -66,7 +72,15 @@ LEADING = "leading"     # Go Back: the leading edge
 NORMAL = "normal"       # Not Now, Close, Cancel: beside the default
 DEFAULT = "default"     # the likely action: the trailing edge, answers Return
 
-ButtonSpec = Tuple[str, str, str, Callable[[], None]]
+# What a button does: a handler, or a menu for a pull-down button.
+ButtonSpec = Tuple[str, str, str, Union[Callable[[], None], QMenu]]
+
+# A pull-down button's Disclosure arrow: where it ends, from the button's
+# trailing edge, in the room the button's padding keeps for it.
+PULL_DOWN_ARROW_END = 12
+
+# The transparent edge around a link's words, where its focus ring shows.
+LINK_EDGE = 2
 
 SECRET_CLIPBOARD_SECONDS = 60
 
@@ -74,12 +88,20 @@ SECRET_CLIPBOARD_SECONDS = 60
 def stylesheet(is_dark: bool) -> str:
     """The app's dialog look plus what assistants use."""
     if is_dark:
-        muted, border, field = DARK_MUTED_FG, DARK_BORDER, DARK_MENU_BG
+        fg, muted, border, field = DARK_FG, DARK_MUTED_FG, DARK_BORDER, DARK_MENU_BG
         accent, ok, err = "#007ACC", "#43A047", "#E57373"
     else:
-        muted, border, field = LIGHT_MUTED_FG, LIGHT_BORDER, LIGHT_MENU_BG
+        fg, muted, border, field = LIGHT_FG, LIGHT_MUTED_FG, LIGHT_BORDER, LIGHT_MENU_BG
         accent, ok, err = LIGHT_SELECTION, "#2E7D32", "#C62828"
     link = theme.dialog_link_color(is_dark)
+    ring = theme.focus_ring_color(is_dark)
+    # A pull-down keeps room for its arrow after its title: the arrow, and
+    # as much space again before it (a pixel less with the focus ring, so
+    # it keeps its size). It is as wide as that, not the width a short
+    # button title is given. On Windows and Linux the default moves to the
+    # button with the focus; a pull-down then keeps its plain fill, as a
+    # destructive button does, since its arrow is drawn in the quiet ink.
+    arrow_room = PULL_DOWN_ARROW_END + 2 * Disclosure.WIDTH
     return theme.dialog_stylesheet(is_dark) + f"""
     QLabel#title {{ font-size: 16px; font-weight: 600; }}
     QLabel#muted, QLabel#help {{ color: {muted}; }}
@@ -109,8 +131,14 @@ def stylesheet(is_dark: bool) -> str:
     QListWidget::item:disabled {{ color: {muted}; }}
     QPushButton:disabled {{ color: {muted}; }}
     QPushButton:default:disabled {{ background: {field}; color: {muted}; border-color: {border}; }}
+    QPushButton#pull_down {{ padding-right: {arrow_room}px; min-width: 0; }}
+    QPushButton#pull_down:focus {{ padding-right: {arrow_room - 1}px; }}
+    QPushButton#pull_down:default {{
+        background: {field}; color: {fg}; border: 2px solid {ring};
+        padding: 5px {arrow_room - 1}px 5px 13px;
+    }}
     QPushButton#link {{
-        border: 2px solid transparent; border-radius: 3px; background: transparent;
+        border: {LINK_EDGE}px solid transparent; border-radius: 3px; background: transparent;
         color: {link}; padding: 0px; min-width: 0;
     }}
     QPushButton#link:hover {{ text-decoration: underline; }}
@@ -380,6 +408,26 @@ class StepList(QWidget):
         return self._rows[key]["state"]
 
 
+class _PullDown(PopupButton):
+    """A pull-down button: its title and the Disclosure arrow at its end,
+    in the room its padding keeps. Qt sizes a button with a menu for its
+    own indicator too, which is not drawn, so that room is given back."""
+
+    def __init__(self, title: str, menu: QMenu, *, is_dark: bool) -> None:
+        super().__init__(title)
+        self.setObjectName("pull_down")
+        self.setMenu(menu)
+        Disclosure(self, end=PULL_DOWN_ARROW_END, dark=is_dark)
+
+    def sizeHint(self) -> QSize:  # noqa: N802, Qt's name
+        hint = super().sizeHint()
+        option = QStyleOptionButton()
+        self.initStyleOption(option)
+        indicator = self.style().pixelMetric(QStyle.PixelMetric.PM_MenuButtonIndicator,
+                                             option, self)
+        return QSize(hint.width() - indicator, hint.height())
+
+
 class _ShownPageStack(QStackedWidget):
     """A stack of pages that asks for the room of the page it shows.
 
@@ -528,7 +576,14 @@ class AssistantWindow(QDialog):
         narrowest = layout.totalMinimumSize().width()
         width = self._scroll.viewport().width()
         if not self.isVisible() or width <= 0:
-            width = max(self.width(), self.minimumWidth()) - sides
+            # Not on screen yet: measured at the width it opens at, its size
+            # hint's, unless it was given one. (Its own width is a child's
+            # first size until then, or its least width; measured there,
+            # the page's words wrapped more than they are shown, and the
+            # window opened taller than its page.)
+            opens_at = (self.width() if self.testAttribute(Qt.WidgetAttribute.WA_Resized)
+                        else self.sizeHint().width())
+            width = max(opens_at, self.minimumWidth()) - sides
         width = max(width, narrowest)
         if layout.hasHeightForWidth():
             needed = layout.totalHeightForWidth(width)
@@ -581,7 +636,8 @@ class AssistantWindow(QDialog):
     def set_buttons(self, specs: Iterable[ButtonSpec]) -> None:
         """Lay out ``(key, label, placement, handler)`` buttons: Go Back at
         the leading edge, the rest at the trailing edge with the one
-        default button last."""
+        default button last. A menu as the handler makes a pull-down
+        button; the menu stays the page's, the button goes with the row."""
         specs = list(specs)
         for widget in self._button_widgets:
             self._button_row.removeWidget(widget)
@@ -596,14 +652,19 @@ class AssistantWindow(QDialog):
         self._action = None
 
         def make(key, label, placement, handler):
-            button = QPushButton(label)
+            if isinstance(handler, QMenu):
+                # As a Mac draws a pull-down button (Qt's own indicator is
+                # a dot there).
+                button = _PullDown(label, handler, is_dark=self._is_dark)
+            else:
+                button = QPushButton(label)
+                button.clicked.connect(handler)
             # Return as the system's own dialogs answer it (alerts.py).
             answer_return_as_the_system_does([button])
             button.setDefault(placement == DEFAULT)
             if placement == DEFAULT:
                 self._action = button
                 button.installEventFilter(self)     # lit again: see _give_owed_focus
-            button.clicked.connect(handler)
             self.buttons[key] = button
             self._button_widgets.append(button)
             return button

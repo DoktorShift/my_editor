@@ -183,3 +183,23 @@ def format_size(byte_count: int) -> str:
     if byte_count >= 1024:
         return f"{round(byte_count / 1024)} KB"
     return f"{byte_count} B"
+
+
+_MiB = 1024 ** 2
+_GiB = 1024 ** 3
+
+
+def format_storage(byte_count: int) -> str:
+    """Storage the way a person reads it: 1.2 GB, 640 MB, with the decimal
+    point the app's language writes.
+
+    Binary units throughout, the ones allowances are stated in: the
+    members' 5 GB is 5 x 1024^3 bytes, and must read "5 GB", not "5.4 GB".
+    """
+    byte_count = max(0, byte_count)
+    if byte_count < _GiB:
+        megabytes = round(byte_count / _MiB)
+        if megabytes < 1024:
+            return f"{megabytes} MB"
+    text = f"{byte_count / _GiB:.1f} GB".replace(".0 GB", " GB")
+    return text.replace(".", i18n.display_locale().decimalPoint())

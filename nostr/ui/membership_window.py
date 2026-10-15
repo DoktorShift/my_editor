@@ -7,7 +7,8 @@ One window with a page for each stage of joining, in the order it happens:
     overview   what membership is, what it costs, and Continue
     apply      the statutes, consent, and the optional details
     pay        the invoice as a QR code to scan with a wallet, and Copy Invoice
-    member     what is active now, and the Nostr address
+    member     the membership card, then what MyEditor set up and the one
+               step left for each, and Manage for the rest
     working    the short wait while the signer and the association answer
 
 The window follows Apple's Human Interface Guidelines the way the rest of
@@ -15,6 +16,18 @@ the app does: one default button at the trailing edge with Cancel-type
 buttons beside it, Go Back at the leading edge, field problems shown under
 the field they belong to, progress shown where the work happens, and plain
 words throughout (no protocol names, status codes or key formats).
+
+The member page is read at a glance, as System Settings shows an
+account's iCloud+: a card with the year and until when the membership
+runs (it is renewed by hand, and nothing is charged automatically), then
+a row for each thing MyEditor sets up. A row says it is done, in words
+beside a check mark, only when it is (the relay list has the members'
+relay, the profile shows the address); otherwise it offers the one
+button left. What the association's guide sets up gets a row of its
+own, without a check mark. What needs the membership service is said to
+be unavailable while the service can't be reached, with Try Again,
+rather than vanishing. Receipt, details, export and deletion are in
+Manage; Done starts with the focus.
 
 Nothing is signed by opening the window. The fee is read without a
 signature; every request that needs one (status, application, invoice,
@@ -38,7 +51,7 @@ import json
 from typing import Callable, Optional
 from urllib.parse import urlsplit
 
-from PySide6.QtCore import QObject, Qt, QTimer, Signal
+from PySide6.QtCore import QEvent, QObject, Qt, QTimer, Signal
 from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
@@ -47,6 +60,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QMenu,
     QPlainTextEdit,
     QPushButton,
     QVBoxLayout,
@@ -58,16 +72,19 @@ from atomic_file import save_text_document
 from alerts import DEFAULT as ALERT_DEFAULT
 import i18n
 from i18n import _
+from media_files import format_storage
 from nostr import einundzwanzig_api as e21
 from nostr.einundzwanzig import (
-    BENEFITS_URL, JOIN_URL, MAX_FILE_LABEL, MEMBER_BLOSSOM, MEMBER_RELAY, MEMBER_SERVICES,
-    NIP05_DOMAIN, PER_USER_LABEL, nip05_address,
+    BENEFITS_URL, JOIN_URL, MAX_FILE_LABEL, MEMBER_RELAY, MEMBER_SERVICES, NIP05_DOMAIN,
+    PER_USER_BYTES, PER_USER_LABEL, nip05_address,
 )
 from nostr.qr import make_qr_pixmap
+from nostr.ui import grouped_list
 from nostr.ui.assistant import (
     DEFAULT, LEADING, NORMAL, AssistantWindow, busy_bar, link_button, page, text_label,
 )
-from nostr.ui.flow_layout import FlowLayout
+from nostr.ui.grouped_list import ListGroup, ListRow, Notice, group_header, usage_bar
+from nostr.ui.membership_card import ORANGE, MembershipCard
 
 # Pages.
 OVERVIEW = "overview"
@@ -82,6 +99,21 @@ _ONE_MOMENT = _("One moment.")
 _SIGNER_MAY_ASK = _("Your signer app may ask you to approve.")
 _DEFAULT_NOTE = _("Membership belongs to your Nostr account and runs for a calendar "
                   "year. You renew it yourself; nothing is charged automatically.")
+_CALENDAR_NOTE = _("Membership runs for a calendar year. You renew it yourself; nothing "
+                   "is charged automatically.")
+
+# The member page's rows: each one's tile, as System Settings tints its
+# icons (the relay in EINUNDZWANZIG's orange).
+_RELAY_TINT = ORANGE.name()
+_STORAGE_TINT = "#0A84FF"
+_ADDRESS_TINT = "#5E5CE6"
+_MORE_TINT = "#8E8E93"
+# From here the storage is said to be almost full, in the bar's color too.
+_ALMOST_FULL = 0.9
+# The member page is never narrower than this, so each row's words and its
+# button sit side by side with room to spare, German ones too, whatever
+# the line under the card says.
+_MEMBER_PAGE_WIDTH = 512
 
 
 def format_date(iso: str) -> str:
@@ -124,15 +156,19 @@ class MembershipWindow(AssistantWindow):
     # clicked for it
     profile_address_requested = Signal(str)
     data_erased = Signal(str)         # pubkey whose membership data the association deleted
+    media_library_requested = Signal()  # open the Media Library, from Media storage
 
     def __init__(self, api, *, pubkey: Optional[str] = None,
                  known_member: Optional[bool] = None, handle: Optional[str] = None,
                  signs_locally: bool = False, profile_address: str = "",
+                 relay_listed: bool = False, member_year: Optional[int] = None,
+                 storage_used: Optional[Callable[[], Optional[int]]] = None,
                  is_dark: bool = True,
                  watcher_factory: Optional[Callable] = None,
                  prices=None,
                  parent=None):
         super().__init__(_("EINUNDZWANZIG Membership"), is_dark=is_dark, parent=parent)
+        self.setStyleSheet(self.styleSheet() + grouped_list.stylesheet(is_dark))
         self._watcher_factory = watcher_factory or (
             lambda api_, year, parent_: e21.PaymentWatcher(api_, year, parent=parent_))
         # Today's Bitcoin price, to show the fee in sats, CHF and EUR. None
@@ -145,6 +181,10 @@ class MembershipWindow(AssistantWindow):
         self._watcher = None
         self._api = None
         self._relay_publishes_list = False
+        # Bytes the account keeps on the members' media server, as the
+        # Media Library last listed them in full; None when that is not
+        # known. Read whenever the member page shows.
+        self._storage_used = storage_used or (lambda: None)
 
         self._build_overview()
         self._build_working()
@@ -153,7 +193,8 @@ class MembershipWindow(AssistantWindow):
         self._build_member()
 
         self.set_identity(api, pubkey=pubkey, known_member=known_member, handle=handle,
-                          signs_locally=signs_locally, profile_address=profile_address)
+                          signs_locally=signs_locally, profile_address=profile_address,
+                          relay_listed=relay_listed, member_year=member_year)
 
     # ------------------------------------------------------------------ #
     # Identity                                                            #
@@ -166,10 +207,15 @@ class MembershipWindow(AssistantWindow):
 
     def set_identity(self, api, *, pubkey: Optional[str], known_member: Optional[bool] = None,
                      handle: Optional[str] = None, signs_locally: bool = False,
-                     profile_address: str = "") -> None:
+                     profile_address: str = "", relay_listed: bool = False,
+                     member_year: Optional[int] = None) -> None:
         """Start over for this identity (after connecting a signer, or a
         profile switch). Anything in flight for the previous one is dropped,
-        and so is the client that asked it."""
+        and so is the client that asked it.
+
+        ``relay_listed``: the account's relay list, as last known, has the
+        members' relay. ``member_year``: the year of the roster that lists
+        the account, when one does."""
         self._stop_watching()
         previous = self._api
         if previous is not None and previous is not api:
@@ -183,18 +229,17 @@ class MembershipWindow(AssistantWindow):
         # The Nostr address the profile shows now, as last read.
         self._profile_address = (profile_address or "").strip()
         self._profile_offered = False
-        self._profile_button.setEnabled(True)
-        self._profile_result.setText("")
+        self._relay_listed = relay_listed
+        self._member_year = member_year
         self._config = None
         self._status = None
         self._invoice = None
         self._name_only = False
         self._just_joined = False
         self._relay_publishes_list = False
-        self._relay_button.setText(_("Add to My Relay List"))
-        self._relay_button.setEnabled(True)
-        self._relay_button.setVisible(True)
-        self._relay_result.setText("")
+        self._service_retrying = False
+        for row in (self._relay_row, self._address_row):
+            row.set_note("")
         # Joining in the app needs the membership service (which holds the
         # association's key). Until it has answered, Continue waits; without
         # it, the association's website is the way to join.
@@ -220,6 +265,7 @@ class MembershipWindow(AssistantWindow):
         if api is None or api is not self._api:
             return      # an identity no longer shown, or a window already closed
         self._service = "available" if ok else "unavailable"
+        self._service_retrying = False
         if ok:
             api.config(self._on_config, lambda _error: None)
         if self.page == OVERVIEW:
@@ -241,7 +287,7 @@ class MembershipWindow(AssistantWindow):
         col.addSpacing(4)
         # Everything the association lists for its members, in its order.
         for service in MEMBER_SERVICES:
-            col.addLayout(self._item(_service_title(service), _service_detail(service))[0])
+            col.addLayout(self._item(_service_title(service), _service_detail(service)))
         col.addWidget(link_button(_("Details on the EINUNDZWANZIG Website"),
                                   lambda: self.link_activated.emit(BENEFITS_URL)),
                       0, Qt.AlignLeft)
@@ -254,24 +300,20 @@ class MembershipWindow(AssistantWindow):
         col.addStretch(1)
         self.add_page(OVERVIEW, body)
 
-    def _item(self, title: str, detail: str, extra: Optional[QWidget] = None):
-        """A checked row: title, detail and optional controls.
-        Returns ``(layout, detail_label)``."""
+    def _item(self, title: str, detail: str) -> QHBoxLayout:
+        """A checked row of the overview: what membership includes."""
         mark = text_label("✓", "check", wrap=False)
         mark.setFixedWidth(18)
         mark.setAccessibleName(_("Included"))
         text = QVBoxLayout()
         text.setSpacing(2)
         text.addWidget(text_label(title, "item_title"))
-        detail_label = text_label(detail, "muted")
-        text.addWidget(detail_label)
-        if extra is not None:
-            text.addWidget(extra, 0, Qt.AlignLeft)
+        text.addWidget(text_label(detail, "muted"))
         row = QHBoxLayout()
         row.setSpacing(8)
         row.addWidget(mark, 0, Qt.AlignTop)
         row.addLayout(text, 1)
-        return row, detail_label
+        return row
 
     def _show_overview(self, note: str = "") -> None:
         self._set_overview_note(note)
@@ -395,7 +437,7 @@ class MembershipWindow(AssistantWindow):
         self._status = status
         if status.is_member:
             self.member_confirmed.emit(self._pubkey or status.pubkey)
-            self._show_member()
+            self._show_member(note=self._paid_note())
         elif status.needs_payment:
             self._create_invoice()
         else:
@@ -613,10 +655,9 @@ class MembershipWindow(AssistantWindow):
                 # So the name shows next time too, before the roster lists it.
                 self.address_saved.emit(self._pubkey, handle)
         if name_only:
-            self._profile_result.setText("")
-            self._profile_button.setEnabled(True)
-            self._show_member(note=_("Your Nostr address is saved. It can take a few "
-                                     "minutes to appear everywhere."))
+            self._address_row.set_note(_("Your Nostr address is saved. It can take a few "
+                                         "minutes to appear everywhere."))
+            self._show_member()
             self._profile_offered = False
             self._offer_address_on_profile()
         else:
@@ -849,121 +890,192 @@ class MembershipWindow(AssistantWindow):
     # ------------------------------------------------------------------ #
 
     def _build_member(self) -> None:
-        body, col = page()
-        self._member_title = text_label("", "title")
-        self._member_subtitle = text_label("", "muted")
-        col.addWidget(self._member_title)
-        col.addWidget(self._member_subtitle)
-        col.addSpacing(4)
+        body, col = page(spacing=0)
+        self._card = MembershipCard(is_dark=self._is_dark)
+        self._card.setMinimumWidth(_MEMBER_PAGE_WIDTH)
+        col.addWidget(self._card)
+        col.addSpacing(8)
+        # One line under the card: how membership runs, a welcome, or what
+        # just happened.
+        self._note = text_label("", "muted")
+        col.addWidget(self._note)
+        # What needs the membership service, while it can't be reached.
+        self._service_line = Notice(
+            _("Choosing an address, receipts and data export aren’t available right now."),
+            _("Try Again"), self._check_service_again, is_dark=self._is_dark)
+        self._retry_link = self._service_line.link
+        col.addSpacing(8)
+        col.addWidget(self._service_line)
+        col.addSpacing(16)
 
-        relay_extra = QWidget()
-        relay_row = QHBoxLayout(relay_extra)
-        relay_row.setContentsMargins(0, 2, 0, 0)
-        relay_row.setSpacing(8)
-        self._relay_button = QPushButton(_("Add to My Relay List"))
-        self._relay_button.setAutoDefault(False)
-        self._relay_button.clicked.connect(self._add_relay)
-        self._relay_result = text_label("", "muted")
-        relay_row.addWidget(self._relay_button)
-        relay_row.addWidget(self._relay_result, 1)
-        col.addLayout(self._item(
-            _("Members’ relay"),
-            _("Your notes and articles also go to {relay}. Add it to your "
-              "relay list so readers find you there too.").format(relay=_host(MEMBER_RELAY)),
-            relay_extra)[0])
-
-        col.addLayout(self._item(
-            _("Media storage"),
-            _("Your uploads also go to {server}: {total} in total, up to {per_file} "
-              "per file.").format(server=_host(MEMBER_BLOSSOM), total=PER_USER_LABEL,
-                                  per_file=MAX_FILE_LABEL))[0])
-
-        name_extra = QWidget()
-        name_col = QVBoxLayout(name_extra)
-        name_col.setContentsMargins(0, 2, 0, 0)
-        name_col.setSpacing(4)
-        name_row = QHBoxLayout()
-        name_row.setSpacing(8)
-        self._name_button = QPushButton(_("Choose an Address…"))
-        self._name_button.setAutoDefault(False)
-        self._name_button.clicked.connect(lambda: self._show_apply(name_only=True))
-        # A person who said Not Now can still put the address on their
-        # profile later, from here.
-        self._profile_button = QPushButton(_("Show on My Profile"))
-        self._profile_button.setAutoDefault(False)
-        self._profile_button.clicked.connect(self._show_address_on_profile)
-        name_row.addWidget(self._name_button)
-        name_row.addWidget(self._profile_button)
-        name_row.addStretch(1)
-        name_col.addLayout(name_row)
-        self._profile_result = text_label("", "muted")
-        name_col.addWidget(self._profile_result)
-        name_row_layout, self._name_detail = self._item(_("Nostr address"), "", name_extra)
-        col.addLayout(name_row_layout)
+        col.addWidget(group_header(_("In MyEditor")))
+        col.addSpacing(8)
+        mine = ListGroup(is_dark=self._is_dark)
+        self._relay_row = mine.add_row(ListRow(
+            _("Members’ relay"), symbol="relay", tint=_RELAY_TINT))
+        self._relay_row.set_detail(_("Readers find your notes and articles at {relay}.").format(
+            relay=_host(MEMBER_RELAY)))
+        # Each row starts as a member's who has set up nothing yet; the page
+        # says where things stand whenever it shows (_show_member).
+        self._relay_row.show_button(_("Add"))
+        self._relay_row.button.clicked.connect(self._add_relay)
+        self._storage_row = mine.add_row(ListRow(
+            _("Media storage"), symbol="photo", tint=_STORAGE_TINT))
+        self._usage_bar = usage_bar(_("Storage used"))
+        self._storage_row.add_detail(self._usage_bar)
+        self._storage_row.show_button(_("Open Media Library"))
+        self._storage_row.button.clicked.connect(self.media_library_requested.emit)
+        self._address_row = mine.add_row(ListRow(
+            _("Nostr address"), symbol="at", tint=_ADDRESS_TINT))
+        self._address_row.show_button(_("Choose…"))
+        self._address_row.button.clicked.connect(self._on_address_button)
+        col.addWidget(mine)
+        col.addSpacing(16)
 
         # What MyEditor doesn't set up itself: the association's guide does.
-        others = [service for service in MEMBER_SERVICES if not service.in_app]
-        more_extra = link_button(_("Set Up on the EINUNDZWANZIG Website"),
-                                 lambda: self.link_activated.emit(BENEFITS_URL))
-        col.addLayout(self._item(
-            _("More for members"),
-            _("Also yours: {services}.").format(
-                services=", ".join(_service_title(s) for s in others)),
-            more_extra)[0])
-
-        self._member_note = text_label("", "muted")
-        col.addWidget(self._member_note)
+        # The sentence names the services of MEMBER_SERVICES that are not
+        # in_app, in words of its own.
+        more = ListGroup(is_dark=self._is_dark)
+        self._more_row = more.add_row(ListRow(
+            _("More for members"), symbol="ellipsis", tint=_MORE_TINT))
+        self._more_row.set_detail(_("Lightning watchtower, community group and Buzz (in "
+                                    "testing) are set up on the association’s website."))
+        # The arrow says it opens in the browser, as a link out of an app does.
+        self._more_row.show_button(f"{_('Open Guide')} ↗",
+                                   description=_("Opens in your browser."))
+        self._more_row.button.setAccessibleName(_("Open Guide"))
+        self._more_row.button.clicked.connect(lambda: self.link_activated.emit(BENEFITS_URL))
+        col.addWidget(more)
         col.addStretch(1)
-
-        # In rows that wrap, so longer words (German) never clip them.
-        links = FlowLayout(spacing=16)
-        self._receipt_link = link_button(_("Receipt"), self._open_receipt)
-        self._details_link = link_button(
-            _("Show Membership Details"), lambda: self._load_status(back=self._show_member))
-        self._export_link = link_button(_("Export My Data…"), self._export)
-        self._erase_link = link_button(_("Delete My Data…"), self._erase)
-        # Deleting is said in red, as a destructive button is.
-        self._erase_link.setProperty("tone", "destructive")
-        for link in (self._receipt_link, self._details_link, self._export_link,
-                     self._erase_link):
-            links.addWidget(link)
-        col.addLayout(links)
+        # The page's other commands, under Manage (filled as the page shows).
+        self._manage_menu = QMenu(self)
         self.add_page(MEMBER, body)
 
     def _show_member(self, note: str = "") -> None:
         self._stop_watching()
+        self._card.set_member(self._member_year_shown(), self._address())
+        if note:
+            self._note.setText(note)
+        elif self._just_joined:
+            self._note.setText(_("Welcome to EINUNDZWANZIG. Thank you for supporting the "
+                                 "community."))
+        else:
+            self._note.setText(_CALENDAR_NOTE)
+        self._show_service_line()
+        self._show_relay()
+        self._show_storage()
+        self._show_address()
+        buttons = [("done", _("Done"), DEFAULT, self.accept)]
+        if self._fill_manage_menu():
+            buttons.insert(0, ("manage", _("Manage"), LEADING, self._manage_menu))
+        self.show_page(MEMBER, buttons)
+        # Done starts with the focus: nothing else on the page (an Add, a
+        # link) may look like what to do next. A button laid out now is
+        # shown only later, so it is shown first.
+        done = self.buttons["done"]
+        done.show()
+        done.setFocus()
+
+    def _member_year_shown(self) -> int:
+        """The year the membership is known for: the one the association
+        says is paid, else the year of the roster that lists the member,
+        else this calendar year."""
         status = self._status
-        self._member_title.setText(_("You’re a Member") if self._just_joined
-                                   else _("You’re an EINUNDZWANZIG Member"))
         if status is not None and status.current_year.paid:
-            subtitle = _("Your membership is paid for {year}.").format(
-                year=status.current_year.year)
+            return status.current_year.year
+        return self._member_year or datetime.date.today().year
+
+    def _paid_note(self) -> str:
+        """What the association's answer adds to the card: that the year
+        is paid."""
+        status = self._status
+        if status is None or not status.current_year.paid:
+            return ""
+        return _("Your membership is paid for {year}.").format(year=status.current_year.year)
+
+    def event(self, event) -> bool:
+        # Back in front (from the Media Library, say): the storage as it
+        # was last listed.
+        if event.type() == QEvent.Type.WindowActivate and self.page == MEMBER:
+            self._show_storage()
+        return super().event(event)
+
+    # -- the membership service, while it can't be reached --------------------
+
+    def _show_service_line(self) -> None:
+        """Say what needs the membership service while it can't be reached,
+        with Try Again (none for a build that has no service to ask)."""
+        retrying = self._service == "checking" and self._service_retrying
+        self._service_line.setVisible(self._service == "unavailable" or retrying)
+        self._retry_link.setVisible(self._api is not None and self._api.configured)
+        self._retry_link.setText(_("Checking…") if retrying else _("Try Again"))
+        self._retry_link.setEnabled(not retrying)
+
+    def _check_service_again(self) -> None:
+        api = self._api
+        if api is None or not api.configured or self._service == "checking":
+            return
+        self._service = "checking"
+        self._service_retrying = True
+        self._show_service_line()
+        api.check_service(lambda ok, asked=api: self._on_service_checked(asked, ok))
+
+    # -- the members' relay ------------------------------------------------------
+
+    def _show_relay(self) -> None:
+        if self._relay_listed:
+            self._relay_row.show_status(_("In your relay list"))
+        elif self._relay_publishes_list:
+            self._relay_row.show_button(_("Create Relay List"))
         else:
-            subtitle = _("Your membership is active.")
-        if self._just_joined:
-            subtitle += " " + _("Thank you for supporting the community.")
-        self._member_subtitle.setText(subtitle)
+            self._relay_row.show_button(_("Add"))
 
-        has_key = self._joining_available()
-        if self._handle:
-            self._name_detail.setText(nip05_address(self._handle))
-            self._name_button.setText(_("Change Address…"))
+    def _add_relay(self) -> None:
+        self._relay_row.button.setEnabled(False)
+        if self._relay_publishes_list:
+            self._relay_row.set_note(_("Publishing…") + self._signer_may_ask())
+            self.publish_relay_list_requested.emit()
         else:
-            self._name_detail.setText(_("Not chosen yet."))
-            self._name_button.setText(_("Choose an Address…"))
-        self._name_button.setVisible(has_key)
-        self._update_profile_offer()
+            self._relay_row.set_note(_("Adding…") + self._signer_may_ask())
+            self.add_relay_requested.emit()
 
-        receipt = status.current_year.receipt_url if status is not None else None
-        self._receipt_link.setVisible(bool(receipt))
-        self._details_link.setVisible(has_key and status is None)
-        self._export_link.setVisible(has_key)
-        self._erase_link.setVisible(has_key)
-        self._member_note.setText(note)
-        self._member_note.setVisible(bool(note))
-        self.show_page(MEMBER, [("done", _("Done"), DEFAULT, self.accept)])
+    def set_relay_result(self, message: str, *, done: bool = False,
+                         offer_list: bool = False) -> None:
+        """The outcome of add_relay_requested (or of publishing a list),
+        from the window that ran it. ``done``: the relay list has the
+        members' relay now, which the row says in place of the button.
+        Otherwise ``message`` says why not under the row, and the button
+        offers to try again; with ``offer_list`` it offers to create the
+        recommended relay list, for an account that has none."""
+        self._relay_listed = self._relay_listed or done
+        self._relay_publishes_list = offer_list and not done
+        self._relay_row.set_note("" if done else message)
+        self._show_relay()
 
-    # -- the Nostr address on the profile -----------------------------------
+    # -- media storage -------------------------------------------------------------
+
+    def _show_storage(self) -> None:
+        """The allowance, and how much of it is used once the Media Library
+        has listed the members' server in full (a number from a listing
+        that failed would be a guess)."""
+        used = self._storage_used()
+        bar = self._usage_bar
+        if used is None:
+            detail = _("{total} for images and videos · up to {per_file} per file").format(
+                total=PER_USER_LABEL, per_file=MAX_FILE_LABEL)
+        else:
+            detail = _("{used} of {total} used · up to {per_file} per file").format(
+                used=format_storage(used), total=PER_USER_LABEL, per_file=MAX_FILE_LABEL)
+            share = min(1.0, used / PER_USER_BYTES)
+            bar.setValue(round(share * bar.maximum()))
+            # Almost full is said in the attention color too, never in it alone.
+            bar.setProperty("tone", "full" if share >= _ALMOST_FULL else "")
+            bar.style().unpolish(bar)
+            bar.style().polish(bar)
+        self._storage_row.set_detail(detail)
+        bar.setVisible(used is not None)
+
+    # -- the Nostr address -----------------------------------------------------------
 
     def _address(self) -> str:
         return nip05_address(self._handle) if self._handle else ""
@@ -972,18 +1084,31 @@ class MembershipWindow(AssistantWindow):
         address = self._address()
         return bool(address) and self._profile_address.lower() == address.lower()
 
-    def _update_profile_offer(self) -> None:
-        """Show on My Profile, whenever there is an address the profile does
-        not show yet (and once it does, a word saying so)."""
-        offer = bool(self._pubkey and self._address()) and not self._profile_shows_address()
-        self._profile_button.setVisible(offer)
-        if self._profile_shows_address() and not self._profile_result.text():
-            self._profile_result.setText(_("Your profile shows this address."))
-        self._profile_result.setVisible(bool(self._profile_result.text()))
+    def _show_address(self) -> None:
+        """The address, and whether the profile shows it: said when it
+        does, offered when it doesn't; without one, Choose… while the
+        membership service can take one."""
+        row = self._address_row
+        address = self._address()
+        row.set_detail(address or _("Not chosen yet"), selectable=bool(address))
+        if address and self._profile_shows_address():
+            row.show_status(_("On your profile"))
+        elif address:
+            row.show_button(_("Add to Profile"))
+        elif self._joining_available():
+            row.show_button(_("Choose…"))
+        else:
+            row.clear_accessory()
+
+    def _on_address_button(self) -> None:
+        if self._address():
+            self._show_address_on_profile()
+        else:
+            self._show_apply(name_only=True)
 
     def _offer_address_on_profile(self) -> None:
         """Ask once, right after an address was chosen, whether the profile
-        should show it. Saying Not Now leaves the button on the member page."""
+        should show it. Saying Not Now leaves Add to Profile on the page."""
         if (self._profile_offered or not self._pubkey or not self._address()
                 or self._profile_shows_address()):
             return
@@ -1007,43 +1132,51 @@ class MembershipWindow(AssistantWindow):
         address = self._address()
         if not address:
             return
-        self._profile_button.setEnabled(False)
-        self._profile_result.setText(_("Updating your profile…") + self._signer_may_ask())
-        self._profile_result.setVisible(True)
+        self._address_row.button.setEnabled(False)
+        self._address_row.set_note(_("Updating your profile…") + self._signer_may_ask())
         self.profile_address_requested.emit(address)
 
     def set_profile_address_result(self, message: str, *, done: bool = False) -> None:
         """The outcome of profile_address_requested, from the window that ran
-        it. ``done`` means the profile shows the address now."""
+        it. ``done`` means the profile shows the address now, which the row
+        says; otherwise ``message`` says why not, and Add to Profile is
+        offered again."""
         if done:
             self._profile_address = self._address()
-        self._profile_result.setText(message)
-        self._profile_result.setVisible(bool(message))
-        self._profile_button.setEnabled(not done)
-        self._profile_button.setVisible(not done and bool(self._address()))
+        self._address_row.set_note("" if done else message)
+        self._show_address()
 
-    def _add_relay(self) -> None:
-        self._relay_button.setEnabled(False)
-        if self._relay_publishes_list:
-            self._relay_result.setText(_("Publishing…") + self._signer_may_ask())
-            self.publish_relay_list_requested.emit()
-        else:
-            self._relay_result.setText(_("Adding…") + self._signer_may_ask())
-            self.add_relay_requested.emit()
+    def _copy_address(self) -> None:
+        address = self._address()
+        if address:
+            QApplication.clipboard().setText(address)
 
-    def set_relay_result(self, message: str, *, done: bool = False,
-                         offer_list: bool = False) -> None:
-        """The outcome of add_relay_requested (or of publishing a list),
-        from the window that ran it. ``done`` hides the button; with
-        ``offer_list`` it offers to publish the recommended relay list,
-        for an account that has none; otherwise it offers to add again."""
-        self._relay_result.setText(message)
-        self._relay_publishes_list = offer_list and not done
-        self._relay_button.setText(_("Publish Recommended Relay List")
-                                   if self._relay_publishes_list
-                                   else _("Add to My Relay List"))
-        self._relay_button.setEnabled(not done)
-        self._relay_button.setVisible(not done)
+    # -- Manage ------------------------------------------------------------------------
+
+    def _fill_manage_menu(self) -> bool:
+        """Manage's commands that apply now, the destructive one last and
+        apart, as a Mac menu keeps it; False when none does."""
+        menu = self._manage_menu
+        menu.clear()
+        status = self._status
+        service = self._joining_available()
+        if status is not None and status.current_year.receipt_url:
+            menu.addAction(_("Receipt for {year}").format(year=status.current_year.year),
+                           self._open_receipt)
+        if service and status is None:
+            # Details cost a signature, so they come on request.
+            menu.addAction(_("Membership Details"),
+                           lambda: self._load_status(back=self._show_member))
+        if service and self._handle:
+            menu.addAction(_("Change Nostr Address…"), lambda: self._show_apply(name_only=True))
+        if self._handle:
+            menu.addAction(_("Copy Nostr Address"), self._copy_address)
+        if service:
+            if not menu.isEmpty():
+                menu.addSeparator()
+            menu.addAction(_("Export My Data…"), self._export)
+            menu.addAction(_("Delete My Data…"), self._erase)
+        return not menu.isEmpty()
 
     def _open_receipt(self) -> None:
         if self._status is not None and self._status.current_year.receipt_url:

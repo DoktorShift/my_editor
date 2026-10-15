@@ -47,10 +47,12 @@ from main_window import MainWindow  # noqa: E402
 from nostr import membership_controller as mc  # noqa: E402
 from nostr import profile_address as pa  # noqa: E402
 from nostr import relay_list_addition as rla  # noqa: E402
+from nostr.blossom.store import ServerListing  # noqa: E402
 from nostr.einundzwanzig import (  # noqa: E402
     MEMBER_BLOSSOM, MEMBER_RELAY, PER_USER_BYTES, MembershipDirectory,
 )
 from nostr.membership_controller import MembershipController  # noqa: E402
+from nostr.outbox.policy import LookupState, RelayList  # noqa: E402
 from nostr.ui import membership_window as mw  # noqa: E402
 from nostr.ui.membership_window import MEMBER  # noqa: E402
 from tests.test_einundzwanzig import FakeNam, roster_bytes  # noqa: E402
@@ -129,6 +131,17 @@ class Api(QObject):
         self.canceled += 1
 
 
+class RelayLists:
+    """The relay directory's cache: each account's relay list as last
+    known; UNKNOWN for anyone else."""
+
+    def __init__(self, lists=None):
+        self.lists = dict(lists or {})
+
+    def cached(self, pubkey):
+        return self.lists.get(pubkey, RelayList())
+
+
 class Job(QObject):
     finished = Signal(str)
 
@@ -143,24 +156,30 @@ class Job(QObject):
 class Harness:
     """A controller over a real directory with a fake roster transport."""
 
-    def __init__(self, *, roster=(MEMBER_KEY,), profile=None, now=1000.0):
+    def __init__(self, *, roster=(MEMBER_KEY,), profile=None, now=1000.0, relay_lists=None,
+                 media_usage=None):
         self.profile = profile if profile is not None else Profile()
         self.clock = {"t": now}
         self.nam = FakeNam({2026: roster_bytes(*roster)})
         self.directory = MembershipDirectory(nam=self.nam, clock=lambda: self.clock["t"])
         self.directory._current_year = lambda: 2026
+        self.relay_lists = RelayLists(relay_lists)
         self.apis = []
         self.jobs = []
         self.status = []
         self.links = []
+        self.libraries = 0
         self.connects = 0
         self.controller = MembershipController(
             profile_provider=lambda: self.profile,
+            relay_directory=self.relay_lists,
             directory=self.directory,
             api_factory=self.make_api,
             show_status=lambda text, ms: self.status.append(text),
             open_link=self.links.append,
             connect_signer=self.connect,
+            media_usage=media_usage or (lambda _origin: None),
+            open_media_library=self.open_library,
             add_relay_job=self.make_job,
             publish_list_job=self.make_job,
             profile_address_job=self.make_address_job,
@@ -191,6 +210,9 @@ class Harness:
         self.connects += 1
         if self.on_connect is not None:
             self.on_connect()
+
+    def open_library(self):
+        self.libraries += 1
 
     def answer(self):
         """Settle the newest roster request."""
@@ -402,7 +424,8 @@ def test_a_saved_address_is_shown_when_the_window_opens_again():
     window.address_saved.emit(MEMBER_KEY, "satoshi")
     window.close()
     h.controller.open_window()
-    assert h.controller.window._name_detail.text() == "satoshi@einundzwanzig.space"
+    assert (h.controller.window._address_row.detail_label.text()
+            == "satoshi@einundzwanzig.space")
     h.controller.window.close()
 
 
@@ -430,6 +453,10 @@ def open_member_window(h):
     return h.controller.window
 
 
+def shows(widget) -> bool:
+    return widget.isVisibleTo(widget.window())
+
+
 @pytest.mark.parametrize("outcome,done,offered", [
     (rla.ADDED, True, False),
     (rla.ALREADY, True, False),
@@ -440,33 +467,85 @@ def open_member_window(h):
 def test_each_relay_outcome_reaches_the_window(outcome, done, offered):
     h = member_harness()
     window = open_member_window(h)
-    window._relay_button.click()
+    row = window._relay_row
+    row.button.click()
     job = h.jobs[0]
     assert job.started == 1 and job.profile is h.profile
     job.finished.emit(outcome)
-    assert window._relay_result.text() == rla.outcome_message(outcome)
-    assert window._relay_button.isHidden() == done
-    assert (window._relay_button.text() == "Publish Recommended Relay List") == offered
+    # Done is said by the row's status; anything else in a note under it.
+    assert shows(row.status_label) == done and shows(row.button) != done
+    assert row.note_label.text() == ("" if done else rla.outcome_message(outcome))
+    assert (row.button.text() == "Create Relay List") == offered
     window.close()
 
 
 def test_the_recommended_list_is_published_only_after_the_click():
     h = member_harness()
     window = open_member_window(h)
-    window._relay_button.click()
+    row = window._relay_row
+    row.button.click()
     h.jobs[0].finished.emit(rla.NO_LIST)
     assert len(h.jobs) == 1                        # offered, not done
-    window._relay_button.click()
+    row.button.click()
     assert len(h.jobs) == 2 and h.jobs[1].started == 1
     h.jobs[1].finished.emit(rla.PUBLISHED)
-    assert window._relay_button.isHidden()
+    assert not shows(row.button) and row.status_label.accessibleName() == "In your relay list"
+    window.close()
+
+
+@pytest.mark.parametrize("relay_list, listed", [
+    (RelayList(write=[MEMBER_RELAY], state=LookupState.FOUND), True),
+    # The same relay, written another way.
+    (RelayList(write=["wss://NOSTR.einundzwanzig.space:443/"], state=LookupState.FOUND), True),
+    # Read from only: readers do not look for the account's notes there.
+    (RelayList(read=[MEMBER_RELAY], state=LookupState.FOUND), False),
+    (RelayList(write=["wss://relay.example"], state=LookupState.FOUND), False),
+    (None, False),                                 # not known: offered, never assumed
+])
+def test_the_window_is_told_whether_the_relay_list_has_the_members_relay(relay_list, listed):
+    lists = {MEMBER_KEY: relay_list} if relay_list is not None else {}
+    h = member_harness(relay_lists=lists)
+    window = open_member_window(h)
+    row = window._relay_row
+    assert shows(row.status_label) == listed and shows(row.button) != listed
+    window.close()
+
+
+def test_the_window_shows_the_members_storage_as_the_library_measured_it():
+    asked = []
+    h = member_harness(media_usage=lambda origin: asked.append(origin) or 2 * 1024 ** 3)
+    window = open_member_window(h)
+    assert asked and set(asked) == {MEMBER_BLOSSOM}
+    assert window._storage_row.detail_label.text().startswith("2 GB of 5 GB used")
+    window.close()
+
+
+def test_open_media_library_in_the_window_opens_the_library():
+    h = member_harness()
+    window = open_member_window(h)
+    window._storage_row.button.click()
+    assert h.libraries == 1
+    window.close()
+
+
+def test_the_window_is_told_the_year_of_the_roster_that_lists_the_member():
+    # In January, before the association rolls its roster over, last
+    # year's lists the members: the card names that year.
+    h = Harness(roster=())
+    h.nam.by_year[2025] = roster_bytes(MEMBER_KEY)
+    h.controller.start()
+    h.answer()                                     # 2026: empty
+    h.answer()                                     # 2025: lists the member
+    window = open_member_window(h)
+    assert window.page == MEMBER
+    assert window._card.title.text() == "Member 2025"
     window.close()
 
 
 def test_a_finished_relay_job_is_released():
     h = member_harness()
     window = open_member_window(h)
-    window._relay_button.click()
+    window._relay_row.button.click()
     job = h.jobs[0]
     job.finished.emit(rla.ADDED)
     flush_deletes()
@@ -490,14 +569,16 @@ def test_each_profile_address_outcome_reaches_the_window(outcome, done):
     published = []
     h.controller.profile_published.connect(published.append)
     window = open_member_window(h)
-    assert not window._profile_button.isHidden()
-    window._profile_button.click()
+    row = window._address_row
+    assert row.button.text() == "Add to Profile" and shows(row.button)
+    row.button.click()
     job = h.jobs[0]
     assert job.started == 1 and job.profile is h.profile
     assert job.address == "u0@einundzwanzig.space"
     job.finished.emit(outcome)
-    assert window._profile_result.text() == pa.outcome_message(outcome)
-    assert window._profile_button.isHidden() == done
+    # Done is said by the row's status; anything else in a note under it.
+    assert row.note_label.text() == ("" if done else pa.outcome_message(outcome))
+    assert shows(row.status_label) == done and shows(row.button) != done
     # Only a profile that changed is read again.
     assert published == ([MEMBER_KEY] if outcome == pa.SHOWN else [])
     window.close()
@@ -506,7 +587,8 @@ def test_each_profile_address_outcome_reaches_the_window(outcome, done):
 def test_the_profile_address_the_app_knows_reaches_the_window():
     h = member_harness(profile=Profile(nip05="u0@einundzwanzig.space"))
     window = open_member_window(h)
-    assert window._profile_button.isHidden()
+    assert window._address_row.status_label.accessibleName() == "On your profile"
+    assert not shows(window._address_row.button)
     window.close()
 
 
@@ -514,12 +596,12 @@ def test_a_profile_address_for_an_account_no_longer_active_is_not_written():
     h = member_harness()
     window = open_member_window(h)
     h.profile = Profile(OTHER_KEY)              # switched, window not told yet
-    window._profile_button.click()
+    window._address_row.button.click()
     assert h.jobs == []
     # The window is not left waiting: it says nothing was changed, and the
     # button can be used again.
-    assert window._profile_result.text() == pa.outcome_message(pa.FAILED)
-    assert window._profile_button.isEnabled()
+    assert window._address_row.note_label.text() == pa.outcome_message(pa.FAILED)
+    assert window._address_row.button.isEnabled()
     window.close()
 
 
@@ -578,6 +660,42 @@ def test_the_media_store_is_given_the_membership_providers(init_body):
     call = constructor(init_body, "MediaStore")
     assert attribute_argument(call, "entitled_servers") == "_entitled_blossom_servers"
     assert attribute_argument(call, "server_quota") == "_entitled_quota"
+
+
+def test_the_controller_is_given_the_storage_and_the_media_library(init_body):
+    # The membership window says how much of the members' space is used,
+    # and opens the Media Library through the command the menu has.
+    call = constructor(init_body, "MembershipController")
+    assert attribute_argument(call, "media_usage") == "_media_usage"
+    assert attribute_argument(call, "open_media_library") == "_on_nostr_media_library"
+
+
+class Store:
+    """The media store's listings and the bytes it counts on a server."""
+
+    def __init__(self, listing=None, stored=0):
+        self.listing = listing
+        self.stored = stored
+
+    def server_listings(self):
+        return {} if self.listing is None else {self.listing.origin: self.listing}
+
+    def bytes_on(self, origin):
+        return self.stored
+
+
+@pytest.mark.parametrize("listing, expected", [
+    (ServerListing(origin=MEMBER_BLOSSOM), 3 * 1024 ** 3),
+    # A listing that failed, stopped early, or never ran is a guess.
+    (ServerListing(origin=MEMBER_BLOSSOM, ok=False), None),
+    (ServerListing(origin=MEMBER_BLOSSOM, truncated=True), None),
+    (None, None),
+])
+def test_the_usage_is_what_the_media_library_last_listed_in_full(listing, expected):
+    window = SimpleNamespace(_media_store=Store(listing, 3 * 1024 ** 3))
+    assert MainWindow._media_usage(window, MEMBER_BLOSSOM + "/") == expected
+    # Before the store exists (the controller is built first), nothing.
+    assert MainWindow._media_usage(SimpleNamespace(), MEMBER_BLOSSOM) is None
 
 
 @pytest.mark.parametrize("handler", [

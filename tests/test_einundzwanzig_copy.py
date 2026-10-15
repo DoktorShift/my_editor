@@ -316,6 +316,11 @@ def _files_in(folder):
 
 @pytest.mark.parametrize("path", [
     "nostr/nip98.py",
+    "nostr/einundzwanzig.py",
+    "nostr/membership_controller.py",
+    "nostr/ui/membership_window.py",
+    "nostr/ui/membership_card.py",
+    "nostr/ui/grouped_list.py",
     *_files_in("nostr/einundzwanzig_api"),
     "tests/membership_fakes.py",
     "tests/test_nip98.py",
