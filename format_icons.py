@@ -112,6 +112,21 @@ def clear_format(color: QColor, text: str = "T") -> QIcon:
     return _icon(_sized_letter(text, 14, "x"), color)
 
 
+def microphone(color: QColor) -> QIcon:
+    """Start Dictation: a microphone on its stand."""
+    def draw(painter: QPainter, ink: QColor) -> None:
+        painter.setPen(_pen(ink))
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.drawRoundedRect(QRectF(6.5, 2.0, 5.0, 9.0), 2.5, 2.5)
+        cup = QPainterPath()
+        cup.moveTo(4.0, 8.5)
+        cup.cubicTo(4.0, 14.0, 14.0, 14.0, 14.0, 8.5)
+        painter.drawPath(cup)
+        painter.drawLine(QPointF(9.0, 13.2), QPointF(9.0, 16.0))
+        painter.drawLine(QPointF(6.5, 16.0), QPointF(11.5, 16.0))
+    return _icon(draw, color)
+
+
 def _pen(ink: QColor, width: float = 1.6) -> QPen:
     pen = QPen(ink, width)
     pen.setCapStyle(Qt.PenCapStyle.RoundCap)

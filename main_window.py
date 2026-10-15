@@ -48,11 +48,13 @@ from widgets import ElidedLabel, FindBar, LineNumberGutter, FileChangedBar, Upda
 import format_icons
 from format_toolbar import FormatToolbar, tooltip_for
 from selection_bar import SelectionBar
+from speech import Speech
 from atomic_file import (
     newline_of, read_json, read_text_as_written, save_document, save_text_document,
     with_newlines, write_json,
 )
 import diagnostics
+import dictation
 import file_paths
 import i18n
 from i18n import N_, _, ngettext, pgettext
@@ -1952,6 +1954,24 @@ class MainWindow(QMainWindow):
                     platform_keys("Ctrl+Alt+Shift+V", "Ctrl+Shift+V"),
                     keywords=(_("plain text"),)),
             triggered=self._paste_plain)
+        # Edit > Speech, as in Apple's Edit menus: the system's voice reads
+        # the selection, or the whole document (speech.py).
+        self.speech = Speech(parent=self)
+        self.act_start_speaking = add(
+            Command("edit.speech.start", _("Start Speaking"), EDIT,
+                    keywords=(_("read aloud"), _("voice"))),
+            triggered=self._start_speaking)
+        self.act_stop_speaking = add(Command("edit.speech.stop", _("Stop Speaking"), EDIT),
+                                     triggered=self.speech.stop)
+        self.act_stop_speaking.setEnabled(False)
+        self.speech.speaking_changed.connect(self.act_stop_speaking.setEnabled)
+        self.speech.failed.connect(lambda why: self.status.showMessage(why, 8000))
+        # Edit > Start Dictation…: the system's own, where it has one
+        # (dictation.py).
+        self.act_start_dictation = add(
+            Command("edit.start_dictation", _("Start Dictation…"), EDIT,
+                    keywords=(_("voice"), _("dictate"), _("microphone"))),
+            triggered=self._start_dictation) if dictation.available() else None
         self.act_delete = add(Command("edit.delete", _("Delete"), EDIT),
                               triggered=lambda: self._edit_focused("delete"))
         self.act_select_all = add(Command("edit.select_all", _("Select All"), EDIT,
@@ -2199,7 +2219,8 @@ class MainWindow(QMainWindow):
             self.act_delete, self.act_select_all, self.act_use_selection, self.act_replace,
             self.act_indent, self.act_outdent,
             self.act_bold, self.act_italic, self.act_underline, self.act_reset_format,
-            *self.act_colors, self.act_remove_color,
+            *self.act_colors, self.act_remove_color, self.act_start_speaking,
+            *([self.act_start_dictation] if self.act_start_dictation is not None else []),
         ]
         # Structure that only a document holding Markdown can carry
         # (headings, lists, links): off in plain-text tabs as well.
@@ -2684,6 +2705,12 @@ class MainWindow(QMainWindow):
         self.m_spelling.aboutToShow.connect(self._update_spelling_menu)
         self.m_substitutions = m_edit.addMenu(_("Substitutions"))
         self.m_substitutions.addAction(self.act_markdown_shortcuts)
+        self.m_speech = m_edit.addMenu(_("Speech"))
+        self.m_speech.addAction(self.act_start_speaking)
+        self.m_speech.addAction(self.act_stop_speaking)
+        if self.act_start_dictation is not None:
+            m_edit.addSeparator()
+            m_edit.addAction(self.act_start_dictation)
         # On a Mac Settings moves to the application menu; a separator left
         # here would end the Edit menu with a line.
         if sys.platform != "darwin":
@@ -2909,7 +2936,9 @@ class MainWindow(QMainWindow):
             {"undo": self.act_undo, "redo": self.act_redo,
              "bold": self.act_bold, "italic": self.act_italic, "strike": self.act_strike,
              "link": self.act_link, "bullets": self.act_bullets, "numbers": self.act_numbers,
-             "checklist": self.act_checklist, "quote": self.act_quote},
+             "checklist": self.act_checklist, "quote": self.act_quote,
+             **({"dictation": self.act_start_dictation}
+                if self.act_start_dictation is not None else {})},
             self.m_style, self.m_insert, dark=self.is_dark_theme)
         self.format_toolbar.undo_menu.aboutToShow.connect(
             lambda: self._fill_history(self.format_toolbar.undo_menu, redo=False))
@@ -5587,6 +5616,25 @@ class MainWindow(QMainWindow):
         if ed:
             ed.change_indent(delta)
             self._update_format_buttons()
+
+    def _start_speaking(self) -> None:
+        """Edit > Speech > Start Speaking: the selection, or the whole
+        document when nothing is selected, as Apple's apps read."""
+        ed = self.current_editor()
+        if ed is not None:
+            cursor = ed.textCursor()
+            self.speech.speak(cursor.selectedText() if cursor.hasSelection()
+                              else ed.toPlainText())
+
+    def _start_dictation(self) -> None:
+        """Edit > Start Dictation…: the system's dictation, into the text."""
+        ed = self.current_editor()
+        if ed is None:
+            return
+        ed.setFocus()
+        if not dictation.start():
+            self.status.showMessage(_("Dictation couldn’t be started. It can be turned on in "
+                                      "the system’s keyboard settings."), 8000)
 
     def _set_heading(self, level: int) -> None:
         ed = self.current_editor()

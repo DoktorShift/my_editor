@@ -4,7 +4,8 @@
 
 Undo and Redo, the paragraph style (Body, Heading 1 to 3), bold, italic,
 strikethrough, a link, the two kinds of list, a quote, and one Insert
-button that opens the Insert menu itself (as Pages' toolbar has). Everything
+button that opens the Insert menu itself (as Pages' toolbar has), then a
+microphone for Start Dictation where the system has dictation. Everything
 else is in the menus, and the menus hold everything; this bar repeats only
 what is used all the time, the way TextEdit's and Pages' format bars do.
 Underline has no button: Markdown and Nostr have no underline (it stays in
@@ -70,7 +71,10 @@ ICONS = {
     "bigger": lambda ink: format_icons.bigger(ink, pgettext("format button", "A")),
     "smaller": lambda ink: format_icons.smaller(ink, pgettext("format button", "A")),
     "reset": lambda ink: format_icons.clear_format(ink, pgettext("format button", "T")),
+    "dictation": format_icons.microphone,
 }
+# After Insert, where the system has it: Start Dictation, as a microphone.
+TRAILING = ("dictation",)
 
 
 def draw_icons(actions: Dict[str, QAction], dark: bool) -> None:
@@ -303,6 +307,13 @@ class FormatToolbar(QToolBar):
         self.insert_button.setAccessibleName(_("Insert"))
         self.insert_button.setToolTip(_("Insert"))
         self.addWidget(self.insert_button)
+        self.dictation_button: Optional[QToolButton] = None
+        if "dictation" in actions:
+            action = actions["dictation"]
+            self.addAction(action)
+            self.dictation_button = self.widgetForAction(action)
+            action.changed.connect(lambda a=action, b=self.dictation_button: self._describe(a, b))
+            self._describe(action, self.dictation_button)
         # The chevron that holds the buttons a narrow window has no room
         # for: Qt gives it no name, so a screen reader would say "button".
         self._insert_menu = insert_menu
@@ -409,7 +420,8 @@ class FormatToolbar(QToolBar):
 
     def set_dark(self, dark: bool) -> None:
         self._dark = dark
-        draw_icons({name: self._actions[name] for name in (*HISTORY, *LAYOUT) if name}, dark)
+        draw_icons({name: self._actions[name] for name in (*HISTORY, *LAYOUT, *TRAILING)
+                    if name in self._actions}, dark)
         ink = QColor(DARK_FG if dark else LIGHT_FG)
         self.insert_button.setIcon(format_icons.plus(ink))
         # The chevron in the theme's ink too: the style's own barely shows
