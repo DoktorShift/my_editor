@@ -339,8 +339,15 @@ class ArticleDetailsPanel(QFrame):
             # Each section's title over it, a hairline between sections.
             + f"#article_details_section {{ font-weight: 600; color: {text}; }}"
             + f"QFrame#article_details_section_line {{ background: {border}; border: none; }}"
-            + f"#article_details_share {{ color: {text}; font-weight: 600; }}"
-            + f"#article_details_share_sentence {{ color: {text}; }}"
+            # Authors: a list as a Mac's settings draw one, + and − under it.
+            + f"QTableWidget#article_details_authors {{ background: {field}; color: {text};"
+              f" border: 1px solid {border}; border-radius: 5px; outline: none; }}"
+            + "QTableWidget#article_details_authors::item { padding: 0 6px; border: none; }"
+            + f"QTableWidget#article_details_authors::item:selected {{"
+              f" background: {theme.list_selection_color(dark).name()}; color: white; }}"
+            + f"QToolButton#article_details_list_button {{ background: {field}; color: {text};"
+              f" border: 1px solid {border}; border-radius: 4px; font-size: 14px; }}"
+            + f"QToolButton#article_details_list_button:disabled {{ color: {muted}; }}"
             + f"QPushButton#article_details_link {{ border: none; background: transparent;"
               f" color: {theme.dialog_link_color(dark)}; padding: 0 2px; }}"
             + f"#article_details_scroll, #article_details_body {{ background: {background}; }}"

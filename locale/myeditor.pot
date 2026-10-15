@@ -6216,7 +6216,7 @@ msgid "Every detail is kept as written in the file: MyEditor can’t read its fr
 msgstr ""
 
 #: nostr/ui/article_details_panel.py:210
-#: nostr/ui/article_details_panel.py:465
+#: nostr/ui/article_details_panel.py:472
 #: nostr/ui/publish_article_dialog.py:440
 #: nostr/ui/stash_kind_dialog.py:418
 msgid "Article title"
@@ -6232,6 +6232,7 @@ msgid "Cover"
 msgstr ""
 
 #: nostr/ui/article_details_panel.py:237
+#: nostr/ui/authors_section.py:78
 msgid "Authors"
 msgstr ""
 
@@ -6245,22 +6246,22 @@ msgstr ""
 msgid "Kept as written in the file."
 msgstr ""
 
-#: nostr/ui/article_details_panel.py:474
+#: nostr/ui/article_details_panel.py:481
 #: nostr/ui/publish_article_dialog.py:534
 msgid "Not published yet."
 msgstr ""
 
-#: nostr/ui/article_details_panel.py:405
+#: nostr/ui/article_details_panel.py:412
 msgid "A saved or published article keeps its link name; saving it under another one makes another article."
 msgstr ""
 
-#: nostr/ui/article_details_panel.py:526
+#: nostr/ui/article_details_panel.py:533
 #: nostr/ui/publish_article_dialog.py:498
 #: nostr/ui/stash_kind_dialog.py:425
 msgid "my-article"
 msgstr ""
 
-#: nostr/ui/article_details_panel.py:472
+#: nostr/ui/article_details_panel.py:479
 #: nostr/ui/publish_article_dialog.py:532
 #, python-brace-format
 msgid "First published {moment}"
@@ -6275,7 +6276,6 @@ msgid "Change Cover…"
 msgstr ""
 
 #: nostr/ui/article_header.py:233
-#: nostr/ui/authors_section.py:76
 #: nostr/ui/cover_field.py:330
 #: nostr/ui/draft_relays_sheet.py:173
 #: nostr/ui/media_library_dialog.py:682
@@ -6321,45 +6321,59 @@ msgstr ""
 msgid "Step {number}, failed"
 msgstr ""
 
-#: nostr/ui/authors_section.py:83
-msgid "No lightning address in their profile, so they can’t be paid a share."
-msgstr ""
-
-#: nostr/ui/authors_section.py:135
+#: nostr/ui/authors_section.py:105
 #: nostr/ui/publish_article_dialog.py:481
 msgid "Add Co-Author…"
 msgstr ""
 
-#: nostr/ui/authors_section.py:149
+#: nostr/ui/authors_section.py:107
+msgid "Remove Co-Author"
+msgstr ""
+
+#: nostr/ui/authors_section.py:112
 msgid "Split Evenly"
 msgstr ""
 
-#: nostr/ui/authors_section.py:153
+#: nostr/ui/authors_section.py:116
 msgid "Give you and every co-author who can be paid an equal share of the zaps."
 msgstr ""
 
-#: nostr/ui/authors_section.py:159
+#: nostr/ui/authors_section.py:145
+msgid "Apps with zap splits pay each share; others pay you."
+msgstr ""
+
+#: nostr/ui/authors_section.py:146
 msgid "Apps that support zap splits, like Amethyst and noStrudel, pay each person their share. Other apps pay you."
 msgstr ""
 
-#: nostr/ui/authors_section.py:175
+#: nostr/ui/authors_section.py:140
+msgid "Share of the zaps"
+msgstr ""
+
+#: nostr/ui/authors_section.py:173
 msgid "You"
 msgstr ""
 
-#: nostr/ui/authors_section.py:68
-#: nostr/ui/authors_section.py:73
+#: nostr/ui/authors_section.py:187
+msgid "No lightning address in their profile, so they can’t be paid a share."
+msgstr ""
+
+#: nostr/ui/authors_section.py:228
+msgid "You keep what the others leave."
+msgstr ""
+
+#: nostr/ui/authors_section.py:240
+#: nostr/ui/authors_section.py:247
 #, python-brace-format
 msgid "Share for {name}"
 msgstr ""
 
-#: nostr/ui/authors_section.py:78
-#: nostr/ui/publish_sheet.py:241
-#: nostr/ui/tag_field.py:95
+#: nostr/ui/authors_section.py:236
 #, python-brace-format
-msgid "Remove {name}"
+msgid "{name} has no lightning address in their profile, so they can’t be paid a share."
 msgstr ""
 
-#: nostr/ui/authors_section.py:174
+#: nostr/ui/authors_section.py:172
 #, python-brace-format
 msgid "{name} · you"
 msgstr ""
@@ -9438,6 +9452,12 @@ msgstr ""
 #: nostr/ui/publish_sheet.py:217
 #, python-brace-format
 msgid "{name}, {role}"
+msgstr ""
+
+#: nostr/ui/publish_sheet.py:241
+#: nostr/ui/tag_field.py:95
+#, python-brace-format
+msgid "Remove {name}"
 msgstr ""
 
 #: nostr/ui/publish_sheet.py:382
