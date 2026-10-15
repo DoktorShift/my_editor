@@ -53,12 +53,15 @@ class AuthorsSection(QWidget):
     changed = Signal(object)
 
     def __init__(self, *, coauthors: Coauthors, own_pubkey: Callable[[], str],
-                 name_of: Callable[[str], str],
+                 own_name: Callable[[], str], name_of: Callable[[str], str],
                  pick_person: Optional[Callable[[QWidget, Callable], None]] = None,
                  parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
         self._coauthors = coauthors
         self._own_pubkey = own_pubkey
+        # Your account's name ("" for an account without one), and how
+        # anyone else is called.
+        self._own_name = own_name
         self._name_of = name_of
         self._pick_person = pick_person
         self._details = ArticleDetails()
@@ -169,9 +172,11 @@ class AuthorsSection(QWidget):
         own = self._own_pubkey()
         shares = self._coauthors.shares(details)
         self._unpaid = set(self._coauthors.unzappable(details.coauthors))
-        people: List[tuple] = [("", (_("{name} · you").format(name=self._name_of(own))
-                                     if own else _("You")),
-                                    zap_shares.author_share(shares))]
+        # You by your account's name, as the account menu says it; by your
+        # short key only while the account has none.
+        you = (_("{name} · you").format(name=self._own_name() or self._name_of(own))
+               if own else _("You"))
+        people: List[tuple] = [("", you, zap_shares.author_share(shares))]
         people += [(pubkey, self._name_of(pubkey), shares.get(pubkey, 0))
                    for pubkey, _hint in details.coauthors]
         self.table.blockSignals(True)
