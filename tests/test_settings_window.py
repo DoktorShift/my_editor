@@ -290,3 +290,74 @@ def test_where_published_posts_open_is_offered_with_nostr_and_kept():
     assert chosen == ["primal"]
     assert window.reader.accessibleName() == "Open posts on the web in"
     assert unnamed_controls(window) == []
+
+
+# -- Dictation (dictation/) -------------------------------------------------------------
+
+def dictation_window(ways, prefs=None, **kwargs):
+    from dictation.preferences import Preferences
+    chosen = [prefs or Preferences(way=ways[0] if ways else "", language="de")]
+    group, appearance = group_of(("system",), "system")
+    window = SettingsWindow(
+        appearance=appearance, languages=[],
+        choose_language=lambda code: None,
+        writing_family=lambda: "system", choose_writing_family=lambda family: None,
+        paste_choice=lambda: "ask", choose_paste=lambda value: None,
+        nostr_in_use=lambda: False, format_bar=lambda: True,
+        choose_format_bar=lambda on: None, dictation_ways=ways,
+        dictation=lambda: chosen[-1], choose_dictation=chosen.append, is_dark=False, **kwargs)
+    window._test_group = group                    # the appearance actions live with it
+    return window, chosen
+
+
+def test_dictation_settings_show_only_where_it_can_run_on_this_computer():
+    import dictation
+    for ways in ((), (dictation.SYSTEM,)):                  # a Mac: the system's alone
+        window, _chosen = dictation_window(ways)
+        assert window.dictation_model is None and window.dictation_way is None
+    window, _chosen = dictation_window((dictation.ON_DEVICE,))   # Linux: no choice of way
+    assert window.dictation_way is None and window.dictation_model.isEnabled()
+    window, _chosen = dictation_window((dictation.SYSTEM, dictation.ON_DEVICE))   # Windows
+    titles = [window.dictation_way.itemText(i) for i in range(window.dictation_way.count())]
+    assert titles == ["Windows Voice Typing", "On This Computer"]
+    assert not window.dictation_model.isEnabled()          # Voice typing has no model here
+
+
+def test_choosing_the_way_the_model_and_the_language():
+    import dictation
+    from dictation import models
+    window, chosen = dictation_window((dictation.SYSTEM, dictation.ON_DEVICE))
+    window.dictation_way.activated.emit(1)
+    assert chosen[-1].way == dictation.ON_DEVICE and window.dictation_model.isEnabled()
+    models_offered = [window.dictation_model.itemText(i)
+                      for i in range(window.dictation_model.count())]
+    assert models_offered == ["Standard (161 MB)", "More accurate (376 MB)"]
+    window.dictation_model.activated.emit(1)
+    assert chosen[-1].model == models.ACCURATE
+    language = window.dictation_language
+    assert language.itemText(0) == "Automatic" and language.currentData() == "de"
+    language.activated.emit(language.findData("fr"))
+    assert chosen[-1].language == "fr" and chosen[-1].model == models.ACCURATE
+    assert unnamed_controls(window) == []
+
+
+def test_a_downloaded_model_can_be_removed(tmp_path, monkeypatch):
+    import alerts
+    import dictation
+    from dictation import models
+    monkeypatch.setenv("HOME", str(tmp_path))
+    model = models.MODELS[models.STANDARD]
+    for file in models.files_of(model):
+        os.makedirs(os.path.dirname(models.path_of(file)), exist_ok=True)
+        with open(models.path_of(file), "wb") as f:
+            f.write(b"\0" * file.size)
+    asked = []
+    monkeypatch.setattr(alerts, "confirm_destructive",
+                        lambda *a, **k: asked.append(k["title"]) or True)
+    window, _chosen = dictation_window((dictation.ON_DEVICE,))
+    assert window.dictation_status.text() == "Downloaded."
+    assert window.dictation_remove.isVisibleTo(window)
+    window.dictation_remove.click()
+    assert asked == ["Remove the speech model?"] and not models.installed(model)
+    assert window.dictation_status.text() == "Downloaded the first time you dictate."
+    assert not window.dictation_remove.isVisibleTo(window)

@@ -37,13 +37,19 @@ from PySide6.QtWidgets import (
     QFormLayout,
     QHBoxLayout,
     QLabel,
+    QPushButton,
     QRadioButton,
     QVBoxLayout,
     QWidget,
 )
 
+import alerts
+import dictation as dictation_mod
 import fonts
 import theme
+from dictation import models as dictation_models
+from dictation.preferences import AUTOMATIC, LANGUAGES, Preferences
+from dictation.setup import size_text
 from constants import DARK_MUTED_FG, LIGHT_MUTED_FG
 from i18n import _
 from nostr import web_readers
@@ -108,6 +114,9 @@ class SettingsWindow(QDialog):
                  choose_caret_style: Callable[[str], None] = lambda value: None,
                  web_reader: Callable[[], str] = lambda: web_readers.DISCOVER,
                  choose_web_reader: Callable[[str], None] = lambda key: None,
+                 dictation_ways: Tuple[str, ...] = (),
+                 dictation: Callable[[], Preferences] = Preferences,
+                 choose_dictation: Callable[[Preferences], None] = lambda prefs: None,
                  is_dark: bool = True, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
         self.setWindowTitle(_("Settings"))
@@ -249,6 +258,12 @@ class SettingsWindow(QDialog):
         self._reader_label = self._label(_("Open posts on the web in:"), self.reader)
         form.addRow(self._reader_label, self._reader_box)
 
+        self._dictation = dictation
+        self._choose_dictation = choose_dictation
+        self.dictation_way = self.dictation_model = self.dictation_language = None
+        if dictation_mod.ON_DEVICE in dictation_ways:
+            self._add_dictation_rows(form, dictation_ways)
+
         layout = QVBoxLayout(self)
         layout.setContentsMargins(24, 22, 24, 22)
         layout.addLayout(form)
@@ -354,6 +369,108 @@ class SettingsWindow(QDialog):
         for points in size.sizes():
             self.font_size.addItem(_("{size} pt").format(size=points), points)
         self.font_size.setCurrentIndex(self.font_size.findData(size.points()))
+
+    # -- dictation -----------------------------------------------------------------
+
+    def _add_dictation_rows(self, form: QFormLayout, ways: Tuple[str, ...]) -> None:
+        """Dictation, where it can run on this computer (Windows, Linux): the
+        way, where there is a choice; the speech model, and removing it;
+        the language dictated."""
+        if len(ways) > 1:
+            self.dictation_way = QComboBox()
+            titles = {dictation_mod.SYSTEM: _("Windows Voice Typing"),
+                      dictation_mod.ON_DEVICE: _("On This Computer")}
+            for way in ways:
+                self.dictation_way.addItem(titles[way], way)
+            self.dictation_way.activated.connect(
+                lambda index: self._dictation_chosen(way=self.dictation_way.itemData(index)))
+            way_box = self._column(self.dictation_way, _(
+                "Windows Voice Typing needs the internet. On this computer, dictation works "
+                "offline after a one-time download, and your voice never leaves it."))
+            form.addRow(self._label(_("Dictation:"), self.dictation_way), way_box)
+
+        self.dictation_model = QComboBox()
+        for key, title in ((dictation_models.STANDARD, _("Standard ({size})")),
+                           (dictation_models.ACCURATE, _("More accurate ({size})"))):
+            model = dictation_models.MODELS[key]
+            size = model.size + dictation_models.VOICE_DETECTOR.size
+            self.dictation_model.addItem(title.format(size=size_text(size)), key)
+        self.dictation_model.activated.connect(
+            lambda index: self._dictation_chosen(model=self.dictation_model.itemData(index)))
+        self.dictation_status = self._help("")
+        self.dictation_remove = QPushButton(_("Remove…"))
+        self.dictation_remove.setAccessibleName(_("Remove the speech model"))
+        self.dictation_remove.clicked.connect(self._remove_dictation_model)
+        model_row = QHBoxLayout()
+        model_row.setContentsMargins(0, 0, 0, 0)
+        model_row.setSpacing(8)
+        model_row.addWidget(self.dictation_model)
+        model_row.addWidget(self.dictation_remove)
+        model_row.addStretch(1)
+        model_box = QWidget()
+        model_column = QVBoxLayout(model_box)
+        model_column.setContentsMargins(0, 0, 0, 0)
+        model_column.setSpacing(4)
+        model_column.addLayout(model_row)
+        model_column.addWidget(self.dictation_status)
+        form.addRow(self._label(_("Speech model:"), self.dictation_model), model_box)
+
+        self.dictation_language = QComboBox()
+        self.dictation_language.addItem(_("Automatic"), AUTOMATIC)
+        self.dictation_language.insertSeparator(1)
+        for code, name in LANGUAGES:
+            self.dictation_language.addItem(name, code)
+        self.dictation_language.activated.connect(lambda index: self._dictation_chosen(
+            language=self.dictation_language.itemData(index)))
+        language_box = self._column(self.dictation_language, _(
+            "The language you dictate in. Automatic hears it, but naming it writes "
+            "better."))
+        form.addRow(self._label(_("Dictation language:"), self.dictation_language),
+                    language_box)
+        self._show_dictation()
+
+    def _column(self, control: QWidget, help_text: str) -> QWidget:
+        box = QWidget()
+        column = QVBoxLayout(box)
+        column.setContentsMargins(0, 0, 0, 0)
+        column.setSpacing(4)
+        column.addWidget(control, 0, Qt.AlignLeft)
+        column.addWidget(self._help(help_text))
+        return box
+
+    def _dictation_chosen(self, **changes) -> None:
+        self._choose_dictation(self._dictation().with_(**changes))
+        self._show_dictation()
+
+    def _show_dictation(self) -> None:
+        if self.dictation_model is None:
+            return
+        prefs = self._dictation()
+        way = prefs.way
+        if self.dictation_way is not None:
+            index = self.dictation_way.findData(way)
+            self.dictation_way.setCurrentIndex(max(0, index))
+            way = self.dictation_way.currentData()
+        on_device = way == dictation_mod.ON_DEVICE or self.dictation_way is None
+        self.dictation_model.setCurrentIndex(max(0, self.dictation_model.findData(prefs.model)))
+        self.dictation_language.setCurrentIndex(
+            max(0, self.dictation_language.findData(prefs.language)))
+        for control in (self.dictation_model, self.dictation_language):
+            control.setEnabled(on_device)
+        installed = dictation_models.installed(dictation_models.MODELS[prefs.model])
+        self.dictation_status.setText(_("Downloaded.") if installed
+                                      else _("Downloaded the first time you dictate."))
+        self.dictation_remove.setVisible(installed)
+        self.dictation_remove.setEnabled(on_device)
+
+    def _remove_dictation_model(self) -> None:
+        model = dictation_models.MODELS[self._dictation().model]
+        if alerts.confirm_destructive(
+                self, title=_("Remove the speech model?"),
+                message=_("It is downloaded again the next time you dictate on this computer."),
+                action=_("Remove")):
+            dictation_models.remove(model)
+        self._show_dictation()
 
     def refresh(self) -> None:
         """Read again what can change elsewhere: whether Nostr is in use, the

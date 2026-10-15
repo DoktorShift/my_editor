@@ -33,7 +33,6 @@ keeps binary data under ~/.config/my_editor, e.g. blossom_cache).
 from __future__ import annotations
 
 import glob
-import hashlib
 import json
 import os
 import platform
@@ -47,6 +46,7 @@ import urllib.request
 import zipfile
 from dataclasses import dataclass
 
+import verified_download
 from atomic_file import read_json, write_json
 from i18n import _
 
@@ -92,8 +92,8 @@ class ToolchainError(Exception):
         self.page = page
 
 
-class Cancelled(Exception):
-    """Raised when the user cancels a running install."""
+# Raised when the user cancels a running install (the download's own).
+Cancelled = verified_download.Cancelled
 
 
 @dataclass
@@ -283,9 +283,7 @@ def knit_environment() -> dict[str, str]:
 # --------------------------------------------------------------------------- #
 
 def _check_host(url: str) -> None:
-    from urllib.parse import urlparse
-    parsed = urlparse(url)
-    if parsed.scheme != "https" or parsed.hostname not in _ALLOWED_HOSTS:
+    if not verified_download.host_allowed(url, _ALLOWED_HOSTS):
         raise ToolchainError(_("refusing non-official download URL: {url}").format(url=url))
 
 
@@ -299,39 +297,22 @@ def _fetch_text(url: str, timeout: int = 30) -> str:
 
 def _download(url: str, dest: str, progress=None, cancel=None,
               sha256: str | None = None) -> str:
-    """Stream url to dest. progress(done_bytes, total_bytes); cancel is a
-    threading.Event-like object. Verifies sha256 when given."""
+    """Stream url to dest from an official host (verified_download).
+    progress(done_bytes, total_bytes); cancel is a threading.Event-like
+    object. Verifies sha256 when given."""
     _check_host(url)
-    os.makedirs(os.path.dirname(dest), exist_ok=True)
-    req = urllib.request.Request(url, headers=_UA)
-    hasher = hashlib.sha256()
-    tmp = dest + ".part"
-    with urllib.request.urlopen(req, timeout=60) as resp:
-        _check_host(resp.geturl())
-        total = int(resp.headers.get("Content-Length") or 0)
-        done = 0
-        with open(tmp, "wb") as f:
-            while True:
-                if cancel is not None and cancel.is_set():
-                    f.close()
-                    os.unlink(tmp)
-                    raise Cancelled()
-                chunk = resp.read(256 * 1024)
-                if not chunk:
-                    break
-                f.write(chunk)
-                hasher.update(chunk)
-                done += len(chunk)
-                if progress:
-                    progress(done, total)
-    if sha256 is not None and hasher.hexdigest().lower() != sha256.lower():
-        os.unlink(tmp)
+    try:
+        return verified_download.download(url, dest, hosts=_ALLOWED_HOSTS, sha256=sha256,
+                                          progress=progress, cancel=cancel,
+                                          user_agent=_UA["User-Agent"])
+    except verified_download.NotOfficial as refused:
+        raise ToolchainError(_("refusing non-official download URL: {url}").format(
+            url=url)) from refused
+    except verified_download.ChecksumMismatch:
         raise ToolchainError(
             _("checksum mismatch for {name}; download discarded. Try again, "
               "or install manually.").format(name=os.path.basename(dest)),
-            page=R_DOWNLOAD_PAGE)
-    os.replace(tmp, dest)
-    return dest
+            page=R_DOWNLOAD_PAGE) from None
 
 
 # --------------------------------------------------------------------------- #

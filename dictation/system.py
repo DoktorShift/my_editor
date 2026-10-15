@@ -1,7 +1,6 @@
 # SPDX-FileCopyrightText: 2026 rinbal
 # SPDX-License-Identifier: AGPL-3.0-or-later
-"""Edit > Start Dictation…: the system's own dictation, into the text with
-the focus.
+"""The system's own dictation, into the text with the focus.
 
 - macOS: Dictation, which Fn pressed twice starts too. Started as the Edit
   menu's Start Dictation… of every Mac app starts it, with the
@@ -9,7 +8,8 @@ the focus.
   Edit menu by itself, so the app offers its own.
 - Windows 10 and 11: Voice typing, which Windows+H opens. Windows has no
   call to open it, so the app presses those keys, as the person would.
-- Linux: GNOME and KDE have no dictation of their own; it is not offered.
+- Linux: GNOME and KDE have no dictation of their own (dictation on this
+  computer is: on_device).
 
 The words come in as typed text through the system's input method, which
 the editor takes like any other (HtmlEditor.inputMethodEvent). Nothing is

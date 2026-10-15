@@ -88,6 +88,14 @@ else:
     # installed. The .deb recommends it (build_deb.sh).
     hiddenimports += ["spelling.enchant"]
 
+# Dictation on this computer (dictation/on_device.py), on Windows and Linux:
+# sherpa-onnx, its compiled module and ONNX Runtime beside it, imported only
+# when someone dictates. A Mac dictates with the system's own.
+dictation_binaries = []
+if sys.platform != "darwin":
+    hiddenimports += collect_submodules("sherpa_onnx")
+    dictation_binaries = collect_dynamic_libs("sherpa_onnx")
+
 # QtPdf backs the built-in PDF viewer (pdf_viewer.py) and must ship in
 # every bundle. Trim the rest and make sure the giant, unused Qt
 # WebEngine never sneaks in.
@@ -117,7 +125,7 @@ excludes = [
 a = Analysis(
     [os.path.join(ROOT, "main.py")],
     pathex=[ROOT],
-    binaries=coincurve_binaries,
+    binaries=coincurve_binaries + dictation_binaries,
     datas=datas,
     hiddenimports=hiddenimports,
     hookspath=[],
