@@ -7,7 +7,9 @@ roster (MembershipDirectory) and its refresh, what the active account is
 entitled to, the membership window and the API client behind it, and
 adding the members' relay to the account's relay list. The main window
 constructs it, hands its providers to the relay and media layers, and
-listens to one signal.
+listens to one signal. For the window's member page it also gives the
+controller how much the account keeps on the members' media server (as
+the Media Library last listed it) and the way to open the Media Library.
 
 The providers are read on every call rather than captured, because
 membership can resolve, lapse or be confirmed while the app is open:
@@ -37,10 +39,11 @@ from PySide6.QtCore import QObject, Qt, QTimer, Signal
 import url_safety
 from i18n import _
 from nostr.einundzwanzig import (
-    MEMBER_BENEFITS, MEMBER_RELAY, NO_BENEFITS, Benefits, MembershipDirectory,
+    MEMBER_BENEFITS, MEMBER_BLOSSOM, MEMBER_RELAY, NO_BENEFITS, Benefits, MembershipDirectory,
 )
 from nostr import profile_address
 from nostr.einundzwanzig_api import MembershipApi, PriceLookup, session_signer
+from nostr.outbox.policy import normalize_relay_url
 from nostr.profile_address import ProfileAddress
 from nostr.relay_list_addition import (
     DONE, NO_LIST, RecommendedRelayList, RelayListAddition, outcome_message,
@@ -85,6 +88,8 @@ class MembershipController(QObject):
         open_link: Callable[[str], None] = lambda _url: None,
         connect_signer: Callable[[], None] = lambda: None,
         show_status: Callable[[str, int], None] = lambda _text, _ms: None,
+        media_usage: Callable[[str], Optional[int]] = lambda _origin: None,
+        open_media_library: Callable[[], None] = lambda: None,
         directory: Optional[MembershipDirectory] = None,
         api_factory: Optional[Callable[[object], object]] = None,
         window_factory: Optional[Callable[..., MembershipWindow]] = None,
@@ -104,6 +109,10 @@ class MembershipController(QObject):
         self._open_link = open_link
         self._connect_signer = connect_signer
         self._show_status = show_status
+        # Bytes the account keeps on a media server, as the Media Library
+        # last listed it in full; None when that is not known.
+        self._media_usage = media_usage
+        self._open_media_library = open_media_library
         self._api_factory = api_factory or self._default_api
         self._window_factory = window_factory or MembershipWindow
         # Today's Bitcoin price, so the window can show the fee in sats, CHF
@@ -253,8 +262,8 @@ class MembershipController(QObject):
             profile = self._profile_provider()
             window = self._window_factory(
                 self._api_factory(profile), **self._identity(profile),
-                is_dark=self._is_dark(), prices=self._prices_factory(),
-                parent=self._window_parent)
+                storage_used=self.storage_used, is_dark=self._is_dark(),
+                prices=self._prices_factory(), parent=self._window_parent)
             window.setWindowFlag(Qt.Window, True)
             window.connect_requested.connect(self._on_connect_requested)
             window.link_activated.connect(self._open_link)
@@ -264,6 +273,7 @@ class MembershipController(QObject):
             window.address_saved.connect(self._on_address_saved)
             window.profile_address_requested.connect(self._on_profile_address)
             window.data_erased.connect(self._on_data_erased)
+            window.media_library_requested.connect(self._open_media_library)
             self._window = window
         window.show()
         window.raise_()
@@ -287,7 +297,27 @@ class MembershipController(QObject):
             "handle": self.directory.cached_handle(pubkey) if pubkey else None,
             "signs_locally": bool(getattr(profile, "is_local", False)),
             "profile_address": getattr(profile, "nip05", "") or "",
+            "relay_listed": self._relay_listed(pubkey),
+            # The year of the roster that lists the member: last year's in
+            # January, until the association rolls it over.
+            "member_year": self.directory.roster_year,
         }
+
+    def _relay_listed(self, pubkey: Optional[str]) -> bool:
+        """Whether the account's relay list, as last known here, has the
+        members' relay among those it writes to (where readers look for
+        its notes). A list not known is not taken to have it: the window
+        then offers to add it, which finds out."""
+        if not pubkey or self._relay_directory is None:
+            return False
+        members = normalize_relay_url(MEMBER_RELAY)
+        written = self._relay_directory.cached(pubkey).write
+        return any(normalize_relay_url(url) == members for url in written)
+
+    def storage_used(self) -> Optional[int]:
+        """Bytes the active account keeps on the members' media server, as
+        the Media Library last listed it in full; None when not known."""
+        return self._media_usage(MEMBER_BLOSSOM)
 
     def _follow_identity(self) -> None:
         """An open window speaks for the active account, whichever way that

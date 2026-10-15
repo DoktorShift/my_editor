@@ -520,12 +520,82 @@ def _draw_book(painter: QPainter, ink: QColor) -> None:
     painter.drawLine(QPointF(8.5, 6), QPointF(12.5, 6))
 
 
+# -- the membership window's glyphs --------------------------------------------
+# A row's symbol on its tile (nostr/ui/grouped_list.py), and the mark of a
+# line that says something is not available.
+
+def _draw_relay(painter: QPainter, ink: QColor) -> None:
+    """A point sending waves both ways: a relay, which carries notes to
+    readers."""
+    painter.setPen(_pen(ink, 1.5))
+    painter.setBrush(Qt.BrushStyle.NoBrush)
+    path = QPainterPath()
+    for radius in (4.2, 7.4):
+        box = QRectF(9 - radius, 9 - radius, 2 * radius, 2 * radius)
+        for start in (-38, 142):
+            path.arcMoveTo(box, start)
+            path.arcTo(box, start, 76)
+    painter.drawPath(path)
+    painter.setPen(Qt.PenStyle.NoPen)
+    painter.setBrush(ink)
+    painter.drawEllipse(QPointF(9, 9), 1.8, 1.8)
+
+
+def _draw_photo(painter: QPainter, ink: QColor) -> None:
+    """A picture in a frame, with hills and a sun: images and videos."""
+    painter.setPen(_pen(ink, 1.4))
+    painter.setBrush(Qt.BrushStyle.NoBrush)
+    painter.drawRoundedRect(QRectF(2, 3.5, 14, 11), 2, 2)
+    painter.setPen(Qt.PenStyle.NoPen)
+    painter.setBrush(ink)
+    hills = QPainterPath()
+    hills.moveTo(QPointF(3.4, 13.4))
+    hills.lineTo(QPointF(7.2, 8.8))
+    hills.lineTo(QPointF(10.1, 11.9))
+    hills.lineTo(QPointF(11.9, 10.2))
+    hills.lineTo(QPointF(14.6, 13.4))
+    hills.closeSubpath()
+    painter.drawPath(hills)
+    painter.drawEllipse(QPointF(12.2, 6.9), 1.4, 1.4)
+
+
+def _draw_at(painter: QPainter, ink: QColor) -> None:
+    """An at sign: an address like you@example.com."""
+    font = QFont()
+    font.setPixelSize(15)
+    font.setBold(True)
+    painter.setFont(font)
+    painter.setPen(ink)
+    painter.drawText(QRectF(0, -0.5, SIZE, SIZE), Qt.AlignmentFlag.AlignCenter, "@")
+
+
+def _draw_ellipsis(painter: QPainter, ink: QColor) -> None:
+    """Three dots: more."""
+    painter.setPen(Qt.PenStyle.NoPen)
+    painter.setBrush(ink)
+    for x in (4.2, 9, 13.8):
+        painter.drawEllipse(QPointF(x, 9), 1.7, 1.7)
+
+
+def _draw_info(painter: QPainter, ink: QColor) -> None:
+    """An i in a circle: a word about what can be done right now."""
+    painter.setPen(_pen(ink, 1.4))
+    painter.setBrush(Qt.BrushStyle.NoBrush)
+    painter.drawEllipse(QRectF(1.8, 1.8, 14.4, 14.4))
+    painter.drawLine(QPointF(9, 8.2), QPointF(9, 12.8))
+    painter.setPen(Qt.PenStyle.NoPen)
+    painter.setBrush(ink)
+    painter.drawEllipse(QPointF(9, 5.6), 1.1, 1.1)
+
+
 _GLYPHS = {"search": _draw_search, "pages": _draw_pages, "lock": _draw_lock,
            "video": _draw_video, "audio": _draw_audio, "document": _draw_document,
            "alert": _draw_alert, "article": _draw_article, "note": _draw_note,
            "curation": _draw_curation, "clock": _draw_clock, "text": _draw_text,
            "spreadsheet": _draw_spreadsheet, "presentation": _draw_presentation,
-           "archive": _draw_archive, "book": _draw_book}
+           "archive": _draw_archive, "book": _draw_book, "relay": _draw_relay,
+           "photo": _draw_photo, "at": _draw_at, "ellipsis": _draw_ellipsis,
+           "info": _draw_info}
 
 
 def paint(name: str, painter: QPainter, rect: QRectF, color: QColor) -> None:

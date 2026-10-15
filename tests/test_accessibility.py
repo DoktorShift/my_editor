@@ -28,6 +28,12 @@ def membership(tmp_path):
     return window()
 
 
+def membership_member(tmp_path):
+    # The member page: its rows, the card and Manage.
+    from tests.test_membership_window import window
+    return window(known_member=True, handle="hal")
+
+
 def profile(tmp_path):
     return ProfileWindow(read=lambda _done: None, save=lambda _changes, _done: None,
                          is_dark=False)
@@ -87,7 +93,7 @@ def draft_relays(tmp_path):
     return DraftRelaysSheet(Lists(["wss://drafts.example"]), is_dark=False)
 
 
-WINDOWS = [membership, profile, backup, create, restore, move_to_signer, connect, update,
+WINDOWS = [membership, membership_member, profile, backup, create, restore, move_to_signer, connect, update,
            alert, alert_with_details, shortcuts, draft_relays]
 
 

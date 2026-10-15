@@ -19,7 +19,15 @@ What must hold:
   check ends in a clear next step (Check Again, Create New Invoice).
 
   A confirmed payment confirms the membership to the window that owns the
-  benefits, and the member page names what is active.
+  benefits.
+
+  The member page says what is done at a glance: a card with the year and
+  until when the membership runs, then one row per thing MyEditor sets
+  up, each with either a status in words (only when it is done) or the
+  one button that is left, never both. What needs the membership service
+  is said to be unavailable when it cannot be reached, with Try Again,
+  rather than vanishing. The rest is in Manage; Done starts with the
+  focus.
 
   One default button, at the trailing edge; Go Back at the leading edge.
 
@@ -27,6 +35,7 @@ The API and the payment watcher are fakes with the real ones' shape; no
 network, no signer, no modal loop.
 """
 
+import datetime
 import os
 import sys
 from dataclasses import replace
@@ -37,17 +46,19 @@ import pytest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtCore import QObject, Signal  # noqa: E402
-from PySide6.QtWidgets import QApplication, QPushButton  # noqa: E402
+from PySide6.QtCore import QEvent, QObject, Qt, Signal  # noqa: E402
+from PySide6.QtWidgets import QApplication, QLabel, QPushButton  # noqa: E402
 
 from nostr import einundzwanzig_api as e21  # noqa: E402
-from nostr.einundzwanzig import JOIN_URL  # noqa: E402
+from nostr.einundzwanzig import BENEFITS_URL, JOIN_URL, MEMBER_SERVICES  # noqa: E402
 from nostr.ui import membership_window as mw  # noqa: E402
 from nostr.ui.membership_window import (  # noqa: E402
     APPLY, MEMBER, OVERVIEW, PAY, WORKING, MembershipWindow,
 )
+from tests.accessibility import out_of_tab_reach, unnamed_controls  # noqa: E402
 
 PUBKEY = "ab" * 32
+GB = 1024 ** 3
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -175,7 +186,8 @@ def invoice(*, paid=False, bolt11="lnbcrt1", checkout="https://pay.einundzwanzig
 
 
 def window(api=None, *, pubkey=PUBKEY, known_member=None, handle=None,
-           signs_locally=False, prices=None, profile_address=""):
+           signs_locally=False, prices=None, profile_address="", relay_listed=False,
+           member_year=None, storage_used=None):
     watchers = []
 
     def factory(api_, year, parent):
@@ -186,6 +198,8 @@ def window(api=None, *, pubkey=PUBKEY, known_member=None, handle=None,
     win = MembershipWindow(api if api is not None else FakeApi(), pubkey=pubkey,
                            known_member=known_member, handle=handle, is_dark=False,
                            signs_locally=signs_locally, profile_address=profile_address,
+                           relay_listed=relay_listed, member_year=member_year,
+                           storage_used=storage_used,
                            watcher_factory=factory,
                            prices=prices)
     win.watchers = watchers
@@ -200,6 +214,34 @@ def recorder(signal):
 
 def default_button(win):
     return next(b for b in win.buttons.values() if b.isDefault())
+
+
+def manage(win):
+    """Manage's commands as its menu lists them, a separator as "-"."""
+    return ["-" if action.isSeparator() else action.text()
+            for action in win._manage_menu.actions()]
+
+
+def choose(win, command):
+    """Choose ``command`` in Manage, as a click on it does."""
+    assert win.buttons["manage"].menu() is win._manage_menu
+    next(a for a in win._manage_menu.actions() if a.text() == command).trigger()
+
+
+def shows(widget) -> bool:
+    """Whether ``widget`` is shown with its page (the window itself need
+    not be on screen)."""
+    return widget.isVisibleTo(widget.window())
+
+
+def status_of(row) -> str:
+    """The words a row's status says, or "" when it shows none."""
+    return row.status_label.accessibleName() if shows(row.status_label) else ""
+
+
+def button_of(row) -> str:
+    """The title of a row's button, or "" when it has none."""
+    return row.button.text() if shows(row.button) else ""
 
 
 def to_apply(win, api):
@@ -271,15 +313,24 @@ def test_the_overview_links_to_the_associations_own_list():
 
 
 def test_the_member_page_points_to_the_services_set_up_elsewhere():
-    from nostr.einundzwanzig import BENEFITS_URL
     win = window(known_member=True)
-    shown = labels(win._pages[MEMBER])
-    assert ("Also yours: Lightning watchtower, Community group, Buzz (experimental)."
-            in shown)
+    row = win._more_row
+    assert row.detail_label.text() == ("Lightning watchtower, community group and Buzz "
+                                       "(in testing) are set up on the association’s "
+                                       "website.")
+    assert status_of(row) == ""              # nothing here is done in MyEditor
+    assert row.button.accessibleName() == "Open Guide"
+    assert "browser" in row.button.accessibleDescription()
     opened = recorder(win.link_activated)
-    [b for b in win._pages[MEMBER].findChildren(QPushButton)
-     if b.text() == "Set Up on the EINUNDZWANZIG Website"][0].click()
+    row.button.click()
     assert opened == [(BENEFITS_URL,)]
+    assert win.result() == 0                       # it opens the guide, and stays open
+
+
+def test_the_sentence_names_every_service_set_up_elsewhere():
+    # The sentence names them in words of its own: a service the
+    # association adds, or one MyEditor starts to set up, changes it.
+    assert [s.key for s in MEMBER_SERVICES if not s.in_app] == ["watchtower", "group", "buzz"]
 
 
 def test_the_fee_is_shown_in_sats_then_francs_then_euros():
@@ -345,9 +396,39 @@ def test_continue_waits_until_the_service_has_answered():
     assert "config" in api.names()
 
 
-def test_a_member_page_hides_what_needs_the_service_when_it_has_no_key():
+def test_without_the_service_the_member_page_says_what_is_not_available():
+    # The service has no key, or cannot be reached: what needs it is not
+    # offered, and the page says so instead of letting it vanish.
     win = window(FakeApi(False), known_member=True)
-    assert win._name_button.isHidden() and win._export_link.isHidden()
+    assert shows(win._service_line)
+    assert win._service_line.label.text() == ("Choosing an address, receipts and data "
+                                              "export aren’t available right now.")
+    assert win._address_row.detail_label.text() == "Not chosen yet"
+    assert button_of(win._address_row) == "" and status_of(win._address_row) == ""
+    assert "manage" not in win.buttons             # nothing in it applies
+
+
+def test_try_again_asks_the_service_again_and_brings_back_what_needs_it():
+    api = FakeApi(False, answer_later=True)
+    win = window(api, known_member=True, handle="hal")
+    api.pending_check()
+    assert shows(win._service_line)
+    assert manage(win) == ["Copy Nostr Address"]
+    retry = win._retry_link
+    assert retry.text() == "Try Again"
+    api._service = True                            # reachable again
+    retry.click()
+    assert api.names().count("check_service") == 2
+    assert retry.text() == "Checking…" and not retry.isEnabled()
+    api.pending_check()
+    assert not shows(win._service_line)
+    assert "Export My Data…" in manage(win)
+
+
+def test_a_build_without_a_service_does_not_offer_to_try_again():
+    win = window(FakeApi(None), known_member=True)
+    assert shows(win._service_line)
+    assert not shows(win._retry_link)
 
 
 def test_a_known_member_goes_straight_to_what_is_active():
@@ -355,8 +436,58 @@ def test_a_known_member_goes_straight_to_what_is_active():
     win = window(api, known_member=True, handle="satoshi")
     assert win.page == MEMBER
     assert api.names() == ["check_service", "config"]
-    assert win._name_detail.text() == "satoshi@einundzwanzig.space"
-    assert not win._details_link.isHidden()   # details cost a signature, so on request
+    assert win._address_row.detail_label.text() == "satoshi@einundzwanzig.space"
+    assert not shows(win._service_line)
+    # Details cost a signature, so they come on request.
+    assert "Membership Details" in manage(win)
+
+
+def test_the_member_page_opens_on_the_card_not_a_title():
+    win = window(known_member=True, handle="satoshi", member_year=2026)
+    card = win._card
+    assert card.brand.text() == "EINUNDZWANZIG"
+    assert card.title.text() == "Member 2026"
+    assert card.address.text() == "satoshi@einundzwanzig.space"
+    assert card.status.text() == "Active · until December 31, 2026"
+    # Read with a pause, not as "middle dot".
+    assert card.status.accessibleName() == "Active, until December 31, 2026"
+    # The window's title names the window; the page does not say it again.
+    assert not [label for label in win._pages[MEMBER].findChildren(QLabel)
+                if label.objectName() == "title"]
+    assert win._note.text() == ("Membership runs for a calendar year. You renew it "
+                                "yourself; nothing is charged automatically.")
+
+
+def test_the_card_never_shows_a_key():
+    win = window(known_member=True)
+    assert not shows(win._card.address)
+    texts = " ".join(label.text() for label in win._card.findChildren(QLabel))
+    assert PUBKEY not in texts and "npub" not in texts
+
+
+def test_the_card_names_the_year_the_membership_is_known_for():
+    # The year the association says is paid, else the year of the roster
+    # that lists the member, else this one.
+    assert window(known_member=True)._card.title.text() == (
+        f"Member {datetime.date.today().year}")
+    api = FakeApi()
+    win = window(api, known_member=True, member_year=2025)
+    assert win._card.title.text() == "Member 2025"
+    choose(win, "Membership Details")
+    api.last("me").ok(status(e21.STATUS_MEMBER, year=2027, paid=True))
+    assert win.page == MEMBER
+    assert win._card.title.text() == "Member 2027"
+    assert win._card.status.text() == "Active · until December 31, 2027"
+    assert win._note.text() == "Your membership is paid for 2027."
+
+
+def test_a_fee_year_not_paid_yet_does_not_move_the_card():
+    # In December the association may already collect next year's fee.
+    api = FakeApi()
+    win = window(api, known_member=True, member_year=2026)
+    choose(win, "Membership Details")
+    api.last("me").ok(status(e21.STATUS_MEMBER, year=2027, paid=False))
+    assert win._card.title.text() == "Member 2026"
 
 
 # -- the default button sits where macOS puts it ----------------------------------
@@ -602,9 +733,11 @@ def test_a_confirmed_payment_confirms_the_membership():
                              receipt="https://pay.einundzwanzig.space/r/1"))
     assert confirmed == [(PUBKEY,)]
     assert win.page == MEMBER
-    assert win._member_title.text() == "You’re a Member"
-    assert "paid for 2026" in win._member_subtitle.text()
-    assert not win._receipt_link.isHidden()
+    # Welcomed once, in place of how membership runs; the card says the rest.
+    assert win._note.text() == ("Welcome to EINUNDZWANZIG. Thank you for supporting "
+                                "the community.")
+    assert win._card.title.text() == "Member 2026"
+    assert manage(win)[0] == "Receipt for 2026"
 
 
 def test_closing_the_window_stops_checking():
@@ -618,13 +751,112 @@ def test_closing_the_window_stops_checking():
     assert api.canceled >= 1
 
 
-# -- being a member -----------------------------------------------------------------------
+# -- being a member: the members' relay ------------------------------------------------
+
+def test_a_relay_list_with_the_members_relay_is_said_to_have_it():
+    win = window(known_member=True, relay_listed=True)
+    row = win._relay_row
+    assert row.detail_label.text() == ("Readers find your notes and articles at "
+                                       "nostr.einundzwanzig.space.")
+    assert status_of(row) == "In your relay list"
+    assert row.status_label.text() == "✓ In your relay list"   # the mark, never alone
+    assert button_of(row) == ""
+
+
+def test_adding_the_relay_is_asked_of_the_window_and_then_said_to_be_done():
+    win = window(known_member=True)
+    row = win._relay_row
+    asked = recorder(win.add_relay_requested)
+    assert button_of(row) == "Add" and status_of(row) == ""
+    row.button.click()
+    assert asked == [()]
+    assert not row.button.isEnabled()
+    assert row.note_label.text().startswith("Adding…")
+    win.set_relay_result("Added to your relay list.", done=True)
+    assert status_of(row) == "In your relay list" and button_of(row) == ""
+    assert not shows(row.note_label)               # the status says it
+
+
+def test_a_signer_account_is_told_where_to_look():
+    win = window(FakeApi(), known_member=True)
+    win._relay_row.button.click()
+    assert "signer app" in win._relay_row.note_label.text()
+    local = window(FakeApi(), known_member=True, signs_locally=True)
+    local._relay_row.button.click()
+    assert "signer" not in local._relay_row.note_label.text().lower()
+
+
+def test_no_relay_list_offers_to_create_the_recommended_one_on_request():
+    win = window(known_member=True)
+    row = win._relay_row
+    asked = recorder(win.add_relay_requested)
+    publish = recorder(win.publish_relay_list_requested)
+    row.button.click()
+    win.set_relay_result("You don’t have a relay list yet.", offer_list=True)
+    assert publish == []                           # never without a click
+    assert button_of(row) == "Create Relay List" and row.button.isEnabled()
+    assert row.note_label.text() == "You don’t have a relay list yet."
+    row.button.click()
+    assert publish == [()] and asked == [()]
+    assert row.note_label.text().startswith("Publishing…")
+
+
+def test_a_list_that_could_not_be_read_offers_to_try_again():
+    win = window(known_member=True)
+    row = win._relay_row
+    asked = recorder(win.add_relay_requested)
+    row.button.click()
+    win.set_relay_result("Try again later.")
+    assert button_of(row) == "Add" and row.button.isEnabled()
+    assert row.note_label.text() == "Try again later."
+    row.button.click()
+    assert asked == [(), ()]
+
+
+# -- being a member: media storage -------------------------------------------------------
+
+def test_storage_says_the_allowance_until_the_library_has_measured_it():
+    win = window(known_member=True)
+    assert win._storage_row.detail_label.text() == ("5 GB for images and videos · up to "
+                                                    "1 GB per file")
+    assert not shows(win._usage_bar)
+
+
+def test_storage_says_what_is_used_as_the_library_last_listed_it():
+    used = {"bytes": int(1.2 * GB)}
+    win = window(known_member=True, storage_used=lambda: used["bytes"])
+    assert win._storage_row.detail_label.text() == ("1.2 GB of 5 GB used · up to 1 GB "
+                                                    "per file")
+    assert win._storage_row.detail_label.accessibleName() == (
+        "1.2 GB of 5 GB used, up to 1 GB per file")
+    bar = win._usage_bar
+    assert shows(bar) and bar.value() == 240 and bar.maximum() == 1000
+    assert bar.accessibleName() == "Storage used"
+    # Read again whenever the window comes back to the front (from the
+    # Media Library, say), so it shows what the library listed meanwhile.
+    used["bytes"] = int(4.6 * GB)
+    QApplication.sendEvent(win, QEvent(QEvent.Type.WindowActivate))
+    assert win._storage_row.detail_label.text().startswith("4.6 GB of 5 GB used")
+    assert bar.property("tone") == "full"           # said in the numbers, and in red
+
+
+def test_open_media_library_asks_for_the_library():
+    win = window(known_member=True)
+    asked = recorder(win.media_library_requested)
+    assert button_of(win._storage_row) == "Open Media Library"
+    win._storage_row.button.click()
+    assert asked == [()]
+
+
+# -- being a member: the Nostr address ---------------------------------------------------
 
 def test_choosing_an_address_later_sends_only_the_address():
     api = FakeApi()
     win = window(api, known_member=True)
-    assert win._name_detail.text() == "Not chosen yet."
-    win._name_button.click()
+    row = win._address_row
+    assert row.detail_label.text() == "Not chosen yet"
+    assert button_of(row) == "Choose…"
+    row.button.click()
     assert win.page == APPLY
     assert win._statutes_box.isHidden() and win._email_row.isHidden()
     send = win.buttons["send"]
@@ -634,13 +866,14 @@ def test_choosing_an_address_later_sends_only_the_address():
     assert api.last("apply").kw == {"statutes_accepted": e21.UNSET, "nip05_handle": "hal"}
     api.last("apply").ok(status(e21.STATUS_MEMBER, paid=True))
     assert win.page == MEMBER
-    assert win._name_detail.text() == "hal@einundzwanzig.space"
+    assert row.detail_label.text() == "hal@einundzwanzig.space"
+    assert row.detail_label.textInteractionFlags() & Qt.TextInteractionFlag.TextSelectableByMouse
+    assert row.note_label.text().startswith("Your Nostr address is saved.")
+    assert win._card.address.text() == "hal@einundzwanzig.space"
 
-
-# -- the Nostr address on the profile -------------------------------------------------
 
 def choose_address(win, api, name="hal"):
-    win._name_button.click()
+    win._address_row.button.click()
     win._handle_edit.setText(name)
     win.buttons["send"].click()
     api.last("apply").ok(status(e21.STATUS_MEMBER, paid=True))
@@ -658,41 +891,45 @@ def test_a_chosen_address_is_offered_for_the_profile_once(questions):
     assert [b.label for b in asked["buttons"]] == ["Not Now", "Show on Profile"]
     assert shown == []                                   # Not Now sends nothing
     # Not Now leaves the way to change one's mind on the member page.
-    assert not win._profile_button.isHidden() and win._profile_button.isEnabled()
-    win._profile_button.click()
+    row = win._address_row
+    assert button_of(row) == "Add to Profile" and row.button.isEnabled()
+    row.button.click()
     assert shown == [("hal@einundzwanzig.space",)]
     assert len(questions.kw) == 1
 
 
-def test_saying_yes_shows_the_address_and_the_result(questions):
+def test_saying_yes_shows_the_address_and_then_says_it_is_there(questions):
     questions.answer = True
     api = FakeApi()
     win = window(api, known_member=True)
     shown = recorder(win.profile_address_requested)
     choose_address(win, api)
+    row = win._address_row
     assert shown == [("hal@einundzwanzig.space",)]
-    assert "Updating your profile" in win._profile_result.text()
-    assert "signer app" in win._profile_result.text()
-    assert not win._profile_button.isEnabled()
+    assert "Updating your profile" in row.note_label.text()
+    assert "signer app" in row.note_label.text()
+    assert not row.button.isEnabled()
     win.set_profile_address_result("Your profile shows it now.", done=True)
-    assert win._profile_button.isHidden()
-    assert win._profile_result.text() == "Your profile shows it now."
+    assert status_of(row) == "On your profile" and button_of(row) == ""
+    assert not shows(row.note_label)               # the status says it
 
 
 def test_a_failed_attempt_can_be_tried_again():
     win = window(known_member=True, handle="hal")
+    row = win._address_row
     shown = recorder(win.profile_address_requested)
-    win._profile_button.click()
+    row.button.click()
     win.set_profile_address_result("Your profile wasn’t changed. Try again in a moment.")
-    assert win._profile_button.isEnabled() and not win._profile_button.isHidden()
-    win._profile_button.click()
+    assert button_of(row) == "Add to Profile" and row.button.isEnabled()
+    assert row.note_label.text() == "Your profile wasn’t changed. Try again in a moment."
+    row.button.click()
     assert len(shown) == 2
 
 
-def test_a_profile_that_shows_the_address_is_not_offered_it(questions):
+def test_a_profile_that_shows_the_address_is_said_to_show_it(questions):
     win = window(known_member=True, handle="hal", profile_address="HAL@einundzwanzig.space")
-    assert win._profile_button.isHidden()
-    assert win._profile_result.text() == "Your profile shows this address."
+    row = win._address_row
+    assert status_of(row) == "On your profile" and button_of(row) == ""
     assert questions.kw == []
 
 
@@ -701,11 +938,6 @@ def test_another_address_on_the_profile_is_named_before_it_is_replaced(questions
     win = window(api, known_member=True, profile_address="hal@example.com")
     choose_address(win, api)
     assert "It replaces hal@example.com." in questions.kw[0]["message"]
-
-
-def test_without_an_address_nothing_is_offered():
-    win = window(known_member=True)
-    assert win._profile_button.isHidden()
 
 
 def test_joining_with_an_address_offers_it_for_the_profile(questions):
@@ -719,21 +951,71 @@ def test_joining_with_an_address_offers_it_for_the_profile(questions):
     assert len(questions.kw) == 1
 
 
-def test_adding_the_relay_is_asked_of_the_window_and_its_result_shown():
-    win = window(known_member=True)
-    asked = recorder(win.add_relay_requested)
-    win._relay_button.click()
-    assert asked == [()]
-    assert not win._relay_button.isEnabled()
-    win.set_relay_result("Added to your relay list.", done=True)
-    assert win._relay_result.text() == "Added to your relay list."
-    assert win._relay_button.isHidden()
+def test_a_saved_address_is_told_to_the_app():
+    api = FakeApi()
+    win = window(api, known_member=True)
+    saved = recorder(win.address_saved)
+    choose_address(win, api)
+    assert saved == [(PUBKEY, "hal")]
+
+
+# -- being a member: Manage and Done ------------------------------------------------------
+
+def test_manage_holds_what_applies_with_delete_last_and_apart():
+    win = window(known_member=True, handle="hal")
+    assert manage(win) == ["Membership Details", "Change Nostr Address…",
+                           "Copy Nostr Address", "-", "Export My Data…", "Delete My Data…"]
+    button = win.buttons["manage"]
+    assert button.text() == "Manage" and not button.isDefault()
+    row = win._button_row
+    widgets = [row.itemAt(i).widget() for i in range(row.count()) if row.itemAt(i).widget()]
+    assert widgets[0] is button and widgets[-1] is win.buttons["done"]
+
+
+def test_change_nostr_address_chooses_another_one():
+    api = FakeApi()
+    win = window(api, known_member=True, handle="hal")
+    choose(win, "Change Nostr Address…")
+    assert win.page == APPLY and win.buttons["send"].text() == "Save Address"
+
+
+def test_copy_nostr_address_puts_it_on_the_clipboard(qt_app):
+    win = window(known_member=True, handle="hal")
+    choose(win, "Copy Nostr Address")
+    assert qt_app.clipboard().text() == "hal@einundzwanzig.space"
+
+
+def test_the_receipt_is_offered_once_the_association_named_it():
+    api = FakeApi()
+    win = window(api, known_member=True)
+    choose(win, "Membership Details")
+    api.last("me").ok(status(e21.STATUS_MEMBER, paid=True,
+                             receipt="https://pay.einundzwanzig.space/r/1"))
+    assert manage(win)[0] == "Receipt for 2026"
+    assert "Membership Details" not in manage(win)
+    opened = recorder(win.link_activated)
+    choose(win, "Receipt for 2026")
+    assert opened == [("https://pay.einundzwanzig.space/r/1",)]
+
+
+def test_membership_details_come_back_to_the_member_page():
+    # Cancel and failure from the member page's details go back there,
+    # not to the join page.
+    api = FakeApi()
+    win = window(api, known_member=True)
+    choose(win, "Membership Details")
+    assert win.page == WORKING
+    win.buttons["cancel"].click()
+    assert win.page == MEMBER
+    choose(win, "Membership Details")
+    api.last("me").fail(e21.ApiError(e21.ErrorCode.SIGNER_UNREACHABLE))
+    assert win.page == MEMBER
 
 
 def test_deleting_data_asks_first_and_returns_to_the_start():
     api = FakeApi()
     win = window(api, known_member=True)
-    win._erase_link.click()
+    choose(win, "Delete My Data…")
     api.last("erase").ok(SimpleNamespace(erased=True, retained_payments=1))
     assert win.page == OVERVIEW
     assert "deleted" in win._overview_note.text()
@@ -746,7 +1028,7 @@ def test_deleting_data_says_what_happens_and_tells_the_app(monkeypatch):
     erased = recorder(win.data_erased)
     monkeypatch.setattr(mw, "confirm_destructive",
                         lambda parent, **kw: seen.append(kw) or True)
-    win._erase_link.click()
+    choose(win, "Delete My Data…")
     assert "deletes the personal details of your membership" in seen[0]["message"]
     assert "Fees you paid stay on record for bookkeeping." in seen[0]["message"]
     assert erased == []                            # nothing is gone until it answers
@@ -754,29 +1036,47 @@ def test_deleting_data_says_what_happens_and_tells_the_app(monkeypatch):
     assert erased == [(PUBKEY,)]
 
 
-def test_a_saved_address_is_told_to_the_app():
+def test_exported_data_is_saved_where_the_person_says(monkeypatch, tmp_path):
     api = FakeApi()
     win = window(api, known_member=True)
-    saved = recorder(win.address_saved)
-    win._name_button.click()
-    win._handle_edit.setText("hal")
-    win.buttons["send"].click()
-    api.last("apply").ok(status(e21.STATUS_MEMBER, paid=True))
-    assert saved == [(PUBKEY, "hal")]
+    target = tmp_path / "membership.json"
+    monkeypatch.setattr(mw.QFileDialog, "getSaveFileName",
+                        staticmethod(lambda *a, **k: (str(target), "")))
+    choose(win, "Export My Data…")
+    api.last("export_data").ok(SimpleNamespace(document={"membership_status": "member"}))
+    assert '"membership_status": "member"' in target.read_text(encoding="utf-8")
+    assert win.page == MEMBER and win._note.text() == "Your membership data is saved."
 
 
-def test_membership_details_come_back_to_the_member_page():
-    # Cancel and failure from the member page's details go back there,
-    # not to the join page.
-    api = FakeApi()
-    win = window(api, known_member=True)
-    win._details_link.click()
-    assert win.page == WORKING
-    win.buttons["cancel"].click()
-    assert win.page == MEMBER
-    win._details_link.click()
-    api.last("me").fail(e21.ApiError(e21.ErrorCode.SIGNER_UNREACHABLE))
-    assert win.page == MEMBER
+def test_done_starts_with_the_focus_and_nothing_else_looks_chosen():
+    win = window(known_member=True, handle="hal")
+    assert win.focusWidget() is win.buttons["done"]
+    assert win.buttons["done"].isDefault()
+    assert sum(b.isDefault() for b in win._pages[MEMBER].findChildren(QPushButton)) == 0
+
+
+def test_a_check_mark_says_only_what_is_done():
+    win = window(known_member=True, handle="hal")     # nothing done yet
+    shown = [label.text() for label in win._pages[MEMBER].findChildren(QLabel)
+             if shows(label)]
+    assert not any("✓" in text for text in shown)
+
+
+def test_every_control_of_the_member_page_is_named_and_in_reach():
+    win = window(known_member=True, handle="hal")
+    assert unnamed_controls(win) == []
+    assert out_of_tab_reach(win) == []
+
+
+def test_the_member_page_fits_the_window_without_scrolling(qt_app):
+    win = window(known_member=True, handle="hal", storage_used=lambda: GB)
+    win.show()
+    qt_app.processEvents()
+    try:
+        assert win._scroll.verticalScrollBar().maximum() == 0
+        assert win.buttons["done"].isVisible()
+    finally:
+        win.close()
 
 
 def test_an_account_that_signs_here_is_not_sent_to_a_signer_app():
@@ -789,39 +1089,6 @@ def test_an_account_that_signs_here_is_not_sent_to_a_signer_app():
     api.last("create_invoice").ok(invoice())
     default_button(win).click()                    # I've Paid
     assert "signer" not in win._pay_status.text().lower()
-
-
-def test_a_signer_account_is_told_where_to_look():
-    win = window(FakeApi(), known_member=True)
-    win._relay_button.click()
-    assert "signer app" in win._relay_result.text()
-    local = window(FakeApi(), known_member=True, signs_locally=True)
-    local._relay_button.click()
-    assert "signer" not in local._relay_result.text().lower()
-
-
-def test_no_relay_list_offers_the_recommended_one_on_request():
-    win = window(known_member=True)
-    asked = recorder(win.add_relay_requested)
-    publish = recorder(win.publish_relay_list_requested)
-    win._relay_button.click()
-    win.set_relay_result("You don’t have a relay list yet.", offer_list=True)
-    assert publish == []                           # never without a click
-    assert win._relay_button.text() == "Publish Recommended Relay List"
-    assert win._relay_button.isEnabled() and not win._relay_button.isHidden()
-    win._relay_button.click()
-    assert publish == [()] and asked == [()]
-
-
-def test_a_list_that_could_not_be_read_offers_to_try_again():
-    win = window(known_member=True)
-    asked = recorder(win.add_relay_requested)
-    win._relay_button.click()
-    win.set_relay_result("Try again later.")
-    assert win._relay_button.text() == "Add to My Relay List"
-    assert win._relay_button.isEnabled()
-    win._relay_button.click()
-    assert asked == [(), ()]
 
 
 def test_once_paid_the_invoice_and_its_buttons_go_away():
@@ -899,9 +1166,10 @@ def test_the_window_owns_its_client_and_lets_go_of_a_replaced_one(qt_app):
 
 def test_no_text_in_the_window_uses_an_em_dash():
     api = FakeApi()
-    win = window(api, known_member=True)
+    win = window(api, known_member=True, handle="hal")
     texts = [w.text() for w in win.findChildren(QPushButton)]
     texts += [w.text() for w in win.findChildren(mw.QLabel)]
+    texts += manage(win)
     assert all("\u2014" not in t for t in texts)
 
 
@@ -946,16 +1214,18 @@ def test_a_page_is_never_cut_off_at_the_side(long_note):
     win.close()
 
 
-def test_the_data_links_wrap_whole_and_delete_is_said_in_red(qt_app):
-    """German link titles clipped at both ends of one row; they wrap now.
-    Deleting the membership data is said in the destructive red."""
-    win = window(FakeApi(), known_member=True)
+def test_no_words_on_the_member_page_are_cut_off(qt_app):
+    """German words once clipped on this page: every button and status keeps
+    its words whole, and a row's line wraps instead."""
+    win = window(FakeApi(), known_member=True, handle="hal")
     win.show()
     qt_app.processEvents()
     try:
-        for link in (win._details_link, win._export_link, win._erase_link):
-            if link.isVisible():
-                assert link.width() >= link.sizeHint().width(), link.text()
-        assert win._erase_link.property("tone") == "destructive"
+        for row in (win._relay_row, win._storage_row, win._address_row, win._more_row):
+            for widget in (row.button, row.status_label):
+                if widget.isVisible():
+                    assert widget.width() >= widget.sizeHint().width(), widget.text()
+        manage = win.buttons["manage"]
+        assert manage.width() >= manage.sizeHint().width()
     finally:
         win.close()

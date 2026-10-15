@@ -279,6 +279,7 @@ _PUBLIC_PROFILE_PHRASES = {
         r"\bNostr profile",                  # No Nostr profile is published at ...
         r"\bedit profile",                   # Edit Profile..., the window's title
         r"\bon profile",                     # Show on Profile
+        r"\badd to profile",                 # Add to Profile (the Nostr address)
         r"\bprofile saved",                  # Profile saved.
         r"\bhave a profile",                 # You don't have a profile yet.
         r"\binto a profile",                 # (a secret key) never goes into a profile
@@ -291,6 +292,7 @@ _PUBLIC_PROFILE_PHRASES = {
         r"\bin ein Profil",                  # kommt nie in ein Profil (a secret key)
         r"Nostr-Profil",
         r"\bProfil (?:bearbeiten|gespeichert|wird)",
+        r"\bzum Profil hinzufügen",          # Add to Profile (the Nostr address)
         r"\bProfilbild",
         r"^Dieses Profil lässt sich hier nicht bearbeiten$",
         r"bsky\.app/profile/",
@@ -352,6 +354,8 @@ def test_the_german_texts_speak_the_glossarys_words_too():
     ("Edit Profile…", "en", False), ("Profil bearbeiten …", "de", False),
     ("Dein Signer", "de", True), ("deine Signer-Apps", "de", False),
     ("Kind 1 when published.", "en", True), ("a short note (kind 1)", "en", True),
+    ("Add to Profile", "en", False), ("Zum Profil hinzufügen", "de", False),
+    ("Switch to profile", "en", True), ("Zum Profil wechseln", "de", True),
     ("Published as a note.", "en", False),
 ])
 def test_the_glossary_rules_read_both_languages_alike(text, language, off):

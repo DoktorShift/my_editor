@@ -79,6 +79,9 @@ ButtonSpec = Tuple[str, str, str, Union[Callable[[], None], QMenu]]
 # trailing edge, in the room the button's padding keeps for it.
 PULL_DOWN_ARROW_END = 12
 
+# The transparent edge around a link's words, where its focus ring shows.
+LINK_EDGE = 2
+
 SECRET_CLIPBOARD_SECONDS = 60
 
 
@@ -135,7 +138,7 @@ def stylesheet(is_dark: bool) -> str:
         padding: 5px {arrow_room - 1}px 5px 13px;
     }}
     QPushButton#link {{
-        border: 2px solid transparent; border-radius: 3px; background: transparent;
+        border: {LINK_EDGE}px solid transparent; border-radius: 3px; background: transparent;
         color: {link}; padding: 0px; min-width: 0;
     }}
     QPushButton#link:hover {{ text-decoration: underline; }}

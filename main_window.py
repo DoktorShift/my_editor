@@ -712,7 +712,9 @@ class MainWindow(QMainWindow):
         # has no benefits, which is the same state as not being a member.
         # The controller owns the roster, its refresh, the membership
         # window and its client; this window only hands its providers on
-        # (see _entitled_relays and the three below it).
+        # (see _entitled_relays and the three below it), and what the
+        # membership window shows of the media: the space used, and the
+        # Media Library itself.
         self._membership = MembershipController(
             profile_provider=lambda: self._profile_store.default(),
             relay_pool=self._relay_pool,
@@ -722,6 +724,8 @@ class MainWindow(QMainWindow):
             open_link=self._open_external,
             connect_signer=self._on_nostr_connect,
             show_status=self.status.showMessage,
+            media_usage=self._media_usage,
+            open_media_library=self._on_nostr_media_library,
             parent=self,
         )
         self._membership.benefits_changed.connect(self._on_membership_benefits_changed)
@@ -7305,6 +7309,20 @@ class MainWindow(QMainWindow):
     def _entitled_quota(self, origin: str):
         """The space a membership gives on its media server, in bytes."""
         return self._membership.quota(origin)
+
+    def _media_usage(self, origin: str):
+        """Bytes the active account keeps on ``origin``, as the Media
+        Library last listed that server; None when that listing failed,
+        stopped early or never ran (a number from it would be a guess), and
+        before the store exists (the controller asking is built first)."""
+        store = getattr(self, "_media_store", None)
+        if store is None:
+            return None
+        origin = url_safety.origin_of(origin)
+        listing = store.server_listings().get(origin)
+        if listing is None or not listing.ok or listing.truncated:
+            return None
+        return store.bytes_on(origin)
 
     def _on_membership_benefits_changed(self) -> None:
         """The active account's benefits changed (resolved, lapsed,
