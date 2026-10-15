@@ -100,6 +100,12 @@ NO_SHORTCUT: Tuple[Tuple[str, str, str], ...] = (
     ("view.toolbar", "other",
      "Set once and remembered; only the Mac has a convention for it (Option-Command-T)."),
     ("view.monospace_writing", "all", "A look preference, set once and remembered."),
+    ("format.bigger", "all",
+     "Option-Command-0 to 3 (Ctrl+0 to 3) choose each style; Bigger and Smaller step "
+     "through them from the format bar and the menu."),
+    ("format.smaller", "all",
+     "Option-Command-0 to 3 (Ctrl+0 to 3) choose each style; Bigger and Smaller step "
+     "through them from the format bar and the menu."),
     ("view.actual_size", "other",
      "Ctrl+0 is Body there, as in LibreOffice; Zoom Out and Zoom In step back to it, and "
      "Settings shows the size."),

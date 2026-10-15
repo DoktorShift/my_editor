@@ -4,8 +4,11 @@
 
 When a selection made with the pointer ends (a drag, a double or a triple
 click), a small bar shows centred above its first line, as the iPad's edit
-menu and Word's mini toolbar do: the paragraph style pop-up (Format >
-Style), Bold, Italic, Strikethrough, Code and Link. They are the window's
+menu and Word's mini toolbar do. The paragraphs: the style pop-up (Format >
+Style), Bigger and Smaller, and Quote; the words: Bold, Italic,
+Strikethrough and Code; then Link, and Clear Formatting. Bigger and Smaller
+size the text as its style (Markdown and Nostr keep no size for words: Notes'
+styles and Medium's large and small T are the pattern). They are the window's
 own commands (commands.py), so their checks, their dimming and what they
 do are the menus' and the toolbar's. A selection made with the keyboard
 shows none: the keyboard has the commands' keys.
@@ -50,8 +53,13 @@ from format_toolbar import (
 from i18n import _, pgettext
 from popup_placement import place_above
 
-# Its buttons after the style pop-up, in order (format_toolbar.ICONS' names).
-BUTTONS = ("bold", "italic", "strike", "code", "link")
+# Its buttons after the style pop-up, in order (format_toolbar.ICONS' names),
+# in groups: the paragraphs, the words, a link, taking formatting off.
+BUTTONS = ("bigger", "smaller", "quote", "bold", "italic", "strike", "code", "link", "reset")
+_GROUP_STARTS = ("bold", "link", "reset")
+# What words can have: in a code block none of these can act, and no bar
+# shows (Quote can, a quote holding code, but a bar for it alone is noise).
+_WORD_BUTTONS = ("bold", "italic", "strike", "code", "link")
 
 # Keys that change nothing pressed on their own: they keep the bar, so
 # Command-B (Ctrl+B) applies Bold with the bar still up.
@@ -108,7 +116,7 @@ class SelectionBar(QFrame):
         self._arrow = Disclosure(self.style_button, end=STYLE_ARROW_END, dark=False)
         self.buttons: Dict[str, QToolButton] = {}
         for name in BUTTONS:
-            if name in ("bold", "link"):
+            if name in _GROUP_STARTS:
                 row.addWidget(self._separator())
             action = actions[name]
             button = QToolButton(self)
@@ -179,8 +187,8 @@ class SelectionBar(QFrame):
                 or QApplication.activePopupWidget() is not None
                 or QApplication.mouseButtons() != Qt.MouseButton.NoButton
                 or editor.slash_menu() is not None or self._composing()
-                # Over a code block every button would be dimmed: no bar.
-                or not any(action.isEnabled() for action in self._actions.values())):
+                # Over a code block the words have no styles: no bar.
+                or not any(self._actions[name].isEnabled() for name in _WORD_BUTTONS)):
             return
         if self._shown_dark != self._dark():
             self.set_dark(self._dark())
