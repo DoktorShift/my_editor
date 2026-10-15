@@ -40,11 +40,18 @@ Design notes:
     request or of the pool (nostr/relay_auth.py). The request is sent
     again once after the relay accepted the sign-in; a second refusal is
     final. A sign-in lasts as long as the connection.
+  - A relay that turns this client away for asking too often
+    ("rate-limited:", "banned:") rests for a while: a publish meanwhile
+    does not ask it, and counts it at once as refusing, with the reason
+    it gave. Asking anyway is refused too, and can keep a ban going.
+    Only publishing rests: subscriptions, and reconnecting for them, go
+    on as before.
 """
 
 from __future__ import annotations
 
 import json
+import logging
 import secrets
 import time
 from dataclasses import dataclass
@@ -58,6 +65,7 @@ from i18n import _
 from . import crypto, events
 from .outbox.policy import normalize_relay_url
 
+logger = logging.getLogger(__name__)
 
 # Per-relay ceiling for a publish ack. Buho_go uses 8 s; we match it.
 DEFAULT_PUBLISH_TIMEOUT_MS: int = 8000
@@ -78,6 +86,15 @@ RECONNECT_STABLE_MS: int = 30_000
 
 # A relay that refuses a request until you sign in starts its reason so.
 AUTH_REQUIRED: str = "auth-required:"
+
+# A relay that turns this client away for asking too often starts its
+# reason so: "rate-limited:" (NIP-01), or "banned:" once it has had
+# enough (relay.damus.io then bans the address, whatever key signed the
+# event). It rests then: nothing is published to it for REST_MINUTES,
+# since that would be refused too, and can keep a ban going. "blocked:"
+# and the other refusals can be about one event, and rest nothing.
+TOO_BUSY: Tuple[str, ...] = ("rate-limited:", "banned:")
+REST_MINUTES: int = 10
 
 # Signing in: how long a relay that asked for it has to send the challenge
 # to sign, and to accept or refuse the signed answer. Signing itself has
@@ -163,7 +180,8 @@ class Relay(QObject):
     sign_in_started = Signal(object)
     sign_in_ended = Signal(object, bool, str, bool)
 
-    def __init__(self, url: str, parent: Optional[QObject] = None) -> None:
+    def __init__(self, url: str, parent: Optional[QObject] = None, *,
+                 clock: Callable[[], float] = time.monotonic) -> None:
         super().__init__(parent)
         self._url = url
         self._ws = QWebSocket(parent=self)
@@ -195,6 +213,12 @@ class Relay(QObject):
         self._refused: Dict[str, str] = {}
         self._sign_ins: Dict[str, _SignIn] = {}
         self._connection = 0                 # counts connections lost
+        # Resting (TOO_BUSY): until when, by ``clock``, nothing is
+        # published here, and the reason the relay gave. A rest outlives
+        # the connection: the relay turned the address away.
+        self._clock = clock
+        self._rest_until: Optional[float] = None
+        self._rest_reason = ""
 
     @property
     def url(self) -> str:
@@ -245,6 +269,24 @@ class Relay(QObject):
     def signed_in_with(self, signer) -> set:
         """The keys ``signer`` signed in on this connection."""
         return {key for key, by in self._signed_in.items() if by is signer}
+
+    def resting(self) -> Optional[str]:
+        """While this relay rests (it turned this client away for asking
+        too often, ``TOO_BUSY``), the reason it gave; None when it may be
+        published to."""
+        if self._rest_until is not None and self._clock() < self._rest_until:
+            return self._rest_reason
+        return None
+
+    def _rest(self, reason: str) -> None:
+        """Publish nothing here for REST_MINUTES. A refusal of a request
+        sent before the rest began does not start it over."""
+        if self.resting() is not None:
+            return
+        self._rest_until = self._clock() + REST_MINUTES * 60
+        self._rest_reason = reason
+        logger.warning("%s turned this client away (%r); nothing is published there "
+                       "for %d minutes", self._url, reason, REST_MINUTES)
 
     def _stayed_up(self) -> None:
         self._retry_ms = RECONNECT_FIRST_MS
@@ -306,6 +348,10 @@ class Relay(QObject):
             self._on_challenge(parsed[1])
         elif parsed[0] == "OK" and len(parsed) >= 3:
             self._on_sign_in_answer(parsed)
+            # Rest first: a request that hears of the refusal and asks
+            # again finds the relay resting.
+            if not parsed[2] and len(parsed) >= 4 and str(parsed[3]).startswith(TOO_BUSY):
+                self._rest(str(parsed[3]))
         self.message.emit(parsed)
 
     def _on_error(self, _code) -> None:
@@ -515,6 +561,13 @@ class PublishJob(QObject):
 
     def _start_one(self, url: str) -> None:
         relay = self._pool.get_or_create(url)
+        resting = relay.resting()
+        if resting is not None:
+            # Resting: not asked, not even connected to. It counts as
+            # refusing, with the reason it gave, on the next tick: the
+            # caller wires up its signals once the job is made.
+            QTimer.singleShot(0, self, lambda u=url, why=resting: self._finish(u, False, why))
+            return
 
         msg_slot = lambda payload, u=url: self._on_message(u, payload)
         disc_slot = lambda u=url: self._on_disconnected(u)
@@ -636,18 +689,21 @@ class RelayPool(QObject):
     signing_in = Signal(str)
     sign_in_failed = Signal(str, str, bool)
 
-    def __init__(self, parent: Optional[QObject] = None) -> None:
+    def __init__(self, parent: Optional[QObject] = None, *,
+                 clock: Callable[[], float] = time.monotonic) -> None:
         super().__init__(parent)
         self._relays: Dict[str, Relay] = {}
         # Who signs in when a relay asks (nostr/relay_auth.py), for every
         # request that does not name its own; None: nobody does.
         self.sign_in = None
+        # What a relay's rest is timed by, in seconds (a seam for tests).
+        self._clock = clock
 
     def get_or_create(self, url: str) -> Relay:
         normalized = _normalize(url)
         relay = self._relays.get(normalized)
         if relay is None:
-            relay = Relay(normalized, parent=self)
+            relay = Relay(normalized, parent=self, clock=self._clock)
             relay.sign_in_started.connect(
                 lambda signer, u=normalized: self._sign_in_started(u, signer))
             relay.sign_in_ended.connect(
