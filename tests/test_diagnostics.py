@@ -2,13 +2,14 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 """The log of what went wrong, kept for bug reports."""
 
+import errno
 import logging
 import os
 import sys
 import threading
 
 import pytest
-from PySide6.QtCore import QUrl, qWarning
+from PySide6.QtCore import QtMsgType, QUrl, qWarning
 
 import diagnostics
 
@@ -79,6 +80,27 @@ def test_qts_own_warnings_are_kept(folder, capsys):
     qWarning("a painter is not active")
     assert "WARNING qt: default: a painter is not active" in log_text(folder)
     assert "a painter is not active" in capsys.readouterr().err
+
+
+class _ClosedTerminal:
+    """The terminal the app was started from, closed since."""
+
+    def write(self, text):
+        raise OSError(errno.EIO, "Input/output error")
+
+
+@pytest.mark.parametrize("terminal", [None, _ClosedTerminal()], ids=["none", "closed"])
+def test_qts_warnings_are_kept_when_there_is_no_terminal(folder, monkeypatch, terminal):
+    # A Windows build has no console: sys.stderr is None there. PySide6
+    # raises an error of the message handler again in the code that made
+    # Qt warn, so every warning of Qt failed that code (the editor and
+    # media playback in the Windows build's self-test).
+    handed_to_qt = []
+    monkeypatch.setattr("PySide6.QtCore.qInstallMessageHandler", handed_to_qt.append)
+    diagnostics.install("1.0", folder=folder)
+    monkeypatch.setattr(sys, "stderr", terminal)
+    handed_to_qt[-1](QtMsgType.QtWarningMsg, None, "a painter is not active")
+    assert "WARNING qt: default: a painter is not active" in log_text(folder)
 
 
 def test_the_log_stays_small(folder):
