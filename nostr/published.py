@@ -113,6 +113,18 @@ class PublishedItem:
         return self.kind == CURATION_KIND
 
     @property
+    def address(self) -> str:
+        """An article's or a curation's coordinate (``kind:pubkey:d``), "" for
+        a note."""
+        return f"{self.kind}:{self.pubkey}:{self.identifier}" if self.identifier else ""
+
+    def curates(self, address: str) -> bool:
+        """Whether this curation lists the article at ``address``."""
+        return self.is_curation and any(
+            isinstance(tag, list) and len(tag) >= 2 and tag[0] == "a" and tag[1] == address
+            for tag in self.event.get("tags", []) or [])
+
+    @property
     def curated(self) -> int:
         """How many articles a curation collects (its ``a`` tags)."""
         return sum(1 for tag in self.event.get("tags", []) or []
@@ -286,6 +298,15 @@ class PublishedList(QObject):
 
     def item(self, event_id: str) -> Optional[PublishedItem]:
         return next((item for item in self._items if item.id == event_id), None)
+
+    def site_of(self, article: PublishedItem) -> Optional[PublishedItem]:
+        """The curation (a Standup site) ``article`` is read in: of the
+        account's curations listing it, the oldest, the identifier breaking
+        ties, as Standup chooses an article's site. None when none lists it."""
+        if not article.is_article or not article.address:
+            return None
+        sites = [item for item in self._items if item.curates(article.address)]
+        return min(sites, key=lambda site: (site.first_published, site.identifier), default=None)
 
     @property
     def has_more(self) -> bool:

@@ -62,6 +62,15 @@ class EditorApplication(QApplication):
             win.open_path(path)
         self._pending_paths.clear()
 
+    def quit_application(self):
+        """Quit as File > Quit does once the window is there (it asks about
+        unsaved work); before that there is nothing to ask about. False when
+        the person kept editing."""
+        if self._main_window is not None:
+            return self._main_window.quit_application()
+        self.quit()
+        return True
+
 
 def resource_path(rel_path: str) -> str:
     """Resolve a bundled resource, working both from source and when frozen.
@@ -90,6 +99,9 @@ def main():
     # First, so even a failure while starting up is in the log.
     diagnostics.install(constants.APP_VERSION)
     app = EditorApplication(sys.argv)
+    # Ctrl+C in the terminal, or a request to stop, quits as Quit does;
+    # from the start, so one that comes while the window is made still does.
+    quitting = QuitOnSignal(app.quit_application, parent=app)
     # Garbage is collected on this thread only, never on a worker's: Qt
     # objects must be destroyed on the thread they belong to.
     GuiThreadCollector(app)
@@ -136,8 +148,6 @@ def main():
     win = MainWindow(initial_path)
     win.show()
     app.register_main_window(win)
-    # Ctrl+C in the terminal, or a request to stop, quits as Quit does.
-    quitting = QuitOnSignal(win.quit_application, parent=app)
     sys.exit(quitting.exit_status(app.exec()))
 
 
