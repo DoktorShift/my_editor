@@ -12,6 +12,9 @@ What must hold:
 
   Whatever page is shown, everything on it is on screen without scrolling,
   as long as the screen has room.
+
+  A page's pull-down button (a menu in place of a handler) opens its menu,
+  sits where the page puts it, and never takes Return from the action.
 """
 
 import os
@@ -23,6 +26,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtCore import QPoint, QRect  # noqa: E402
+from PySide6.QtGui import QAccessible  # noqa: E402
 from PySide6.QtWidgets import QApplication, QLabel  # noqa: E402
 
 from nostr.ui.assistant import DEFAULT, AssistantWindow, page, text_label  # noqa: E402
@@ -124,3 +128,43 @@ def test_return_on_a_focused_button_follows_the_system(monkeypatch, mac, chosen)
         assert pressed == [chosen]
     finally:
         window.close()
+
+
+def test_a_menu_in_place_of_a_handler_makes_a_pull_down_button():
+    # Manage on the membership window's member page: a button that opens
+    # a menu of commands, at the place given, never the default (Return
+    # stays with the page's action), and without Qt's own menu indicator
+    # (a dot on a Mac): the Disclosure arrow is drawn at its end, as on
+    # the format bar's pop-up.
+    from PySide6.QtWidgets import QMenu
+    from format_toolbar import Disclosure
+    from nostr.ui.assistant import LEADING, PULL_DOWN_ARROW_END
+    window = AssistantWindow("Test", is_dark=False)
+    body, column = page()
+    column.addWidget(text_label("A page.", ""))
+    window.add_page("page", body)
+    menu = QMenu(window)
+    menu.addAction("Copy")
+    window.show_page("page", [("manage", "Manage", LEADING, menu),
+                              ("done", "Done", DEFAULT, window.accept)])
+    manage = window.buttons["manage"]
+    assert manage.menu() is menu
+    assert not manage.isDefault() and window.buttons["done"].isDefault()
+    assert manage.findChildren(Disclosure)
+    # A screen reader announces it as a button with a menu, by its title.
+    spoken = QAccessible.queryAccessibleInterface(manage)
+    assert spoken.role() == QAccessible.Role.ButtonMenu
+    assert spoken.text(QAccessible.Text.Name) == "Manage"
+    # As wide as its title, its padding and its arrow need: Qt keeps room
+    # for its own indicator too, which is not drawn.
+    manage.ensurePolished()
+    words = manage.fontMetrics().horizontalAdvance("Manage")
+    room = 14 + PULL_DOWN_ARROW_END + 2 * Disclosure.WIDTH + 2      # padding and border
+    assert manage.sizeHint().width() <= words + room + 2
+    row = window._button_row
+    widgets = [row.itemAt(i).widget() for i in range(row.count()) if row.itemAt(i).widget()]
+    assert widgets[0] is manage and widgets[-1] is window.buttons["done"]
+    # The page shown next brings its own buttons; the menu stays the page's.
+    window.show_page("page", [("done", "Done", DEFAULT, window.accept)])
+    assert "manage" not in window.buttons
+    assert menu.actions()[0].text() == "Copy"
