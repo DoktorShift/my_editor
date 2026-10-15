@@ -10,7 +10,8 @@ the View menu, and a remembered answer about pasted images could not be
 changed at all once given.
 
 The window holds only what is chosen once and kept: the appearance, the
-language, the writing font, whether the format bar shows over a selection,
+language, the writing font and the text size (which View > Zoom In and
+Zoom Out step through too), whether the format bar shows over a selection,
 how the text cursor looks, and, while a Nostr account is in use, what
 happens to a pasted image and where published posts open on the web.
 Every command stays in its menu: the window
@@ -27,22 +28,30 @@ from __future__ import annotations
 from typing import Callable, Dict, List, Optional, Tuple
 
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QAction, QKeySequence, QShortcut
+from PySide6.QtGui import QAction, QFont, QFontInfo, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
     QDialog,
+    QFontDialog,
     QFormLayout,
+    QHBoxLayout,
     QLabel,
     QRadioButton,
+    QSlider,
     QVBoxLayout,
     QWidget,
 )
 
+import fonts
 import theme
 from constants import DARK_MUTED_FG, LIGHT_MUTED_FG
 from i18n import _
 from nostr import web_readers
+from text_size import STEPS as TEXT_SIZES, text_size
+
+# The pop-up's item that asks for another installed font.
+_OTHER_FONT = "other"
 
 # What happens to a pasted image while a Nostr account is in use, as the
 # setting stores it ("ask", "always", "never"), in the order offered.
@@ -71,8 +80,12 @@ class SettingsWindow(QDialog):
 
     ``appearance`` maps "system", "light" and "dark" to View > Appearance's
     commands; ``languages`` lists View > Language's as ``(code, command)``;
-    ``choose_language(code)`` remembers one; ``monospace`` is View > Use
-    Monospace Font for Writing; ``format_bar()`` and
+    ``choose_language(code)`` remembers one; ``writing_family()`` and
+    ``choose_writing_family(family)`` read and store the writing font
+    (fonts.SYSTEM, SERIF, MONOSPACE or a family's name; View > Use
+    Monospace Font for Writing is MONOSPACE); the text size is the app's
+    (text_size.py), which View > Zoom In and Zoom Out change too;
+    ``format_bar()`` and
     ``choose_format_bar(on)`` read and store whether the format bar shows
     over a selection; ``caret_style()`` and ``choose_caret_style(value)``
     read and store the text cursor (CARET_CHOICES); ``paste_choice()`` and
@@ -85,7 +98,8 @@ class SettingsWindow(QDialog):
     def __init__(self, *, appearance: Dict[str, QAction],
                  languages: List[Tuple[str, QAction]],
                  choose_language: Callable[[str], None],
-                 monospace: QAction,
+                 writing_family: Callable[[], str],
+                 choose_writing_family: Callable[[str], None],
                  paste_choice: Callable[[], str],
                  choose_paste: Callable[[str], None],
                  nostr_in_use: Callable[[], bool],
@@ -106,6 +120,8 @@ class SettingsWindow(QDialog):
         self._nostr_in_use = nostr_in_use
         self._format_bar_shown = format_bar
         self._web_reader = web_reader
+        self._writing_family = writing_family
+        self._choose_writing_family = choose_writing_family
 
         form = QFormLayout()
         form.setLabelAlignment(Qt.AlignRight)
@@ -147,23 +163,62 @@ class SettingsWindow(QDialog):
             _("MyEditor uses a new language the next time it opens.")))
         form.addRow(self._label(_("Language:"), self.language), language_box)
 
-        # Writing: the font, as View > Use Monospace Font for Writing, and
-        # the format bar over text selected with the pointer.
-        self.monospace = QCheckBox(_("Use a monospace font for writing"))
-        self.monospace.setChecked(monospace.isChecked())
-        self.monospace.toggled.connect(
-            lambda on: on != monospace.isChecked() and monospace.setChecked(on))
-        monospace.toggled.connect(self.monospace.setChecked)
+        # The writing font: a pop-up menu, each font named in itself, as a
+        # Mac's font menus show them; Other… is the system's font panel.
+        self.font = QComboBox()
+        self.font.activated.connect(self._font_activated)
+        font_box = QWidget()
+        font_column = QVBoxLayout(font_box)
+        font_column.setContentsMargins(0, 0, 0, 0)
+        font_column.setSpacing(4)
+        font_column.addWidget(self.font, 0, Qt.AlignLeft)
+        font_column.addWidget(self._help(
+            _("The font you write in. Code and plain text stay in the monospace font.")))
+        form.addRow(self._label(_("Font:"), self.font), font_box)
+
+        # The text size: a slider from a small A to a large A, the size
+        # beside it; View > Zoom In and Zoom Out move it too.
+        self.text_size = QSlider(Qt.Orientation.Horizontal)
+        self.text_size.setRange(0, len(TEXT_SIZES) - 1)
+        self.text_size.setPageStep(1)
+        self.text_size.setTickPosition(QSlider.TickPosition.TicksBelow)
+        self.text_size.setTickInterval(1)
+        self.text_size.setFixedWidth(180)
+        self.text_size.valueChanged.connect(
+            lambda index: text_size().set_percent(TEXT_SIZES[index]))
+        self.text_size_value = QLabel()
+        self.text_size_value.setMinimumWidth(44)
+        small, large = QLabel("A"), QLabel("A")
+        base = QFontInfo(small.font()).pixelSize()
+        for glyph, scale in ((small, 0.8), (large, 1.5)):
+            glyph_font = QFont(glyph.font())
+            glyph_font.setPixelSize(max(8, round(base * scale)))
+            glyph.setFont(glyph_font)
+        size_row = QHBoxLayout()
+        size_row.setContentsMargins(0, 0, 0, 0)
+        size_row.setSpacing(8)
+        for widget in (small, self.text_size, large, self.text_size_value):
+            size_row.addWidget(widget, 0, Qt.AlignVCenter)
+        size_row.addStretch(1)
+        size_box = QWidget()
+        size_column = QVBoxLayout(size_box)
+        size_column.setContentsMargins(0, 0, 0, 0)
+        size_column.setSpacing(4)
+        size_column.addLayout(size_row)
+        size_column.addWidget(self._help(
+            _("How big the documents’ text and their previews read. View > Zoom In and "
+              "Zoom Out change it too.")))
+        size_label = QLabel(_("Text size:"))
+        size_label.setBuddy(self.text_size)
+        self.text_size.setAccessibleName(_("Text size"))
+        form.addRow(size_label, size_box)
+        text_size().changed.connect(self._show_text_size)
+
+        # Writing: the format bar over text selected with the pointer.
         self.format_bar = QCheckBox(_("Show the format bar when selecting text"))
         self.format_bar.setChecked(bool(format_bar()))
         self.format_bar.toggled.connect(choose_format_bar)
-        writing_box = QWidget()
-        writing_column = QVBoxLayout(writing_box)
-        writing_column.setContentsMargins(0, 0, 0, 0)
-        writing_column.setSpacing(4)
-        writing_column.addWidget(self.monospace)
-        writing_column.addWidget(self.format_bar)
-        form.addRow(self._label(_("Writing:")), writing_box)
+        form.addRow(self._label(_("Writing:")), self.format_bar)
 
         # The text cursor: how the insertion point looks where you type.
         self.caret = QComboBox()
@@ -280,10 +335,53 @@ class SettingsWindow(QDialog):
         if code is not None:
             self._choose_language(code)
 
+    # -- the writing font and the text size ------------------------------------
+
+    def _show_fonts(self) -> None:
+        """The fonts offered, the chosen one current: System, Serif and
+        Monospace (each named in itself), a font picked with Other… by its
+        name, then Other…."""
+        chosen = self._writing_family() or fonts.SYSTEM
+        self.font.clear()
+        offered = [(fonts.SYSTEM, _("System")), (fonts.SERIF, _("Serif")),
+                   (fonts.MONOSPACE, _("Monospace"))]
+        if chosen not in (fonts.SYSTEM, fonts.SERIF, fonts.MONOSPACE):
+            offered.append((chosen, chosen))
+        for family, title in offered:
+            self.font.addItem(title, family)
+            sample = fonts.writing_font(13, family)
+            self.font.setItemData(self.font.count() - 1, sample, Qt.ItemDataRole.FontRole)
+        self.font.insertSeparator(self.font.count())
+        self.font.addItem(_("Other…"), _OTHER_FONT)
+        self.font.setCurrentIndex(max(0, self.font.findData(chosen)))
+
+    def _font_activated(self, index: int) -> None:
+        family = self.font.itemData(index)
+        if family == _OTHER_FONT:
+            current = fonts.writing_font(fonts.WRITING_PIXEL_SIZE, self._writing_family())
+            picked, accepted = QFontDialog.getFont(current, self, _("Writing Font"))
+            if accepted:
+                self._choose_writing_family(picked.family())
+            self._show_fonts()                    # Other… is never the choice
+            return
+        if family:
+            self._choose_writing_family(family)
+
+    def _show_text_size(self, *_args) -> None:
+        percent = text_size().percent()
+        self.text_size.blockSignals(True)
+        self.text_size.setValue(TEXT_SIZES.index(percent))
+        self.text_size.blockSignals(False)
+        self.text_size_value.setText(_("{percent} %").format(percent=percent))
+        self.text_size.setAccessibleDescription(self.text_size_value.text())
+
     def refresh(self) -> None:
         """Read again what can change elsewhere: whether Nostr is in use, the
+        writing font and the text size (the View menu changes them too), the
         format bar's setting, and the pasted-image setting (an alert's
         Remember This Choice sets it)."""
+        self._show_fonts()
+        self._show_text_size()
         self.format_bar.setChecked(bool(self._format_bar_shown()))
         shown = bool(self._nostr_in_use())
         self._paste_label.setVisible(shown)

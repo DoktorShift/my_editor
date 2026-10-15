@@ -42,7 +42,7 @@ from i18n import _
 
 from .drafts_common import THEME_TOKENS, scaled, secondary_font
 from .preview_parts import (
-    PAD, ActionBar, ClampedLabel, HeroImage, PreviewAction, PreviewFields, PreviewReader,
+    IMAGE_UNAVAILABLE, IMAGE_WAITING, PAD, ActionBar, ClampedLabel, HeroImage, PreviewAction, PreviewFields, PreviewReader,
     body_font, preview_css, title_font,
 )
 
@@ -68,6 +68,7 @@ class ReaderWindow(QWidget):
         self.setAccessibleName(_("Preview of {title}").format(title=fields.title))
         self._is_dark = bool(is_dark)
         self.fields = fields
+        self._image_url = ""
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -124,8 +125,32 @@ class ReaderWindow(QWidget):
         self.hero.apply_theme(self._is_dark)
 
     def set_image(self, pixmap: QPixmap) -> None:
-        if self.hero.isVisible():
+        """The cover's picture. Hidden, not merely not shown yet: the window
+        is given it before it first shows."""
+        if not self.hero.isHidden():
             self.hero.set_pixmap(pixmap)
+
+    def set_image_note(self, text: str) -> None:
+        if not self.hero.isHidden():
+            self.hero.set_note(text)
+
+    def load_image(self, loader, url: str) -> None:
+        """Ask ``loader`` (thumbnail_loader.ThumbnailLoader) for the cover at
+        ``url``, which the preview had not got yet, and show it when it
+        comes, or say it can't."""
+        self._image_url = url
+        loader.url_ready.connect(self._on_image_ready)
+        loader.url_failed.connect(self._on_image_failed)
+        self.set_image_note(IMAGE_WAITING)
+        loader.load_url(url)
+
+    def _on_image_ready(self, url: str, _sha: str, pixmap: QPixmap) -> None:
+        if url == self._image_url:
+            self.set_image(pixmap)
+
+    def _on_image_failed(self, url: str, _reason: str) -> None:
+        if url == self._image_url:
+            self.set_image_note(IMAGE_UNAVAILABLE)
 
     def _on_chosen(self, key: str) -> None:
         self.action_chosen.emit(key)

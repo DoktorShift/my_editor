@@ -98,7 +98,8 @@ def test_settings_offers_the_four_cursors_and_chooses_through_the_window():
     chosen = []
     window = SettingsWindow(
         appearance={"system": QAction("Automatic")}, languages=[],
-        choose_language=lambda code: None, monospace=QAction("Mono"),
+        choose_language=lambda code: None, writing_family=lambda: "system",
+        choose_writing_family=lambda family: None,
         paste_choice=lambda: "ask", choose_paste=lambda value: None,
         nostr_in_use=lambda: False, format_bar=lambda: True,
         choose_format_bar=lambda on: None,

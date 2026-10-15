@@ -66,6 +66,7 @@ import rich_text
 import text_look
 import word_count
 from fonts import monospace_family
+from text_size import text_size
 from doc_walk import doc_length, doc_offset, iter_blocks
 from i18n import _, ngettext
 from markdown_writer import READ_FEATURES, read_markdown
@@ -538,6 +539,32 @@ def note_document(text: str, *, author: str = "", names: Optional[NameLookup] = 
 # The widget                                                                   #
 # --------------------------------------------------------------------------- #
 
+def scale_text(doc: QTextDocument, factor: float) -> None:
+    """Every size of text in ``doc`` times ``factor``: a preview at the app's
+    text size (text_size.py). The sizes are the documents' own (a heading
+    stays larger than the body), so they are scaled where they are set."""
+    if factor == 1:
+        return
+    default = doc.defaultFont()
+    if default.pointSizeF() > 0:
+        default.setPointSizeF(default.pointSizeF() * factor)
+        doc.setDefaultFont(default)
+    cursor = QTextCursor(doc)
+    for block in iter_blocks(doc):
+        it = block.begin()
+        while not it.atEnd():
+            fragment = it.fragment()
+            size = fragment.charFormat().fontPointSize()
+            if fragment.isValid() and size > 0:
+                cursor.setPosition(fragment.position())
+                cursor.setPosition(fragment.position() + fragment.length(),
+                                   QTextCursor.MoveMode.KeepAnchor)
+                scaled = QTextCharFormat()
+                scaled.setFontPointSize(size * factor)
+                cursor.mergeCharFormat(scaled)
+            it += 1
+
+
 class NostrPreview(QTextBrowser):
     """A read-only view of a note or an article as readers will see it.
 
@@ -554,6 +581,9 @@ class NostrPreview(QTextBrowser):
         self._images = images
         self._media_names = media_names
         self._dark = dark
+        # The text size the shown document is at (scale_text).
+        self._scale = 1.0
+        text_size().changed.connect(self._follow_text_size)
         self.setOpenExternalLinks(True)
         self.setOpenLinks(True)
         self.setAccessibleName(_("Preview"))
@@ -598,11 +628,21 @@ class NostrPreview(QTextBrowser):
         # The document's parent is this view, so its images are asked for
         # through loadResource below; the one it replaces goes.
         previous = self.document()
+        self._scale = 1.0
         self.setDocument(doc)
         # Qt deletes a document the view made itself; one made here goes now.
         if (previous is not doc and shiboken6.isValid(previous)
                 and previous.parent() is self):
             previous.deleteLater()
+        self._follow_text_size()
+
+    def _follow_text_size(self, *_args) -> None:
+        """The shown document at the app's text size, its column as wide in
+        words as at the actual size."""
+        target = text_size().scale()
+        if target != self._scale:
+            scale_text(self.document(), target / self._scale)
+            self._scale = target
         self._center_column()
 
     def loadResource(self, kind: int, url: QUrl):
@@ -623,10 +663,11 @@ class NostrPreview(QTextBrowser):
     def _center_column(self) -> None:
         """Keep the text in a readable column, as the reading apps do, and
         no image wider than it."""
-        spare = max(0, self.width() - COLUMN_WIDTH - 32)
+        widest = round(COLUMN_WIDTH * self._scale)
+        spare = max(0, self.width() - widest - 32)
         side = spare // 2 + 16
         self.setViewportMargins(side, 16, side, 16)
-        column = max(120, min(COLUMN_WIDTH, self.width() - 2 * side - 24))
+        column = max(120, min(widest, self.width() - 2 * side - 24))
         self._fit_images(column)
 
     def _fit_images(self, width: int) -> None:

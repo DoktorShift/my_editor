@@ -30,7 +30,8 @@ from PySide6.QtGui import QSyntaxHighlighter, QTextCharFormat, QColor, QFont, QT
 
 import rich_text
 from doc_walk import doc_length, doc_offset
-from fonts import code_font, monospace_family
+from fonts import CODE_PIXEL_SIZE, code_font, monospace_family
+from text_size import text_size
 
 
 _EXT_TO_LANG: dict[str, str] = {
@@ -631,6 +632,12 @@ class RichTextLook(QSyntaxHighlighter):
         super().__init__(document)
         self._is_dark = is_dark
         self._build_formats()
+        # Code blocks follow the app's text size, as the text around them.
+        text_size().changed.connect(self._text_size_changed)
+
+    def _text_size_changed(self, _percent: int) -> None:
+        self._build_formats()
+        self.rehighlight()
 
     def set_theme(self, is_dark: bool):
         if self._is_dark != is_dark:
@@ -657,7 +664,7 @@ class RichTextLook(QSyntaxHighlighter):
         # A code block's lines, in the font code is set in; each language's
         # colors over it.
         self._code_line = QTextCharFormat()
-        self._code_line.setFont(code_font())
+        self._code_line.setFont(code_font(text_size().pixels(CODE_PIXEL_SIZE)))
         self._over_code: dict[int, tuple] = {}
         # Footnote marks raised in the link color; definitions quieter.
         self._footnote_mark = QTextCharFormat()

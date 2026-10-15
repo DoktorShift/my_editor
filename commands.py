@@ -100,6 +100,9 @@ NO_SHORTCUT: Tuple[Tuple[str, str, str], ...] = (
     ("view.toolbar", "other",
      "Set once and remembered; only the Mac has a convention for it (Option-Command-T)."),
     ("view.monospace_writing", "all", "A look preference, set once and remembered."),
+    ("view.actual_size", "other",
+     "Ctrl+0 is Body there, as in LibreOffice; Zoom Out and Zoom In step back to it, and "
+     "Settings shows the size."),
     ("view.paper_mode", "all", "A look preference, set once and remembered."),
     ("view.highlight_line", "all", "A look preference, set once and remembered."),
     ("view.background.", "all", "A look preference, set once and remembered."),
