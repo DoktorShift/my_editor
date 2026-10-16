@@ -24,6 +24,7 @@ from PySide6.QtCore import QCoreApplication, QEventLoop, QTimer
 from PySide6.QtGui import QColor, QTextCharFormat, QTextCursor, QTextDocument
 
 import rmarkdown
+import rmd_toolchain
 from rmarkdown import (
     KnitRunner,
     classify_failure,
@@ -123,6 +124,33 @@ def test_bullets_nest_and_get_blank_line_before():
     assert "intro\n\n- one\n  - two\n\nafter" in body
 
 
+def _body_of(markdown: str) -> str:
+    from markdown_writer import READ_FEATURES
+    doc = QTextDocument()
+    doc.setMarkdown(markdown, READ_FEATURES)
+    return document_to_rmd(doc, "T").split("---\n\n", 1)[1]
+
+
+def test_real_lists_nest_by_four_spaces_and_keep_numbers_and_checks():
+    body = _body_of("intro\n\n- one\n    - two\n\n3. three\n4. four\n\n- [x] done\n")
+    assert "intro\n\n- one\n    - two\n" in body
+    assert "3. three\n4. four" in body
+    assert "- [x] done" in body
+
+
+def test_headings_strike_code_and_links_are_pandoc_markdown():
+    body = _body_of("## A *heading*\n\nSome ~~old~~ `x = 1` and [a site](https://x.example).\n")
+    assert body.startswith("## A *heading*\n\n")
+    assert "~~old~~" in body and "`x = 1`" in body
+    assert "[a site](https://x.example)" in body
+
+
+def test_quotes_and_dividers_are_pandoc_markdown():
+    # Review F6 (early range): they vanished when saved as R Markdown.
+    body = _body_of("Intro\n\n> A quote\n>\n> More\n>\n> > deeper\n\n---\n\nAfter\n")
+    assert body == "Intro\n\n> A quote\n>\n> More\n>\n> > deeper\n\n***\n\nAfter\n"
+
+
 def test_line_structure_uses_hard_breaks():
     out = document_to_rmd(_doc(["line one", "line two", "", "para two"]), "T")
     assert "line one\\\nline two\n\npara two" in out
@@ -146,7 +174,8 @@ def test_image_copied_to_sidecar(tmp_path):
 
 
 def test_media_dir_for():
-    assert media_dir_for("/x/y/notes.Rmd") == "/x/y/notes_media"
+    folder = os.path.join("x", "y")
+    assert media_dir_for(os.path.join(folder, "notes.Rmd")) == os.path.join(folder, "notes_media")
 
 
 # --------------------------------------------------------------------------- #
@@ -156,7 +185,7 @@ def test_media_dir_for():
 def test_parse_output_path_from_stderr_line(tmp_path):
     rmd = str(tmp_path / "doc.Rmd")
     produced = tmp_path / "doc.html"
-    produced.write_text("x")
+    produced.write_text("x", encoding="utf-8")
     out = f"processing...\nOutput created: doc.html\n"
     assert parse_output_path(out, rmd, "html") == str(produced)
 
@@ -164,7 +193,7 @@ def test_parse_output_path_from_stderr_line(tmp_path):
 def test_parse_output_path_falls_back_to_extension_swap(tmp_path):
     rmd = str(tmp_path / "doc.Rmd")
     produced = tmp_path / "doc.html"
-    produced.write_text("x")
+    produced.write_text("x", encoding="utf-8")
     assert parse_output_path("no marker here", rmd, "html") == str(produced)
     assert parse_output_path("no marker here", rmd, "pdf") is None
 
@@ -189,11 +218,29 @@ def test_classify_failure_kinds():
 # KnitRunner against a fake Rscript
 # --------------------------------------------------------------------------- #
 
-def _fake_rscript(tmp_path, body: str) -> str:
-    path = tmp_path / "Rscript"
-    path.write_text("#!/bin/sh\n" + body)
-    path.chmod(path.stat().st_mode | stat.S_IEXEC)
-    return str(path)
+def _fake_rscript(tmp_path, monkeypatch, body: str) -> str:
+    """A stand-in for Rscript that runs ``body``, Python, with Rscript's
+    arguments (``sys.argv[4]`` is the .Rmd file).
+
+    It starts the way each system starts a program it is given: a shell
+    script on macOS and Linux, a .cmd file on Windows. Neither names a
+    path (cmd reads its file in the console's code page, which need not
+    hold every letter of one): Python comes from the environment the knit
+    inherits, the code from beside the script.
+    """
+    (tmp_path / "fake_rscript.py").write_text(body, encoding="utf-8")
+    monkeypatch.setenv("FAKE_RSCRIPT_PYTHON", sys.executable)
+    if sys.platform == "win32":
+        launcher = tmp_path / "Rscript.cmd"
+        launcher.write_text('@"%FAKE_RSCRIPT_PYTHON%" "%~dp0fake_rscript.py" %*\n',
+                            encoding="ascii")
+    else:
+        launcher = tmp_path / "Rscript"
+        launcher.write_text('#!/bin/sh\n'
+                            'exec "$FAKE_RSCRIPT_PYTHON" "$(dirname "$0")/fake_rscript.py" "$@"\n',
+                            encoding="ascii")
+        launcher.chmod(launcher.stat().st_mode | stat.S_IEXEC)
+    return str(launcher)
 
 
 def _run_knit(monkeypatch, rscript, rmd_path, fmt="html", timeout_ms=5000):
@@ -212,29 +259,50 @@ def _run_knit(monkeypatch, rscript, rmd_path, fmt="html", timeout_ms=5000):
 
 def test_knit_success_via_fake_rscript(tmp_path, monkeypatch):
     rmd = tmp_path / "doc.Rmd"
-    rmd.write_text("---\ntitle: x\n---\nbody\n")
-    script = _fake_rscript(
-        tmp_path,
-        'echo "Output created: doc.html" 1>&2\n'
-        'printf "<html></html>" > "$(dirname "$4")/doc.html"\n')
+    rmd.write_text("---\ntitle: x\n---\nbody\n", encoding="utf-8")
+    script = _fake_rscript(tmp_path, monkeypatch, (
+        "import os, sys\n"
+        "sys.stderr.write('Output created: doc.html\\n')\n"
+        "with open(os.path.join(os.path.dirname(sys.argv[4]), 'doc.html'), 'w',\n"
+        "          encoding='utf-8') as f:\n"
+        "    f.write('<html></html>')\n"))
     results = _run_knit(monkeypatch, script, str(rmd))
     assert results.get("ok") == str(tmp_path / "doc.html")
 
 
 def test_knit_failure_classified(tmp_path, monkeypatch):
     rmd = tmp_path / "doc.Rmd"
-    rmd.write_text("x\n")
-    script = _fake_rscript(
-        tmp_path,
-        'echo "there is no package called \'rmarkdown\'" 1>&2\nexit 1\n')
+    rmd.write_text("x\n", encoding="utf-8")
+    script = _fake_rscript(tmp_path, monkeypatch, (
+        "import sys\n"
+        "sys.stderr.write(\"there is no package called 'rmarkdown'\\n\")\n"
+        "sys.exit(1)\n"))
     results = _run_knit(monkeypatch, script, str(rmd))
     assert results.get("kind") == "missing-rmarkdown"
     assert "rmarkdown" in results.get("detail", "")
 
 
+def test_the_knit_runs_in_the_environment_it_was_started_from(tmp_path, monkeypatch):
+    # Rscript needs the system's PATH (LaTeX, for Knit to PDF), HOME and,
+    # on Windows, SystemRoot, without which it does not even start. It
+    # gets them all, with the app's own R library added.
+    rmd = tmp_path / "doc.Rmd"
+    rmd.write_text("x\n", encoding="utf-8")
+    monkeypatch.setenv("MYEDITOR_SYSTEM_PATH", os.environ.get("PATH", ""))
+    script = _fake_rscript(tmp_path, monkeypatch, (
+        "import os, sys\n"
+        "print('library=' + os.environ.get('R_LIBS_USER', ''))\n"
+        "kept = os.environ.get('PATH', '').endswith(os.environ['MYEDITOR_SYSTEM_PATH'])\n"
+        "print('system path kept: %s' % kept)\n"
+        "sys.exit(1)\n"))
+    detail = _run_knit(monkeypatch, script, str(rmd)).get("detail", "")
+    assert "library=" + rmd_toolchain._LIBRARY_DIR in detail
+    assert "system path kept: True" in detail
+
+
 def test_knit_missing_r_reported(monkeypatch, tmp_path):
     rmd = tmp_path / "doc.Rmd"
-    rmd.write_text("x\n")
+    rmd.write_text("x\n", encoding="utf-8")
     monkeypatch.setattr(rmarkdown, "find_rscript", lambda: None)
     runner = KnitRunner()
     seen = {}

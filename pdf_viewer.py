@@ -27,7 +27,6 @@ grows as pages are examined and ``countChanged`` fires along the way,
 so the match label updates live without blocking on large documents.
 """
 
-import json
 import os
 import time
 
@@ -43,7 +42,11 @@ from PySide6.QtWidgets import (
     QTreeView, QVBoxLayout, QWidget,
 )
 
+import theme
+from atomic_file import read_json, write_json
+from i18n import _, ngettext
 from url_safety import is_safe_external_url
+from commands import platform_keys, standard_and
 from widgets import FindBar
 
 _POSITIONS_PATH = os.path.expanduser("~/.config/my_editor/pdf_positions.json")
@@ -62,14 +65,7 @@ _MAX_ZOOM = 8.0
 # --------------------------------------------------------------------------- #
 
 def _load_positions() -> dict:
-    try:
-        with open(_POSITIONS_PATH, "r", encoding="utf-8") as f:
-            data = json.load(f)
-        if isinstance(data, dict):
-            return data
-    except (OSError, json.JSONDecodeError):
-        pass
-    return {}
+    return read_json(_POSITIONS_PATH, dict)
 
 
 def load_view_state(path: str) -> dict | None:
@@ -80,21 +76,16 @@ def load_view_state(path: str) -> dict | None:
 
 def save_view_state(path: str, state: dict) -> None:
     """Persist the view state for ``path``, evicting the oldest entries
-    beyond the cap. Failures are swallowed: losing a reading position
-    must never interfere with closing a tab or quitting."""
-    try:
-        positions = _load_positions()
-        state = dict(state, ts=int(time.time()))
-        positions[os.path.abspath(path)] = state
-        if len(positions) > _MAX_POSITIONS:
-            oldest_first = sorted(positions.items(),
-                                  key=lambda kv: kv[1].get("ts", 0) if isinstance(kv[1], dict) else 0)
-            positions = dict(oldest_first[len(positions) - _MAX_POSITIONS:])
-        os.makedirs(os.path.dirname(_POSITIONS_PATH), exist_ok=True)
-        with open(_POSITIONS_PATH, "w", encoding="utf-8") as f:
-            json.dump(positions, f)
-    except OSError:
-        pass
+    beyond the cap. A failed write is only logged: losing a reading
+    position must never interfere with closing a tab or quitting."""
+    positions = _load_positions()
+    state = dict(state, ts=int(time.time()))
+    positions[os.path.abspath(path)] = state
+    if len(positions) > _MAX_POSITIONS:
+        oldest_first = sorted(positions.items(),
+                              key=lambda kv: kv[1].get("ts", 0) if isinstance(kv[1], dict) else 0)
+        positions = dict(oldest_first[len(positions) - _MAX_POSITIONS:])
+    write_json(_POSITIONS_PATH, positions)
 
 
 # --------------------------------------------------------------------------- #
@@ -116,7 +107,7 @@ QToolButton {
     padding: 3px 8px; font-size: 12px;
 }
 QToolButton:hover { background: #3C3C3C; }
-QToolButton:checked { background: #3C2800; color: #FFB347; border-color: #FF8C00; }
+QToolButton:checked { background: #264F78; color: #FFFFFF; border-color: #3794FF; }
 """
 
 _TOOLBAR_LIGHT_CSS = """
@@ -134,8 +125,21 @@ QToolButton {
     padding: 3px 8px; font-size: 12px;
 }
 QToolButton:hover { background: #E1E1E1; }
-QToolButton:checked { background: #FFF0D0; color: #A05000; border-color: #E88000; }
+QToolButton:checked { background: #DCEBFA; color: #0B4F8A; border-color: #0078D4; }
 """
+
+
+def _toolbar_css(is_dark: bool) -> str:
+    """The toolbar's style with the app's focus ring: 2 px wide (the padding
+    gives up the extra pixel, so a button keeps its size), and on a checked
+    button (the fit mode in use) the ring that stands out from its fill
+    rather than the checked border's own blue."""
+    ring = theme.focus_ring_color(is_dark)
+    on_checked = theme.focus_ring_on_accent_color(is_dark)
+    return (_TOOLBAR_DARK_CSS if is_dark else _TOOLBAR_LIGHT_CSS) + (
+        f"QToolButton:focus {{ border: 2px solid {ring}; padding: 2px 7px; }}\n"
+        f"QToolButton:checked:focus {{ border-color: {on_checked}; }}\n")
+
 
 # Surface painted around the pages. Slightly darker than the page in
 # light mode, the app backdrop in dark mode, so pages read as sheets.
@@ -165,6 +169,65 @@ QTreeView::item { padding: 3px 4px; }
 QTreeView::item:hover { background: #ECECEC; }
 QTreeView::item:selected { background: #0078D4; color: #FFFFFF; }
 """
+
+
+def _with_keys(words: str, keys: QKeySequence) -> str:
+    """A tooltip with the keys as this computer writes them: "Zoom in
+    (⌘+)" on a Mac, "Zoom in (Ctrl++)" elsewhere, never a Mac reader
+    told to press Ctrl."""
+    text = keys.toString(QKeySequence.SequenceFormat.NativeText)
+    return _("{command} ({keys})").format(command=words, keys=text) if text else words
+
+
+# The reader's own keys, in the order Help > Keyboard Shortcuts lists them:
+# (section, words, what it does to the tab, keys that work anywhere in the
+# tab, keys that work on the page only). Keys with Ctrl work in the find
+# field too; bare keys (a space, a letter, Home) only on the page, so the
+# find field and the page box still type them. J, K, N, P and G are
+# SumatraPDF's; Ctrl+0, 1 and 2 SumatraPDF's zoom keys, as in MyEditor 3.3
+# (Option-Command-1 and 2 on a Mac, see below).
+# Find (Ctrl+F) and Copy (Ctrl+C) are the window's Edit commands, which
+# act on the reader in a PDF tab; they are listed, not bound, here.
+MOVE, ZOOM, FIND = "Move Around", "Zoom", "Find and Copy"
+
+
+def reader_keys():
+    """The table above, its words in the reader's language."""
+    return (
+        (MOVE, _("Next screenful"), lambda tab: tab._scroll_page(+1), (), ("Space",)),
+        (MOVE, _("Previous screenful"), lambda tab: tab._scroll_page(-1), (), ("Shift+Space",)),
+        (MOVE, _("Next page"), lambda tab: tab.next_page(), (), ("N",)),
+        (MOVE, _("Previous page"), lambda tab: tab.prev_page(), (), ("P",)),
+        (MOVE, _("Scroll down"), lambda tab: tab._scroll_lines(+1), (), ("J",)),
+        (MOVE, _("Scroll up"), lambda tab: tab._scroll_lines(-1), (), ("K",)),
+        (MOVE, _("First page"), lambda tab: tab.jump_to_page(0), (), ("Home",)),
+        (MOVE, _("Last page"),
+         lambda tab: tab.jump_to_page(tab.document.pageCount() - 1), (), ("End",)),
+        (MOVE, _("Go to page"), lambda tab: tab._focus_page_box(), (), ("G",)),
+        (MOVE, _("Show or hide the table of contents"), lambda tab: tab.toggle_outline(),
+         ("F12",), ()),
+        (ZOOM, _("Zoom in"), lambda tab: tab.zoom_in(),
+         standard_and(QKeySequence.StandardKey.ZoomIn, "Ctrl+="), ("+",)),
+        (ZOOM, _("Zoom out"), lambda tab: tab.zoom_out(),
+         standard_and(QKeySequence.StandardKey.ZoomOut), ("-",)),
+        (ZOOM, _("Fit page width"), lambda tab: tab.fit_width(), ("Ctrl+0",), ()),
+        # Option-Command-1 and 2 on a Mac, where Command-1 to 9 go to tabs.
+        (ZOOM, _("Actual size"), lambda tab: tab.actual_size(),
+         (platform_keys("Ctrl+Alt+1", "Ctrl+1"),), ()),
+        (ZOOM, _("Fit whole page"), lambda tab: tab.fit_page(),
+         (platform_keys("Ctrl+Alt+2", "Ctrl+2"),), ()),
+        (FIND, _("Find in PDF"), None, ("Ctrl+F",), ()),
+        (FIND, _("Copy selected text"), None, standard_and(QKeySequence.StandardKey.Copy), ()),
+        (FIND, _("Clear selection"), lambda tab: tab.view.clear_selection(), (), ("Esc",)),
+    )
+
+
+def _reader_key(words: str) -> QKeySequence:
+    """The first key of the reader's command ``words``, for its tooltip."""
+    for _section, name, _act, tab_keys, view_keys in reader_keys():
+        if name == words:
+            return QKeySequence((tab_keys + view_keys)[0])
+    return QKeySequence()
 
 
 # Painted over selected text. Pages always render white (see module
@@ -253,6 +316,25 @@ class _ReaderView(QPdfView):
         # Hover feedback (pointing hand over links) needs move events
         # without a button held.
         self.viewport().setMouseTracking(True)
+
+    # -- copying -----------------------------------------------------------
+
+    def event(self, e):
+        # The copy key is the reader's own while it has the focus, the way
+        # a text field claims it: the window's Edit > Copy has the same key,
+        # and two shortcuts on one key would cancel each other out.
+        if (e.type() == QEvent.Type.ShortcutOverride
+                and e.matches(QKeySequence.StandardKey.Copy)):
+            e.accept()
+            return True
+        return super().event(e)
+
+    def keyPressEvent(self, e):
+        if e.matches(QKeySequence.StandardKey.Copy):
+            self.copy_selection()
+            e.accept()
+            return
+        super().keyPressEvent(e)
 
     # -- geometry (mirror of QPdfView's private layout) --------------------
 
@@ -514,6 +596,7 @@ class PdfViewerTab(QWidget):
         self.outline = QTreeView()
         self.outline.setModel(self._bookmarks)
         self.outline.setHeaderHidden(True)
+        self.outline.setAccessibleName(_("Table of contents"))
         self.outline.setFixedWidth(_OUTLINE_WIDTH)
         self.outline.setExpandsOnDoubleClick(False)
         self.outline.activated.connect(self._on_outline_activated)
@@ -523,7 +606,6 @@ class PdfViewerTab(QWidget):
         self._build_toolbar()
 
         self.findbar = FindBar(self.find_next, self.find_prev, self._close_findbar, self)
-        self.findbar.hint_label.setText("Enter: next  |  Shift+Enter: prev  |  Esc: close")
         self.findbar.edit.textChanged.connect(self._on_search_text_changed)
         self.findbar.setVisible(False)
 
@@ -570,16 +652,20 @@ class PdfViewerTab(QWidget):
         bar.setSpacing(6)
 
         self._outline_btn = QToolButton()
-        self._outline_btn.setText("Contents")
-        self._outline_btn.setToolTip("Table of contents (F12)")
+        self._outline_btn.setText(_("Contents"))
+        self._outline_btn.setToolTip(_with_keys(
+            _("Table of contents"), _reader_key(_("Show or hide the table of contents"))))
         self._outline_btn.setCheckable(True)
         self._outline_btn.setEnabled(False)
         self._outline_btn.clicked.connect(self.toggle_outline)
         bar.addWidget(self._outline_btn)
         bar.addSpacing(8)
 
-        bar.addWidget(QLabel("Page"))
+        page_label = QLabel(_("Page"))
+        bar.addWidget(page_label)
         self._page_edit = QLineEdit()
+        page_label.setBuddy(self._page_edit)
+        self._page_edit.setAccessibleName(_("Page"))
         self._page_edit.setFixedWidth(48)
         self._page_edit.setAlignment(Qt.AlignCenter)
         # Click-to-focus only: initial focus and Tab must stay with the
@@ -594,75 +680,58 @@ class PdfViewerTab(QWidget):
 
         self._zoom_out_btn = QToolButton()
         self._zoom_out_btn.setText("−")
-        self._zoom_out_btn.setToolTip("Zoom out (Ctrl+-)")
+        # A glyph on the button; its name says what it does.
+        self._zoom_out_btn.setAccessibleName(_("Zoom Out"))
+        self._zoom_out_btn.setToolTip(_with_keys(_("Zoom out"),
+                                                 QKeySequence(QKeySequence.StandardKey.ZoomOut)))
         self._zoom_out_btn.clicked.connect(self.zoom_out)
         bar.addWidget(self._zoom_out_btn)
 
-        self._zoom_label = QLabel("Fit")
+        self._zoom_label = QLabel(_("Fit"))
         self._zoom_label.setMinimumWidth(42)
         self._zoom_label.setAlignment(Qt.AlignCenter)
         bar.addWidget(self._zoom_label)
 
         self._zoom_in_btn = QToolButton()
         self._zoom_in_btn.setText("+")
-        self._zoom_in_btn.setToolTip("Zoom in (Ctrl++)")
+        self._zoom_in_btn.setAccessibleName(_("Zoom In"))
+        self._zoom_in_btn.setToolTip(_with_keys(_("Zoom in"),
+                                                QKeySequence(QKeySequence.StandardKey.ZoomIn)))
         self._zoom_in_btn.clicked.connect(self.zoom_in)
         bar.addWidget(self._zoom_in_btn)
 
         bar.addSpacing(8)
 
         self._fit_width_btn = QToolButton()
-        self._fit_width_btn.setText("Fit Width")
-        self._fit_width_btn.setToolTip("Fit page width (Ctrl+0)")
+        self._fit_width_btn.setText(_("Fit Width"))
+        self._fit_width_btn.setToolTip(_with_keys(_("Fit page width"),
+                                                  _reader_key(_("Fit page width"))))
         self._fit_width_btn.setCheckable(True)
         self._fit_width_btn.setChecked(True)
-        self._fit_width_btn.clicked.connect(lambda: self._set_zoom_mode(QPdfView.ZoomMode.FitToWidth))
+        self._fit_width_btn.clicked.connect(self.fit_width)
         bar.addWidget(self._fit_width_btn)
 
         self._fit_page_btn = QToolButton()
-        self._fit_page_btn.setText("Fit Page")
-        self._fit_page_btn.setToolTip("Fit whole page")
+        self._fit_page_btn.setText(_("Fit Page"))
+        self._fit_page_btn.setToolTip(_with_keys(_("Fit whole page"),
+                                                 _reader_key(_("Fit whole page"))))
         self._fit_page_btn.setCheckable(True)
-        self._fit_page_btn.clicked.connect(lambda: self._set_zoom_mode(QPdfView.ZoomMode.FitInView))
+        self._fit_page_btn.clicked.connect(self.fit_page)
         bar.addWidget(self._fit_page_btn)
 
     def _build_shortcuts(self):
-        # Ctrl combos work anywhere inside the tab, including while the
-        # find bar's edit has focus.
-        for keys, handler in (
-            (QKeySequence.ZoomIn, self.zoom_in),
-            (QKeySequence("Ctrl+="), self.zoom_in),
-            (QKeySequence.ZoomOut, self.zoom_out),
-            (QKeySequence("Ctrl+0"), lambda: self._set_zoom_mode(QPdfView.ZoomMode.FitToWidth)),
-            (QKeySequence("Ctrl+1"), self.actual_size),
-            (QKeySequence("Ctrl+2"), lambda: self._set_zoom_mode(QPdfView.ZoomMode.FitInView)),
-            (QKeySequence(Qt.Key_F12), self.toggle_outline),
-        ):
-            sc = QShortcut(keys, self)
-            sc.setContext(Qt.WidgetWithChildrenShortcut)
-            sc.activated.connect(handler)
-
-        # Bare reading keys bind to the view only, so typing a space, a
-        # letter, or pressing Home in the find bar's edit still edits
-        # text there. j/k/n/p/g mirror SumatraPDF's vim-style bindings.
-        for keys, handler in (
-            (QKeySequence(Qt.Key_Space), lambda: self._scroll_page(+1)),
-            (QKeySequence(Qt.SHIFT | Qt.Key_Space), lambda: self._scroll_page(-1)),
-            (QKeySequence(Qt.Key_Home), lambda: self.jump_to_page(0)),
-            (QKeySequence(Qt.Key_End), lambda: self.jump_to_page(self.document.pageCount() - 1)),
-            (QKeySequence(Qt.Key_J), lambda: self._scroll_lines(+1)),
-            (QKeySequence(Qt.Key_K), lambda: self._scroll_lines(-1)),
-            (QKeySequence(Qt.Key_N), self.next_page),
-            (QKeySequence(Qt.Key_P), self.prev_page),
-            (QKeySequence(Qt.Key_Plus), self.zoom_in),
-            (QKeySequence(Qt.Key_Minus), self.zoom_out),
-            (QKeySequence(Qt.Key_G), self._focus_page_box),
-            (QKeySequence.Copy, self.view.copy_selection),
-            (QKeySequence(Qt.Key_Escape), self.view.clear_selection),
-        ):
-            sc = QShortcut(keys, self.view)
-            sc.setContext(Qt.WidgetShortcut)
-            sc.activated.connect(handler)
+        """The reader's keys (reader_keys): keys with Ctrl anywhere in the
+        tab, including while the find bar's field has focus; bare keys on
+        the page only, so typing a space or a letter in a field types it."""
+        for _section, _words, act, tab_keys, view_keys in reader_keys():
+            if act is None:
+                continue
+            for keys, widget, context in ((tab_keys, self, Qt.WidgetWithChildrenShortcut),
+                                          (view_keys, self.view, Qt.WidgetShortcut)):
+                for text in keys:
+                    shortcut = QShortcut(QKeySequence(text), widget)
+                    shortcut.setContext(context)
+                    shortcut.activated.connect(lambda act=act: act(self))
 
     # -- loading -----------------------------------------------------------
 
@@ -672,13 +741,13 @@ class PdfViewerTab(QWidget):
         error = self.document.load(self._file_path)
         while error == QPdfDocument.Error.IncorrectPassword:
             password, ok = QInputDialog.getText(
-                self, "Password required",
-                f"'{os.path.basename(self._file_path)}' is password protected.\n"
-                "Enter the password to open it:",
+                self, _("Password required"),
+                _("'{name}' is password protected.\nEnter the password to open it:").format(
+                    name=os.path.basename(self._file_path)),
                 QLineEdit.Password,
             )
             if not ok:
-                self.load_error = "The document is password protected."
+                self.load_error = _("The document is password protected.")
                 self.load_ok = False
                 return False
             self.document.setPassword(password)
@@ -686,12 +755,12 @@ class PdfViewerTab(QWidget):
 
         if error != QPdfDocument.Error.None_:
             messages = {
-                QPdfDocument.Error.FileNotFound: "The file could not be found.",
-                QPdfDocument.Error.InvalidFileFormat: "The file is not a valid PDF.",
+                QPdfDocument.Error.FileNotFound: _("The file could not be found."),
+                QPdfDocument.Error.InvalidFileFormat: _("The file is not a valid PDF."),
                 QPdfDocument.Error.UnsupportedSecurityScheme:
-                    "The document uses an unsupported security scheme.",
+                    _("The document uses an unsupported security scheme."),
             }
-            self.load_error = messages.get(error, "The document could not be opened.")
+            self.load_error = messages.get(error, _("The document could not be opened."))
             self.load_ok = False
             return False
 
@@ -715,7 +784,8 @@ class PdfViewerTab(QWidget):
         if self._reload_pending:
             return
         self._reload_pending = True
-        QTimer.singleShot(400, self._do_scheduled_reload)
+        # Tied to the tab: dropped if it is closed meanwhile.
+        QTimer.singleShot(400, self, self._do_scheduled_reload)
 
     def _do_scheduled_reload(self):
         self._reload_pending = False
@@ -736,6 +806,16 @@ class PdfViewerTab(QWidget):
             self.jump_to_page(min(page, self.document.pageCount() - 1))
             self.page_changed.emit()
 
+    def release(self) -> None:
+        """Let go of the document as the tab closes, before it is deleted:
+        Find's results leave the view, and the file is closed, which stops
+        the view rendering it and Find scanning it. (Taking the document
+        from the view or the search instead makes Qt connect to nothing,
+        and say so in the log.)"""
+        self._reload_pending = False
+        self.view.setSearchModel(None)
+        self.document.close()
+
     def document_title(self) -> str:
         """Title from PDF metadata, or the file name without extension."""
         title = self.document.metaData(QPdfDocument.MetaDataField.Title)
@@ -749,7 +829,7 @@ class PdfViewerTab(QWidget):
             self._restore_pending = False
             # Deferred one event-loop turn so the first layout pass has
             # assigned the view its real size before we jump.
-            QTimer.singleShot(0, self._restore_view_state)
+            QTimer.singleShot(0, self, self._restore_view_state)
 
     def _restore_view_state(self):
         state = load_view_state(self._file_path)
@@ -792,7 +872,8 @@ class PdfViewerTab(QWidget):
 
     def page_display(self) -> str:
         """Status-bar text, e.g. "Page 3 / 42"."""
-        return f"Page {self.current_page() + 1} / {self.document.pageCount()}"
+        return _("Page {page} / {total}").format(page=self.current_page() + 1,
+                                                  total=self.document.pageCount())
 
     def _on_page_changed(self, *_):
         self._sync_page_edit()
@@ -862,6 +943,12 @@ class PdfViewerTab(QWidget):
         self._fit_page_btn.setChecked(mode == QPdfView.ZoomMode.FitInView)
         self._update_zoom_label()
 
+    def fit_width(self):
+        self._set_zoom_mode(QPdfView.ZoomMode.FitToWidth)
+
+    def fit_page(self):
+        self._set_zoom_mode(QPdfView.ZoomMode.FitInView)
+
     def zoom_in(self):
         self._apply_custom_zoom(self.view.zoomFactor() * _ZOOM_STEP)
 
@@ -896,9 +983,10 @@ class PdfViewerTab(QWidget):
 
     def _update_zoom_label(self):
         if self.view.zoomMode() == QPdfView.ZoomMode.Custom:
-            self._zoom_label.setText(f"{round(self.view.zoomFactor() * 100)}%")
+            self._zoom_label.setText(_("{percent}%").format(
+                percent=round(self.view.zoomFactor() * 100)))
         else:
-            self._zoom_label.setText("Fit")
+            self._zoom_label.setText(_("Fit"))
 
     # -- find --------------------------------------------------------------
 
@@ -959,9 +1047,10 @@ class PdfViewerTab(QWidget):
             return
         count = self._search.count()
         if count == 0:
-            self.findbar.set_match_info("No matches")
+            self.findbar.set_match_info(_("No matches"))
         elif self._current_result < 0:
-            self.findbar.set_match_info(f"{count} matches")
+            self.findbar.set_match_info(
+                ngettext("{count} match", "{count} matches", count).format(count=count))
         else:
             self.findbar.set_match_info(f"{self._current_result + 1} / {count}")
 
@@ -969,7 +1058,7 @@ class PdfViewerTab(QWidget):
 
     def update_theme(self, is_dark: bool):
         self.is_dark = is_dark
-        self._toolbar.setStyleSheet(_TOOLBAR_DARK_CSS if is_dark else _TOOLBAR_LIGHT_CSS)
+        self._toolbar.setStyleSheet(_toolbar_css(is_dark))
         self.outline.setStyleSheet(_OUTLINE_DARK_CSS if is_dark else _OUTLINE_LIGHT_CSS)
         self.findbar.is_dark = is_dark
         self.findbar._update_theme()

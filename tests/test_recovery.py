@@ -10,7 +10,9 @@ The defect classes this file guards against:
 - a record written by a newer build being guessed at or overwritten,
 - a stale backup restoring with its original path, so one Ctrl+S
   overwrites hours of newer work,
-- Save As over the same path removing the live backup.
+- Save As over the same path removing the live backup,
+- a quote, a code block or inline code coming back from a crash as
+  plain paragraphs (HTML cannot hold them; the Markdown kept beside it can).
 """
 
 import json
@@ -93,10 +95,14 @@ def _window_stub():
         editors.append(ed)
         return ed
 
-    return types.SimpleNamespace(
+    stub = types.SimpleNamespace(
         _new_wired_editor=new_editor,
+        _new_backup=lambda ed, path: recovery.EditorBackup(ed, path),
         _reload_from_disk=lambda *a: None,
         _attach_close_button=lambda *a: None,
+        _attach_highlighter=lambda *a: None,
+        _remember_split=lambda *a: None,
+        _width_changed=lambda *a: None,
         _asset_manager=types.SimpleNamespace(adopt_data_uri=lambda uri: None),
         _watcher=types.SimpleNamespace(addPath=lambda p: None),
         is_dark_theme=False,
@@ -104,6 +110,8 @@ def _window_stub():
         tabs=_Tabs(),
         editors=editors,
     )
+    stub._editor_container = lambda ed: MainWindow._editor_container(stub, ed)
+    return stub
 
 
 # --------------------------------------------------------------------------- #
@@ -145,6 +153,23 @@ def test_restore_of_a_stale_record_removes_the_old_file(tmp_path):
     assert not os.path.exists(record["_backup_file"])
     surviving = recovery.find_all_backups()
     assert [r.get("original_path") for r in surviving] == [None]
+
+
+def test_a_record_spelling_its_file_another_way_restores_under_the_one_spelling(tmp_path):
+    # An older version kept paths as they arrived: with Qt's forward
+    # slashes on Windows, or with steps back. The tab and its new backup
+    # take the one spelling (file_paths), so the file cannot open twice.
+    source = tmp_path / "note.html"
+    source.write_text("<p>on disk</p>", encoding="utf-8")
+    (tmp_path / "sub").mkdir()
+    spelled = (tmp_path / "sub").as_posix() + "/../note.html"
+    assert recovery.EditorBackup(_editor("unsaved edit"), spelled).write_now()
+    record = recovery.find_all_backups()[0]
+
+    restored = MainWindow._restore_one_backup(_window_stub(), record)
+
+    assert restored._file_path == str(source)
+    assert [r["original_path"] for r in recovery.find_all_backups()] == [str(source)]
 
 
 # --------------------------------------------------------------------------- #
@@ -369,7 +394,7 @@ def test_a_forward_version_record_is_left_on_disk_and_skipped(tmp_path):
     record = dict(json.loads(payload), _backup_file=str(path))
     win = _window_stub()
 
-    assert MainWindow._restore_one_backup(win, record) is False
+    assert MainWindow._restore_one_backup(win, record) is None
 
     assert path.read_text(encoding="utf-8") == payload
     assert win.tabs.titles == []
@@ -383,9 +408,73 @@ def test_an_unknown_format_is_left_on_disk_and_skipped(tmp_path):
     record = dict(json.loads(payload), _backup_file=str(path))
     win = _window_stub()
 
-    assert MainWindow._restore_one_backup(win, record) is False
+    assert MainWindow._restore_one_backup(win, record) is None
 
     assert path.read_text(encoding="utf-8") == payload
+
+
+# --------------------------------------------------------------------------- #
+# The helpers crash recovery and the update restart share
+# --------------------------------------------------------------------------- #
+
+def test_restoring_returns_the_editor_it_opened(tmp_path):
+    path = tmp_path / "old.autosave"
+    path.write_text("{}", encoding="utf-8")
+    record = {"original_path": None, "content": "x", "_backup_file": str(path)}
+    win = _window_stub()
+    assert MainWindow._restore_one_backup(win, record) is win.editors[-1]
+
+
+def test_only_known_formats_are_restorable():
+    assert recovery.is_restorable({})                                   # version 1, plain text
+    assert recovery.is_restorable({"version": 2, "format": "html"})
+    assert not recovery.is_restorable({"version": 3, "format": "html"})  # a newer build
+    assert not recovery.is_restorable({"version": 2, "format": "rtf"})
+    assert not recovery.is_restorable({"version": True, "format": "html"})
+    assert not recovery.is_restorable({"version": "2", "format": "html"})
+
+
+def test_loading_a_backup_leaves_no_undo_history_and_the_given_modified_flag():
+    ed = HtmlEditor()
+    recovery.load_backup_content(ed, {"version": 2, "format": "html",
+                                      "content": "<p>kept</p>"}, modified=False)
+    assert ed.toPlainText() == "kept"
+    assert not ed.document().isModified()
+    assert not ed.document().isUndoAvailable()
+
+    recovery.load_backup_content(ed, {"content": "a <b> tag"})   # version 1: plain text
+    assert ed.toPlainText() == "a <b> tag"
+    assert ed.document().isModified()
+
+
+def test_taking_over_writes_the_replacement_before_removing_the_old_record(tmp_path):
+    old = tmp_path / "old.autosave"
+    old.write_text("{}", encoding="utf-8")
+    backup = recovery.EditorBackup(_editor("restored"), None)
+    assert backup.take_over(str(old))
+    assert not old.exists()
+    assert _record_of(backup)["content"]
+
+
+def test_taking_over_keeps_the_old_record_when_nothing_could_be_written(tmp_path):
+    old = tmp_path / "old.autosave"
+    old.write_text("{}", encoding="utf-8")
+    backup = recovery.EditorBackup(HtmlEditor(), None)   # empty: nothing to write
+    assert backup.take_over(str(old)) is False
+    assert old.exists()
+
+
+def test_taking_over_its_own_file_keeps_it(tmp_path):
+    backup = recovery.EditorBackup(_editor("restored"), str(tmp_path / "note.html"))
+    assert backup.write_now()
+    assert backup.take_over(backup.path)
+    assert os.path.exists(backup.path)
+
+
+def test_an_empty_document_is_empty_and_an_image_is_not():
+    assert recovery.document_is_empty(HtmlEditor().document())
+    assert not recovery.document_is_empty(_editor("x").document())
+    assert not recovery.document_is_empty(_editor_with_image(text="").document())
 
 
 # --------------------------------------------------------------------------- #
@@ -427,3 +516,343 @@ def test_a_stale_restore_cannot_overwrite_the_newer_file(tmp_path):
 
     assert win.editors[-1]._file_path is None, "Ctrl+S has to go through Save As"
     assert win.tabs.titles == ["note.html (recovered copy)*"]
+
+
+def test_a_backup_that_cannot_be_finished_leaves_the_previous_one_whole(tmp_path, monkeypatch):
+    # The moment a backup matters most is a crash, which is also when its
+    # own write may be cut short. The previous backup must survive that.
+    import atomic_file
+
+    ed = _editor("first version")
+    backup = recovery.EditorBackup(ed, str(tmp_path / "note.html"))
+    assert backup.write_now()
+    before = _record_of(backup)["content"]
+
+    ed.setHtml("<p>second version</p>")
+    monkeypatch.setattr(atomic_file, "_replace",
+                        lambda *_: (_ for _ in ()).throw(OSError(5, "I/O error")))
+    assert backup.write_now() is False
+    assert _record_of(backup)["content"] == before
+    assert not [n for n in os.listdir(os.path.dirname(backup.path)) if n.endswith(".tmp")]
+
+
+# --------------------------------------------------------------------------- #
+# A crash gives back exactly what was typed, structure included
+# --------------------------------------------------------------------------- #
+
+def _markdown_editor(markdown: str) -> HtmlEditor:
+    from markdown_writer import read_markdown
+    ed = HtmlEditor()
+    read_markdown(ed.document(), markdown)
+    return ed
+
+
+def _restored(backup) -> HtmlEditor:
+    restored = HtmlEditor()
+    recovery.load_backup_content(restored, _record_of(backup))
+    return restored
+
+
+STRUCTURED = "Intro with `code`.\n\n> A quote\n\n```python\nprint(1)\n```\n"
+
+
+def test_quotes_and_code_survive_backup_and_restore(tmp_path):
+    from markdown_writer import document_to_markdown
+    backup = recovery.EditorBackup(_markdown_editor(STRUCTURED), None)
+    assert backup.write_now()
+    record = _record_of(backup)
+    assert record["structure"]["blocks"] and record["structure"]["code"]
+    assert record["format"] == "html" and record["content"]   # older builds read this
+    assert document_to_markdown(_restored(backup).document()) == STRUCTURED
+
+
+def test_a_document_html_keeps_whole_has_no_structure_list(tmp_path):
+    backup = recovery.EditorBackup(_markdown_editor("# Title\n\n- one\n- two\n"), None)
+    assert backup.write_now()
+    assert "structure" not in _record_of(backup)
+
+
+def test_colors_and_code_survive_together(tmp_path):
+    from PySide6.QtGui import QColor, QTextCharFormat, QTextCursor
+    from markdown_writer import document_to_markdown
+    ed = _markdown_editor(STRUCTURED)
+    cursor = QTextCursor(ed.document())
+    cursor.movePosition(QTextCursor.MoveOperation.NextWord, QTextCursor.MoveMode.KeepAnchor)
+    red = QTextCharFormat()
+    red.setForeground(QColor("red"))
+    cursor.mergeCharFormat(red)
+    backup = recovery.EditorBackup(ed, None)
+    assert backup.write_now()
+    restored = _restored(backup)
+    assert document_to_markdown(restored.document()) == STRUCTURED
+    first = QTextCursor(restored.document())
+    first.setPosition(1)
+    assert first.charFormat().foreground().color() == QColor("red")
+
+
+@pytest.mark.parametrize("typed", [
+    "In HTML, <br> breaks a line.",
+    "Write &amp; for an ampersand.",
+    "A star stays \\* here, and *this* too.",
+    "Hidden <!-- note --> words.",
+    "    four spaces first",
+    "Backticks `around` a word, and <b>tags</b>.",
+])
+def test_typed_markdown_characters_come_back_as_typed(typed):
+    # Review F1: a restore that read the backup as Markdown lost the rest
+    # of the document after a typed <br>, and changed entities and escapes.
+    from PySide6.QtGui import QTextCursor
+    ed = HtmlEditor()
+    cursor = ed.textCursor()
+    cursor.insertText("Code: ")
+    code = rich_text_style_code()
+    cursor.insertText("x = 1", code)
+    cursor.insertText(" end", code.__class__())
+    cursor.insertBlock()
+    cursor.insertText(typed)
+    cursor.insertBlock()
+    cursor.insertText("Second paragraph.")
+    cursor.insertBlock()
+    cursor.insertText("Third paragraph.")
+    backup = recovery.EditorBackup(ed, None)
+    assert backup.write_now()
+    restored = _restored(backup)
+    assert restored.toPlainText() == ed.toPlainText()
+    probe = QTextCursor(restored.document())
+    probe.setPosition(len("Code: ") + 2)
+    assert probe.charFormat().fontFixedPitch()          # the inline code is back too
+
+
+def rich_text_style_code():
+    import rich_text
+    return rich_text.style_format(rich_text.CODE, True)
+
+
+def test_a_note_comes_back_without_new_blank_lines():
+    from markdown_writer import document_to_note_text
+    ed = HtmlEditor()
+    ed.setPlainText("first line\nsecond line\nthird line")
+    cursor = ed.textCursor()
+    cursor.setPosition(0)
+    cursor.setPosition(5, cursor.MoveMode.KeepAnchor)
+    cursor.mergeCharFormat(rich_text_style_code())
+    backup = recovery.EditorBackup(ed, None)
+    assert backup.write_now()
+    assert document_to_note_text(_restored(backup).document()) == document_to_note_text(
+        ed.document())
+
+
+def test_an_html_document_keeps_its_html_formatting():
+    # Alignment, sub- and superscript and a merged cell, next to inline
+    # code: the HTML keeps them, the structure list adds the code. A size
+    # the page set is not kept: the text size is the person's (export_html,
+    # _drop_page_fonts), as it is when the file is saved and opened.
+    from PySide6.QtGui import QTextCursor
+    ed = HtmlEditor()
+    ed.setHtml('<p align="center"><span style="font-size:20pt">Big</span> H<sub>2</sub>O '
+               'x<sup>2</sup> <code>code</code></p><table border="1"><tr>'
+               '<td colspan="2">merged</td></tr><tr><td>a</td><td>b</td></tr></table>')
+    probe = QTextCursor(ed.document())
+    probe.setPosition(ed.toPlainText().index("code") + 1)
+    whole = QTextCursor(ed.document())
+    whole.setPosition(ed.toPlainText().index("code"))
+    whole.setPosition(ed.toPlainText().index("code") + 4, QTextCursor.MoveMode.KeepAnchor)
+    whole.mergeCharFormat(rich_text_style_code())
+    backup = recovery.EditorBackup(ed, "/tmp/page.html")
+    assert backup.write_now()
+    kept = _restored(backup)                     # the editor owns the document
+    restored = kept.document()
+    first = restored.begin()
+    assert first.blockFormat().alignment() & __import__("PySide6.QtCore").QtCore.Qt.AlignHCenter
+    sizes = [f.charFormat().fontPointSize() for f in _fragments(first)]
+    assert set(sizes) == {0}
+    aligns = [f.charFormat().verticalAlignment() for f in _fragments(first)]
+    from PySide6.QtGui import QTextCharFormat
+    assert QTextCharFormat.VerticalAlignment.AlignSubScript in aligns
+    assert QTextCharFormat.VerticalAlignment.AlignSuperScript in aligns
+    assert any(f.charFormat().fontFixedPitch() for f in _fragments(first))
+    cell = QTextCursor(restored.findBlock(restored.toPlainText().index("merged")))
+    assert cell.currentTable().cellAt(cell).columnSpan() == 2
+
+
+def _fragments(block):
+    it = block.begin()
+    while not it.atEnd():
+        if it.fragment().isValid():
+            yield it.fragment()
+        it += 1
+
+
+def test_a_structure_list_for_other_text_is_not_applied():
+    from markdown_writer import document_to_markdown
+    backup = recovery.EditorBackup(_markdown_editor(STRUCTURED), None)
+    assert backup.write_now()
+    record = _record_of(backup)
+    record["content"] = record["content"].replace("Intro", "Other")
+    restored = HtmlEditor()
+    recovery.load_backup_content(restored, record)
+    assert restored.toPlainText().startswith("Other with code.")
+    assert ">" not in document_to_markdown(restored.document())   # no quote put on wrong text
+
+
+def test_an_older_markdown_record_is_used_only_when_it_gives_back_the_text():
+    from markdown_writer import document_to_markdown
+    ed = _markdown_editor(STRUCTURED)
+    backup = recovery.EditorBackup(ed, None)
+    assert backup.write_now()
+    record = _record_of(backup)
+    del record["structure"]
+    record["markdown"] = STRUCTURED                    # as an earlier build wrote it
+    restored = HtmlEditor()
+    recovery.load_backup_content(restored, record)
+    assert document_to_markdown(restored.document()) == STRUCTURED
+    # Typed text the Markdown would change: the HTML wins.
+    typed = HtmlEditor()
+    typed.setPlainText("In HTML, <br> breaks a line.\nMore text.")
+    backup = recovery.EditorBackup(typed, None)
+    assert backup.write_now()
+    record = _record_of(backup)
+    record["markdown"] = "In HTML, <br> breaks a line.\n\nMore text.\n"
+    restored = HtmlEditor()
+    recovery.load_backup_content(restored, record)
+    assert restored.toPlainText() == "In HTML, <br> breaks a line.\nMore text."
+
+
+def test_an_idle_tab_is_not_written_again(monkeypatch):
+    # Review L1 (early range): every tick rebuilt the snapshot of every
+    # open tab, typing or not.
+    backup = recovery.EditorBackup(_markdown_editor(STRUCTURED), None)
+    assert backup.write_now()
+    built = []
+    original = backup._snapshot
+    monkeypatch.setattr(backup, "_snapshot", lambda: built.append(1) or original())
+    assert backup.write_now()
+    assert built == []
+    backup._editor.textCursor().insertText("more")
+    assert backup.write_now()
+    assert built == [1]
+
+
+def test_typed_footnotes_survive_a_crash():
+    # Review H3: restored from Markdown, "[^2]: Ibid." was read as a link
+    # definition and lost.
+    from markdown_writer import document_to_markdown
+    ed = _markdown_editor("> A quote\n")
+    cursor = ed.textCursor()
+    cursor.movePosition(cursor.MoveOperation.End)
+    for line in ("A claim[^1] and another[^2].", "[^1]: https://example.com/source",
+                 "[^2]: Ibid."):
+        cursor.insertBlock(__import__("PySide6.QtGui").QtGui.QTextBlockFormat())
+        cursor.insertText(line)
+    backup = recovery.EditorBackup(ed, None)
+    assert backup.write_now()
+    restored = _restored(backup)
+    assert restored.toPlainText() == ed.toPlainText()
+    assert document_to_markdown(restored.document()) == document_to_markdown(ed.document())
+
+
+def test_a_document_opened_as_markdown_text_stays_that_way(tmp_path):
+    ed = HtmlEditor()
+    ed.setPlainText("A claim[^1].\n\n[^1]: The source.")
+    ed._markdown_source = True
+    backup = recovery.EditorBackup(ed, None)
+    assert backup.write_now()
+
+    restored = HtmlEditor()
+    recovery.load_backup_content(restored, _record_of(backup))
+    assert restored._markdown_source is True
+    assert restored.toPlainText() == "A claim[^1].\n\n[^1]: The source."
+
+
+def test_backups_follow_the_typing_closely():
+    assert recovery._DEBOUNCE_MS == 2_000
+    assert recovery._MAX_INTERVAL_MS == 15_000
+
+
+
+# --------------------------------------------------------------------------- #
+# A backup that cannot be kept says so (decision Q-J)
+# --------------------------------------------------------------------------- #
+
+def test_a_failed_backup_is_reported_and_so_is_its_recovery(tmp_path, monkeypatch):
+    import atomic_file
+    ed = _editor("words worth keeping")
+    backup = recovery.EditorBackup(ed, str(tmp_path / "note.html"))
+    heard = []
+    backup.set_status_listener(heard.append)
+    assert backup.write_now() and heard == []            # silent while it works
+    real = atomic_file._replace
+    monkeypatch.setattr(atomic_file, "_replace",
+                        lambda *_: (_ for _ in ()).throw(OSError(28, "No space left")))
+    ed.setHtml("<p>more words</p>")
+    assert backup.write_now() is False
+    assert backup.problem == recovery.WRITE_FAILED and heard == [recovery.WRITE_FAILED]
+    ed.setHtml("<p>even more</p>")
+    backup.write_now()
+    assert heard == [recovery.WRITE_FAILED]              # said once, not on every tick
+    monkeypatch.setattr(atomic_file, "_replace", real)
+    assert backup.write_now()
+    assert backup.problem == recovery.KEPT and heard == [recovery.WRITE_FAILED, recovery.KEPT]
+
+
+def test_a_document_too_large_to_back_up_says_so(monkeypatch):
+    monkeypatch.setattr(recovery, "MAX_BACKUP_BYTES", 10)
+    ed = _editor("a document longer than ten bytes")
+    backup = recovery.EditorBackup(ed, None)
+    assert backup.write_now() is False
+    assert backup.problem == recovery.TOO_LARGE
+
+
+# -- a document locked with a password (locked_files.py) -----------------------
+
+def test_a_locked_documents_backup_holds_nothing_in_the_clear():
+    from locked_files import Lock
+    ed = _editor("private words")
+    ed._lock = Lock("correct horse")
+    backup = recovery.EditorBackup(ed, "/tmp/diary.md")
+    assert backup.write_now()
+    with open(backup.path, "rb") as f:
+        written = f.read()
+    assert b"private words" not in written
+    record = _record_of(backup)
+    assert record["format"] == recovery.SEALED and recovery.is_restorable(record)
+    assert record["original_path"] == "/tmp/diary.md"        # where it goes back to
+    lock, opened = recovery.unseal_backup(record, "correct horse")
+    assert "private words" in opened["content"] and opened["format"] == "html"
+    assert lock.matches("correct horse")
+
+
+def test_a_sealed_backup_needs_the_password_and_older_builds_leave_it():
+    from locked_files import Lock, WrongPassword
+    ed = _editor("private words")
+    ed._lock = Lock("correct horse")
+    backup = recovery.EditorBackup(ed, None)
+    assert backup.write_now()
+    record = _record_of(backup)
+    with pytest.raises(WrongPassword):
+        recovery.unseal_backup(record, "wrong")
+    # A build before locking knew the "html" format only: it leaves this be.
+    assert record["format"] != "html"
+
+
+def test_a_locked_documents_pictures_stay_inside_its_sealed_backup():
+    from locked_files import Lock
+    ed = _editor("words")
+    ed._lock = Lock("correct horse")
+    handed_out = []
+    backup = recovery.EditorBackup(ed, None, externalize=lambda uri: handed_out.append(uri))
+    big = "data:image/png;base64," + "A" * (recovery.MIN_EXTERNALIZE_BYTES + 10)
+    ed.textCursor().insertHtml(f'<img src="{big}">')
+    assert backup.write_now()
+    assert handed_out == []
+
+
+def test_locking_a_document_seals_its_backup_at_once():
+    from locked_files import Lock
+    ed = _editor("private words")
+    backup = recovery.EditorBackup(ed, None)
+    assert backup.write_now()
+    assert _record_of(backup)["format"] == "html"
+    ed._lock = Lock("correct horse")
+    assert backup.write_now()                       # no word changed
+    assert _record_of(backup)["format"] == recovery.SEALED

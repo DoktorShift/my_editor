@@ -1,32 +1,31 @@
 # SPDX-FileCopyrightText: 2026 rinbal
 # SPDX-License-Identifier: AGPL-3.0-or-later
-"""The consent gate: the last thing between a private file and the public.
+"""The question before a private image is shared, and the sharing itself.
 
-Publishing a private picture is not a setting change, it is a new file on
-a public server that anyone with the address can open, and it cannot be
-unsent. So this dialog does the four things a person needs before they
-can answer honestly: it says what will be created, it says what will not
-change, it says what is stripped on the way, and it says what it costs.
+Sharing a private image is not a setting change: it makes a new file on
+a public server that anyone with the link can open, and it cannot be
+unsent. So it is asked, in an alert's words: what happens (anyone with
+the link will see it) and what is done on the way (camera and location
+details are removed). The mechanics, a second file beside the private
+original, decrypted and re-encoded here, stay in the background.
 
-The order matters. The explanation comes first and nothing moves until
-the user answers it: ``PublicCopyMaker.ensure_public_copies`` asks for
+The order matters. The question comes first and nothing moves until the
+person answers it: ``PublicCopyMaker.ensure_public_copies`` asks for
 consent before a single byte is fetched, so a refusal here leaves
 nothing uploaded and nothing recorded, which is exactly what the button
-promises. Only after that does the same window become a progress view,
-so the user watches the thing they just agreed to rather than being
-handed a second dialog they have to interpret.
+promises. Only after that does the same window show the sharing going,
+with one bar, so the person watches what they just agreed to.
 
 Two rules shape the failure side:
 
   A partial set is never a success. The copies that were made are in the
-  ledger and are named, because a public blob the user cannot see is one
-  they cannot revoke, but the publish they asked for does not go ahead
-  with a file missing. ``PublishSet.blobs`` is None and the caller stops.
+  ledger, and the message says Stop Sharing in the Media Library removes
+  them, but the insert or publish asked for does not go ahead with a
+  file missing. ``PublishSet.blobs`` is None and the caller stops.
 
-  Retry is offered for failures only. The copies that succeeded are in
-  the ledger, so a second run finds them there and reuses them; nothing
-  is fetched twice and nothing is uploaded twice. That is a property of
-  the ledger, not of this dialog remembering anything.
+  Try Again runs the set again, and only the failures cost anything: the
+  copies that succeeded are in the ledger, so the maker reuses them;
+  nothing is fetched or uploaded twice.
 
 The dialog owns the run rather than being driven by it, which is what
 lets the whole state machine be tested by calling methods: no modal
@@ -36,30 +35,26 @@ loop, no event loop, no signer, no network.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Sequence
+from typing import List, Optional, Sequence
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QDialog,
     QHBoxLayout,
     QLabel,
-    QListWidget,
-    QListWidgetItem,
     QProgressBar,
     QPushButton,
     QVBoxLayout,
     QWidget,
 )
 
-from ..media.media_visibility import UNKNOWN, MediaVisibility
-from ..media.publish_copy import CopyStage, PublicCopyMaker, PublishSet
-from ..media.visibility import PrivateBlob, PublicBlob
-# This dialog is the second half of the picker's flow, so it borrows the
-# picker's stylesheet rather than growing one of its own. Two windows in
-# one gesture that do not look like the same app is how a consent prompt
-# starts reading like something that arrived from somewhere else.
-from .media_library_dialog import _DARK_CSS, _LIGHT_CSS, _format_size
+from i18n import _, ngettext
 
+from ..media.media_visibility import UNKNOWN, MediaVisibility
+from ..media.publish_copy import PublicCopyMaker, PublishSet
+from ..media.scrub import can_scrub
+from ..media.visibility import PrivateBlob, PublicBlob
+import theme
 
 # The dialog's own states. ``EXPLAIN`` is the only one from which
 # nothing has happened yet, which is what makes its Cancel honest.
@@ -69,44 +64,12 @@ FAILED = "failed"
 CANCELLED = "cancelled"
 
 
-# One line per stage, in the order a copy passes through them.
-# ``progress-indicators.md``: "If it's helpful, display a description
-# that provides additional context for the task. Be accurate and
-# succinct. Avoid vague terms like loading or authenticating because
-# they seldom add value." So these name the actual step, and the scrub
-# names what it removes rather than calling itself "preparing".
-WAITING = "waiting"
-_STAGE_TEXT: Dict[str, str] = {
-    WAITING: "Waiting",
-    CopyStage.CHECKING: "Checking",
-    CopyStage.FETCHING: "Downloading the original",
-    CopyStage.DECRYPTING: "Decrypting",
-    CopyStage.PREPARING: "Removing camera and location data",
-    CopyStage.UPLOADING: "Uploading the copy",
-    CopyStage.RECORDING: "Recording it as public",
-    CopyStage.REUSED: "Already has a public copy",
-    CopyStage.DONE: "Public copy created",
-    CopyStage.FAILED: "Failed",
-    CopyStage.CANCELLED: "Cancelled, nothing was uploaded",
-}
-
-# The four promises, in the order they answer "what happens to me".
-# ``writing.md``: "Be clear. Choose words that are easily understood and
-# convey the right thing."
-_PROMISES = (
-    "A separate public copy is uploaded. Anyone with its address can open it.",
-    "The private original is not changed, moved or unlocked. It stays private.",
-    "Camera and location details are removed from the copy before it is sent.",
-    "You can revoke the copy later. It is listed with your published media.",
-)
-
-# What a pick is refused with when nobody has been able to check it. It
-# names the state, the consequence and the way out, because "unknown" on
-# its own reads as a bug rather than as something the user can clear.
-_UNCHECKED_PICK = (
-    "This picture has not been checked against your private library, so it "
-    "was not used. Wait for the library to finish opening, or reconnect your "
-    "signer, then try again."
+# What a pick is refused with when nobody has been able to check whether
+# it is private. Said as what to do, because "unknown" on its own reads
+# as a bug rather than as something the person can clear.
+_UNCHECKED_PICK = _(
+    "MyEditor couldn’t check yet whether this image is private. Try again "
+    "in a moment, or check your signer app."
 )
 
 
@@ -140,10 +103,12 @@ class PublishCopyDialog(QDialog):
         parent: Optional[QWidget] = None,
     ) -> None:
         super().__init__(parent)
-        self.setWindowTitle("Create a public copy")
+        self.setWindowTitle(_("Share"))
         self.setModal(True)
-        self.resize(560, 460)
-        self.setStyleSheet(_DARK_CSS if is_dark else _LIGHT_CSS)
+        self.setMinimumWidth(380)
+        self.setStyleSheet(theme.dialog_stylesheet(is_dark) + (
+            "QLabel#copy_heading { font-size: 14px; font-weight: 600; }\n"
+            f"QLabel#copy_status {{ color: {theme.attention_color(is_dark)}; }}\n"))
 
         self._maker = maker
         self._blobs = list(blobs)
@@ -165,13 +130,11 @@ class PublishCopyDialog(QDialog):
 
         self._state = EXPLAIN
         self._publish_set: Optional[PublishSet] = None
-        self._rows: Dict[str, QListWidgetItem] = {}
         self._settled = 0
 
         self._build_ui()
         self._apply_state()
 
-        maker.copy_progress.connect(self._on_copy_progress)
         maker.run_progress.connect(self._on_run_progress)
 
     # -- what the caller reads ---------------------------------------------
@@ -198,45 +161,39 @@ class PublishCopyDialog(QDialog):
 
     def _build_ui(self) -> None:
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(18, 16, 18, 16)
+        layout.setContentsMargins(20, 18, 20, 16)
         layout.setSpacing(10)
 
         self._heading = QLabel("")
-        font = self._heading.font()
-        font.setPointSize(font.pointSize() + 1)
-        font.setBold(True)
-        self._heading.setFont(font)
+        self._heading.setObjectName("copy_heading")
         self._heading.setWordWrap(True)
+        self._heading.setTextFormat(Qt.PlainText)
         layout.addWidget(self._heading)
 
-        self._promises = QLabel("\n".join(f"·  {line}" for line in _PROMISES))
-        self._promises.setWordWrap(True)
-        layout.addWidget(self._promises)
+        count = len(self._pending)
+        self._message = QLabel(ngettext(
+            "Anyone with the link will be able to see it. Camera and location "
+            "details are removed first.",
+            "Anyone with the link will be able to see them. Camera and location "
+            "details are removed first.",
+            count,
+        ))
+        self._message.setWordWrap(True)
+        layout.addWidget(self._message)
 
-        self._storage = QLabel("")
-        self._storage.setObjectName("media_hint")
-        self._storage.setWordWrap(True)
-        layout.addWidget(self._storage)
-
-        self._list = QListWidget()
-        self._list.setSelectionMode(QListWidget.NoSelection)
-        layout.addWidget(self._list, 1)
-        for blob in self._pending:
-            item = QListWidgetItem(_row_text(blob, WAITING))
-            self._list.addItem(item)
-            self._rows[blob.sha256] = item
-
-        # Determinate, because the number of copies is known before the
+        # Determinate, because the number of images is known before the
         # first one starts. progress-indicators.md: "When possible, use a
         # determinate progress indicator."
         self._progress = QProgressBar()
-        self._progress.setRange(0, max(1, len(self._pending)))
+        self._progress.setRange(0, max(1, count))
         self._progress.setValue(0)
+        self._progress.setTextVisible(False)
+        self._progress.setAccessibleName(_("Sharing"))
         self._progress.setVisible(False)
         layout.addWidget(self._progress)
 
         self._status = QLabel("")
-        self._status.setObjectName("media_status")
+        self._status.setObjectName("copy_status")
         self._status.setWordWrap(True)
         # A failed upload puts the server's own words in here, and QLabel
         # renders markup unless it is told not to guess.
@@ -246,19 +203,15 @@ class PublishCopyDialog(QDialog):
         buttons = QHBoxLayout()
         buttons.setSpacing(8)
         buttons.addStretch(1)
-        self._cancel_btn = QPushButton("Cancel")
+        self._cancel_btn = QPushButton(_("Cancel"))
         self._cancel_btn.clicked.connect(self._on_cancel_clicked)
         buttons.addWidget(self._cancel_btn)
-        self._retry_btn = QPushButton("Try again")
+        self._retry_btn = QPushButton(_("Try Again"))
         self._retry_btn.clicked.connect(self._on_retry_clicked)
         self._retry_btn.setVisible(False)
         buttons.addWidget(self._retry_btn)
         # The action button says what it does rather than saying OK.
-        # alerts.md: "A specific button title like 'Erase,' 'Convert,'
-        # 'Clear,' or 'Delete' helps people understand the action they're
-        # taking."
-        self._create_btn = QPushButton(_create_label(len(self._pending)))
-        self._create_btn.setObjectName("media_primary")
+        self._create_btn = QPushButton(_("Share"))
         self._create_btn.setDefault(True)
         self._create_btn.clicked.connect(self._on_create_clicked)
         buttons.addWidget(self._create_btn)
@@ -270,37 +223,33 @@ class PublishCopyDialog(QDialog):
         count = len(self._pending)
         explaining = self._state == EXPLAIN
         working = self._state == WORKING
+        name = _name_of(self._pending)
 
-        if explaining:
-            if not count:
-                # Reachable only from a caller that did not check first;
-                # ``resolve_pick`` never opens the dialog for a set that
-                # is already public, because there is nothing to consent
-                # to and a modal asking about nothing is noise.
-                self._heading.setText("These pictures already have public copies.")
-            else:
-                self._heading.setText(
-                    "Create a public copy of this picture?"
-                    if count == 1
-                    else f"Create public copies of these {count} pictures?"
-                )
+        if explaining and not count:
+            # Reachable only from a caller that did not check first;
+            # ``resolve_pick`` never opens the dialog for a set that is
+            # shared already, because there is nothing to ask.
+            self._heading.setText(_("These images are shared already."))
+        elif explaining:
+            self._heading.setText(
+                _("Share this image?") if count == 1 and not name else
+                ngettext("Share “{name}”?", "Share {count} images?",
+                         count).format(name=name, count=count))
         elif working:
             self._heading.setText(
-                "Creating the public copy…"
-                if count == 1
-                else f"Creating {count} public copies…"
-            )
+                _("Sharing this image…") if count == 1 and not name else
+                ngettext("Sharing “{name}”…", "Sharing {count} images…",
+                         count).format(name=name, count=count))
 
-        self._promises.setVisible(explaining)
-        self._storage.setVisible(explaining)
-        self._storage.setText(_storage_line(self._pending))
+        self._message.setVisible(explaining and bool(count))
+        self._create_btn.setText(_("Share") if count else _("Continue"))
         self._progress.setVisible(working)
         self._create_btn.setVisible(explaining)
         self._retry_btn.setVisible(self._state in (FAILED, CANCELLED))
         # There is nothing to halt before the run starts and nothing to
         # halt after it has stopped, so the one button changes meaning
         # with the state rather than sitting there doing nothing.
-        self._cancel_btn.setText("Cancel" if explaining or working else "Close")
+        self._cancel_btn.setText(_("Cancel") if explaining or working else _("Close"))
 
     # -- the run -----------------------------------------------------------
 
@@ -322,10 +271,6 @@ class PublishCopyDialog(QDialog):
         """
         if self._state not in (FAILED, CANCELLED):
             return
-        for sha, item in self._rows.items():
-            blob = self._blob(sha)
-            if blob is not None and self._maker.existing_copy(blob) is None:
-                item.setText(_row_text(blob, WAITING))
         self._start_run()
 
     def _start_run(self) -> None:
@@ -352,21 +297,10 @@ class PublishCopyDialog(QDialog):
         """
         return all(blob.sha256 in self._agreed for blob in needed)
 
-    def _on_copy_progress(self, sha: str, stage: str) -> None:
-        item = self._rows.get(sha)
-        blob = self._blob(sha)
-        if item is None or blob is None:
-            return
-        item.setText(_row_text(blob, stage))
-
     def _on_run_progress(self, done: int, total: int) -> None:
         self._settled = done
         self._progress.setRange(0, max(1, total))
         self._progress.setValue(done)
-        # feedback.md: "Consider integrating status feedback into your
-        # interface... people get important information without having to
-        # take action or leave their current context."
-        self._status.setText(f"{done} of {total} settled.")
 
     def _on_run_done(self, outcome: PublishSet) -> None:
         self._publish_set = outcome
@@ -401,7 +335,7 @@ class PublishCopyDialog(QDialog):
         pointing at it. The dialog closes when the run answers.
         """
         if self._state == WORKING:
-            self._status.setText("Stopping. Nothing new will be uploaded.")
+            self._status.setText(_("Stopping…"))
             self._maker.cancel()
             return
         super().reject()
@@ -417,23 +351,11 @@ class PublishCopyDialog(QDialog):
     def done(self, result: int) -> None:
         # The maker outlives this dialog, so its signals must not keep
         # arriving at a widget Qt is about to delete.
-        for signal, slot in (
-            (self._maker.copy_progress, self._on_copy_progress),
-            (self._maker.run_progress, self._on_run_progress),
-        ):
-            try:
-                signal.disconnect(slot)
-            except (RuntimeError, TypeError):
-                pass
+        try:
+            self._maker.run_progress.disconnect(self._on_run_progress)
+        except (RuntimeError, TypeError):
+            pass
         super().done(result)
-
-    # -- internals ---------------------------------------------------------
-
-    def _blob(self, sha: str) -> Optional[PrivateBlob]:
-        for blob in self._pending:
-            if blob.sha256 == sha:
-                return blob
-        return None
 
 
 # --------------------------------------------------------------------------- #
@@ -481,11 +403,18 @@ def resolve_pick(
             ok=True,
         )
 
+    if not all(can_scrub(blob.mime) for blob in private):
+        # The question promises the camera and location details are
+        # removed; for a kind this app cannot clean, that would be untrue.
+        return PickResolution(
+            reason=_("MyEditor can’t share this kind of private file yet, because it "
+                     "can’t remove its camera and location details."),
+        )
+
     if maker is None:
         return PickResolution(
-            reason="This picture is private, and this app cannot make a "
-                   "public copy of it right now. Connect your signer and "
-                   "try again.",
+            reason=_("This image is private and can’t be shared right now. "
+                     "Connect your signer app and try again."),
         )
 
     if all(maker.existing_copy(blob) is not None for blob in private):
@@ -523,7 +452,7 @@ def resolution_from(outcome: Optional[PublishSet]) -> PickResolution:
             return PickResolution(cancelled=True)
         reason = outcome.failures[0].reason if outcome.failures else ""
         return PickResolution(
-            reason=reason or "No public copy was created, so nothing was inserted.",
+            reason=reason or _("The image wasn’t shared, so nothing was inserted."),
         )
     public: PublicBlob = outcome.blobs[0]
     return PickResolution(
@@ -539,66 +468,33 @@ def resolution_from(outcome: Optional[PublishSet]) -> PickResolution:
 # Text                                                                        #
 # --------------------------------------------------------------------------- #
 
-def _create_label(count: int) -> str:
-    if not count:
-        return "Use the existing copies"
-    return "Create public copy" if count == 1 else f"Create {count} public copies"
-
-
-def _row_text(blob: PrivateBlob, stage: str) -> str:
-    """One file's line: what it is, how big, and where it has got to.
-
-    The name comes from the private record and the hash prefix stands in
-    when there is not one, so a file is identifiable either way.
-    """
-    name = (blob.name or "").strip() or f"{blob.sha256[:8]}…"
-    return f"{name}  ·  {_format_size(blob.size)}  ·  {_STAGE_TEXT.get(stage, stage)}"
-
-
-def _storage_line(pending: Sequence[PrivateBlob]) -> str:
-    """What the copies cost, because they count against the same quota.
-
-    A copy does not replace the original, it sits beside it, so the space
-    the user is agreeing to spend is the space the originals already
-    take, again.
-    """
-    total = sum(max(0, blob.size) for blob in pending)
-    if not total:
-        return (
-            "Each copy is stored beside its original, so it uses that much "
-            "space again on your media servers."
-        )
-    if len(pending) == 1:
-        return (
-            f"The copy uses about {_format_size(total)} more on your media "
-            f"servers. The original keeps its own space."
-        )
-    return (
-        f"The copies use about {_format_size(total)} more on your media "
-        f"servers, on top of the originals, which keep their own space."
-    )
+def _name_of(pending: Sequence[PrivateBlob]) -> str:
+    """The name of the first image, from its private record, or ""."""
+    return (pending[0].name or "").strip() if pending else ""
 
 
 def _cancelled_line(minted: int) -> str:
     """Cancelling says what did and did not happen, without softening it."""
     if not minted:
-        return "Cancelled. Nothing was uploaded and nothing was published."
-    return (
-        f"Cancelled. Nothing was published, but "
-        f"{minted} public cop{'y' if minted == 1 else 'ies'} had already been "
-        f"created. {'It is' if minted == 1 else 'They are'} listed with your "
-        f"published media and can be revoked there."
-    )
+        return _("Cancelled. Nothing was shared.")
+    return ngettext(
+        "Cancelled. {count} image was shared before that; Stop Sharing in the "
+        "Media Library undoes it.",
+        "Cancelled. {count} images were shared before that; Stop Sharing in the "
+        "Media Library undoes it.",
+        minted,
+    ).format(count=minted)
 
 
 def _failed_line(reason: str, minted: int) -> str:
     """A named reason, and never a claim that the set succeeded."""
-    detail = (reason or "").strip() or "A public copy could not be created."
-    line = f"Nothing was published. {detail}"
-    if minted:
-        line += (
-            f" {minted} cop{'y' if minted == 1 else 'ies'} made before this "
-            f"{'is' if minted == 1 else 'are'} listed with your published "
-            f"media and can be revoked."
-        )
-    return line
+    detail = (reason or "").strip() or _("This image couldn’t be shared.")
+    if not minted:
+        return detail
+    return ngettext(
+        "{reason} {count} other image was shared already; Stop Sharing in the "
+        "Media Library undoes it.",
+        "{reason} {count} other images were shared already; Stop Sharing in the "
+        "Media Library undoes it.",
+        minted,
+    ).format(reason=detail, count=minted)

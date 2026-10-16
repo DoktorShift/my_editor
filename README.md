@@ -1,6 +1,6 @@
 # MyEditor
 
-**A clean, distraction-free desktop text editor. Write locally, publish to Nostr, keep your keys in your own signer.**
+**A clean, distraction-free desktop text editor. Write locally, publish to Nostr, keep your key on this computer or in your own signer app.**
 
 <p align="center">
   <img src="assets/MyEditor_screenshot_v3.png" width="780" alt="MyEditor screenshot"/>
@@ -8,8 +8,9 @@
 
 MyEditor is a fast, local-first note editor for lecture notes, quick drafts, and
 long-form writing. Write in a calm, focused window, then publish straight to Nostr
-as a short note or a full article. Your files stay on your disk and your private
-key stays in your signer.
+as a short note or a full article. Your files stay on your disk, and your private
+key stays where you put it: protected on this computer, or in a signer app on your
+phone, where it can move any time.
 
 <p align="center">
   <a href="https://github.com/rinbal/my_editor/releases/latest"><b>Download for Windows, macOS, or Linux</b></a>
@@ -19,22 +20,40 @@ key stays in your signer.
 
 ## Highlights
 
-**Focused writing.** Dark and light themes, tabs, rich text, bullet lists, find,
-syntax highlighting, line numbers, and lined / dotted / grid backgrounds with a
-paper mode for a real sheet-of-paper feel.
+**Focused writing.** A real writing editor with each platform's own keys:
+headings, lists, checklists, quotes, tables, footnotes and code blocks, links,
+a slash menu, Markdown shortcuts as you type, and Write, Preview and Split
+views. Spelling is checked as you type with your system's own checker. Choose
+your font and its size, zoom the text, and pick light, dark or automatic
+appearance, tabs, line numbers, and lined / dotted / grid backgrounds with a
+paper mode for a real sheet-of-paper feel. In English or German.
+
+**Private when you need it.** Lock any document with a password: it is
+encrypted in place in the open age format (it opens without MyEditor too), and
+its crash backups are encrypted as well.
+
+**Dictate and listen.** Start Dictation uses your Mac's dictation or Windows
+Voice typing, and dictates offline on this computer where there is none (Linux,
+or Windows by choice) after a one-time download, your voice never leaving it.
+Edit > Speech reads a draft aloud.
 
 **Publish to Nostr.** Send notes or long-form articles signed on your phone via
 NIP-46, keep private encrypted drafts that sync across your devices, and manage
-media on your own Blossom servers.
+media on your own Blossom servers. New to Nostr? Create an account in the app,
+with a password-protected backup. EINUNDZWANZIG membership lives in the Nostr
+menu too: members get the members' relay, media storage and a Nostr address,
+and see all of it at a glance.
 [Read the Nostr guide](docs/nostr.md).
 
-**Import from anywhere.** Pull content in as private drafts from RSS / Atom /
-JSON feeds, Nostr profiles and events, NostrHub NIPs, Bluesky threads, Markdown
-files and GitHub folders, sitemaps, WordPress and Ghost exports, Medium and
-Substack ZIPs, and podcast feeds (with chapters). Preview and pick items before
-anything is signed, recover full text for teaser-only feeds, mirror images to
-your Blossom server, and subscribe to sources (synced privately via your
-relays) to import "new since last visit" later. OPML lists bulk-subscribe.
+**Import from anywhere.** Nostr > Imports follows websites and keeps their new
+posts in an inbox on this computer until you make private drafts of the ones you
+want. It reads RSS / Atom / JSON feeds, Nostr authors and articles, NostrHub
+NIPs, Bluesky threads, Markdown files and GitHub folders, sitemaps, WordPress
+and Ghost exports, Medium and Substack ZIPs, and podcast feeds (with chapters).
+Read a post before anything is signed, fetch the whole article for feeds that
+send a summary, and copy images to your media server. Your sources are one
+private list on your relays, shared with EINUNDZWANZIG STANDUP; OPML lists come
+in and go out.
 
 **Reads PDFs, too.** A built-in distraction-free PDF viewer: open any PDF in a
 tab, find text, select and copy passages straight into your notes, follow links,
@@ -52,8 +71,7 @@ embedded, metadata, page numbers, Page Setup dialog).
 R Markdown, and knit to HTML or PDF; missing toolchain parts (R, pandoc,
 rmarkdown, TinyTeX) install on demand from their official sources.
 
-> Developed and tested on Linux. macOS and Windows work but may show minor visual
-> differences.
+> Tested on Windows, macOS and Linux with every change.
 
 ---
 

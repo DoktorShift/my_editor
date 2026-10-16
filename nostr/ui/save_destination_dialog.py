@@ -4,7 +4,7 @@
 
 Triggered by ``Ctrl+Shift+S`` whenever a Nostr profile is connected.
 When *no* profile is connected the editor falls back to its existing
-"Save As" disk dialog directly — this dialog never appears, which is
+"Save As" disk dialog directly: this dialog never appears, which is
 the dormancy rule the rest of the Nostr feature obeys.
 
 UX:
@@ -36,6 +36,9 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from alerts import answer_return_as_the_system_does
+from i18n import _
+
 
 class SaveDestination(Enum):
     """Where the current tab's contents should land."""
@@ -45,7 +48,7 @@ class SaveDestination(Enum):
 
 
 # --------------------------------------------------------------------------- #
-# Stylesheets — paired with the existing dialog palette                       #
+# Stylesheets, paired with the existing dialog palette                        #
 # --------------------------------------------------------------------------- #
 
 _DARK_CSS = """
@@ -143,7 +146,7 @@ class _DestinationCard(QFrame):
     """One selectable card representing a save destination.
 
     Composed as a frame around a radio button + heading + hint. The
-    frame is the click target — clicking anywhere on the card selects
+    frame is the click target: clicking anywhere on the card selects
     the inner radio. Selection state is exposed via the ``selected``
     QSS property so the stylesheet can paint the chosen card.
     """
@@ -170,8 +173,11 @@ class _DestinationCard(QFrame):
         head = QHBoxLayout()
         head.setContentsMargins(0, 0, 0, 0)
         head.setSpacing(8)
+        # The card's choice, reached with Tab as any choice is; Space or a
+        # click picks it, and the arrow keys move to the other card.
         self.radio = QRadioButton()
-        self.radio.setFocusPolicy(Qt.NoFocus)  # selection follows card click
+        self.radio.setAccessibleName(title)
+        self.radio.clicked.connect(self.clicked)
         head.addWidget(self.radio, 0, Qt.AlignVCenter)
         self.title_label = QLabel(title)
         self.title_label.setObjectName("save_dest_option")
@@ -191,7 +197,7 @@ class _DestinationCard(QFrame):
         self.style().polish(self)
         self.radio.setChecked(selected)
 
-    def mousePressEvent(self, event):  # noqa: D401 — Qt override
+    def mousePressEvent(self, event):  # noqa: D401 (Qt override)
         if event.button() == Qt.LeftButton:
             self.clicked.emit()
         super().mousePressEvent(event)
@@ -206,8 +212,8 @@ class SaveDestinationDialog(QDialog):
     remember the choice for the rest of this tab's lifetime.
 
     Returns:
-      ``self.destination`` — ``SaveDestination`` enum
-      ``self.remember``    — bool
+      ``self.destination``: ``SaveDestination`` enum
+      ``self.remember``:    bool
 
     Access these after ``exec()`` returns ``QDialog.Accepted``.
     """
@@ -220,7 +226,7 @@ class SaveDestinationDialog(QDialog):
         parent: Optional[QWidget] = None,
     ) -> None:
         super().__init__(parent)
-        self.setWindowTitle("Save")
+        self.setWindowTitle(_("Save"))
         self.setModal(True)
         self.setMinimumWidth(440)
         self._is_dark = is_dark
@@ -247,13 +253,13 @@ class SaveDestinationDialog(QDialog):
         root.setContentsMargins(24, 22, 24, 18)
         root.setSpacing(14)
 
-        title = QLabel("Where do you want to save?")
+        title = QLabel(_("Where do you want to save?"))
         title.setObjectName("save_dest_title")
         root.addWidget(title)
 
         subtitle = QLabel(
-            "Local files live only on this device. Nostr drafts are encrypted "
-            "to your key and synced across your other devices."
+            _("Local files live only on this device. Nostr drafts are encrypted "
+              "to your key and synced across your other devices.")
         )
         subtitle.setObjectName("save_dest_subtitle")
         subtitle.setWordWrap(True)
@@ -264,14 +270,14 @@ class SaveDestinationDialog(QDialog):
         self._group.setExclusive(True)
 
         self._local_card = _DestinationCard(
-            title="Save to disk",
-            hint="A regular local file. Same as your usual Save As.",
+            title=_("Save to disk"),
+            hint=_("A regular local file. Same as your usual Save As."),
         )
         self._draft_card = _DestinationCard(
-            title="Save as private Nostr draft",
-            hint=(
+            title=_("Save as private Nostr draft"),
+            hint=_(
                 "End-to-end encrypted to your Nostr key. Only you can decrypt it. "
-                "Will appear on other devices signed in with the same profile."
+                "Shows up on your other devices that use the same account."
             ),
         )
         self._group.addButton(self._local_card.radio, 0)
@@ -290,19 +296,19 @@ class SaveDestinationDialog(QDialog):
         root.addWidget(self._draft_card)
 
         self._remember_checkbox = QCheckBox(
-            "Remember this choice for this tab"
+            _("Remember this choice for this tab")
         )
         self._remember_checkbox.setToolTip(
-            "Skip this dialog on the next Ctrl+Shift+S for the current "
-            "document. You can change it again by closing and reopening "
-            "the tab."
+            _("Skip this dialog on the next Ctrl+Shift+S for the current "
+              "document. You can change it again by closing and reopening "
+              "the tab.")
         )
         root.addWidget(self._remember_checkbox)
 
         buttons = QDialogButtonBox(QDialogButtonBox.Cancel | QDialogButtonBox.Ok)
         ok_button = buttons.button(QDialogButtonBox.Ok)
-        ok_button.setText("Save")
-        ok_button.setDefault(True)
+        ok_button.setText(_("Save"))
+        answer_return_as_the_system_does(buttons.buttons())
         buttons.accepted.connect(self._on_accept)
         buttons.rejected.connect(self.reject)
         root.addWidget(buttons)
@@ -315,8 +321,12 @@ class SaveDestinationDialog(QDialog):
     def _select(self, destination: SaveDestination) -> None:
         self._destination = destination
         is_local = destination is SaveDestination.LOCAL
+        moved = self.focusWidget() in (self._local_card.radio, self._draft_card.radio)
         self._local_card.set_selected(is_local)
         self._draft_card.set_selected(not is_local)
+        if moved:
+            # The keyboard focus goes with the choice, as in a radio group.
+            (self._local_card if is_local else self._draft_card).radio.setFocus()
 
     def _on_accept(self) -> None:
         self._remember = self._remember_checkbox.isChecked()
@@ -324,7 +334,7 @@ class SaveDestinationDialog(QDialog):
 
     # -- keyboard navigation -----------------------------------------------
 
-    def keyPressEvent(self, event):  # noqa: D401 — Qt override
+    def keyPressEvent(self, event):  # noqa: D401 (Qt override)
         # Up/Down moves between cards; Enter accepts. Matches macOS sheet
         # conventions and Windows native dialog behaviour.
         if event.key() in (Qt.Key_Up, Qt.Key_Left):

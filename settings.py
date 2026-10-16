@@ -2,22 +2,17 @@
 # SPDX-FileCopyrightText: 2026 rinbal
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
-import json
 import os
+
+from atomic_file import read_json, write_json
 
 _SETTINGS_FILE = os.path.expanduser("~/.config/my_editor/settings.json")
 
 
 def load_settings() -> dict:
-    """Return the stored settings dict (tolerates a missing or corrupt file)."""
-    try:
-        with open(_SETTINGS_FILE, "r", encoding="utf-8") as f:
-            data = json.load(f)
-        if isinstance(data, dict):
-            return data
-    except (FileNotFoundError, json.JSONDecodeError):
-        pass
-    return {}
+    """Return the stored settings dict (tolerates a missing, unreadable
+    or corrupt file)."""
+    return read_json(_SETTINGS_FILE, dict)
 
 
 def save_setting(key: str, value) -> None:
@@ -27,8 +22,7 @@ def save_setting(key: str, value) -> None:
     save_settings(settings)
 
 
-def save_settings(settings: dict) -> None:
-    """Overwrite the settings file with the given dict."""
-    os.makedirs(os.path.dirname(_SETTINGS_FILE), exist_ok=True)
-    with open(_SETTINGS_FILE, "w", encoding="utf-8") as f:
-        json.dump(settings, f, indent=2)
+def save_settings(settings: dict) -> bool:
+    """Overwrite the settings file with the given dict, in one step.
+    False when it could not be written; the old settings are kept."""
+    return write_json(_SETTINGS_FILE, settings, indent=2)

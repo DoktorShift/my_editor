@@ -18,6 +18,8 @@ from __future__ import annotations
 import re
 from urllib.parse import urlparse
 
+from i18n import _
+
 from ...rss.parser import Feed
 from ..errors import ERROR_CODES, SourceError
 from ..registry import ResolveContext, ResolveInput, ResolveResult, SourceResolver
@@ -47,7 +49,7 @@ def sitemap_feed(entries, *, source_url: str) -> Feed:
     host = _hostname(source_url)
     return Feed(
         format="sitemap",
-        title=f"{host} · sitemap" if host else "Sitemap",
+        title=_("{host} · sitemap").format(host=host) if host else _("Sitemap"),
         link=source_url or None,
         description=None,
         items=tuple(entries_to_items(entries)),

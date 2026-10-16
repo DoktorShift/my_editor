@@ -36,10 +36,11 @@ from PySide6.QtGui import (
 
 from export_html import (
     document_to_html,
-    normalize_lists_after_set_html,
+    normalize_after_set_html,
     sniff_image_ext,
     sniff_image_mime,
 )
+from markdown_writer import READ_FEATURES, document_to_markdown
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -285,7 +286,7 @@ def test_a_url_with_a_query_string_reopens_identical():
 
     reopened = QTextDocument()
     reopened.setHtml(out)
-    normalize_lists_after_set_html(reopened)
+    normalize_after_set_html(reopened)
     names = []
     block = reopened.begin()
     while block.isValid():
@@ -352,7 +353,7 @@ def _roundtrip(doc, title="T", image_roots=()):
     out = document_to_html(doc, title, image_roots=image_roots)
     doc2 = QTextDocument()
     doc2.setHtml(out)
-    normalize_lists_after_set_html(doc2)
+    normalize_after_set_html(doc2)
     return doc2
 
 
@@ -361,9 +362,6 @@ def test_roundtrip_preserves_text_and_structure():
         "Title line",
         [("mixed ", PLAIN), ("bold", _bold()), (" tail", PLAIN)],
         "",
-        "    • one",
-        "        • two",
-        "    • three",
         "  indented plain",
         "last",
     ])
@@ -371,10 +369,14 @@ def test_roundtrip_preserves_text_and_structure():
     assert doc2.toPlainText() == doc.toPlainText()
 
 
-def test_roundtrip_normalizes_zero_space_bullet_to_four():
-    doc = _doc(["• zero"])
+def test_roundtrip_turns_typed_bullets_into_real_lists():
+    # Bullets typed as text are exported as a list, and a list opened
+    # from HTML is a real one, which the editor edits as such.
+    doc = _doc(["intro", "    • one", "        • two", "    • three", "after"])
     doc2 = _roundtrip(doc)
-    assert doc2.toPlainText() == "    • zero"
+    assert document_to_markdown(doc2) == document_to_markdown(doc) == (
+        "intro\n\n- one\n    - two\n- three\n\nafter\n")
+    assert doc2.findBlockByNumber(1).textList() is not None
 
 
 def test_roundtrip_preserves_inline_formats():
@@ -410,13 +412,145 @@ def test_roundtrip_keeps_embedded_image(tmp_path):
     assert "\ufffc" in doc2.toPlainText()
 
 
-def test_normalization_converts_foreign_lists():
+def test_foreign_lists_stay_lists_without_stray_whitespace():
     # Foreign HTML with real lists (pretty-printed whitespace included)
-    # becomes literal bullet lines with a neutral marker format.
+    # opens as real lists, the items trimmed.
     doc = QTextDocument()
     doc.setHtml("<ul>\n  <li>alpha</li>\n  <li>beta\n    <ul><li>gamma</li></ul>\n  </li>\n</ul>")
-    normalize_lists_after_set_html(doc)
-    text = doc.toPlainText()
-    assert "    • alpha" in text
-    assert "    • beta" in text
-    assert "        • gamma" in text
+    normalize_after_set_html(doc)
+    assert document_to_markdown(doc) == "- alpha\n- beta\n    - gamma\n"
+
+
+# --------------------------------------------------------------------------- #
+# Markdown structure: real lists, headings, inline styles, links
+# --------------------------------------------------------------------------- #
+
+def _from_markdown(text):
+    doc = QTextDocument()
+    doc.setMarkdown(text, READ_FEATURES)
+    return doc
+
+
+def test_a_real_list_exports_as_nested_list_markup():
+    out = document_to_html(_from_markdown("- one\n    - inner\n- two\n"), "T")
+    assert "<ul><li>one<ul><li>inner</li></ul></li><li>two</li></ul>" in out
+
+
+def test_a_numbered_list_keeps_its_start_and_a_checklist_its_marks():
+    out = document_to_html(_from_markdown("3. three\n4. four\n\nx\n\n- [x] done\n- [ ] open\n"),
+                           "T")
+    assert '<ol start="3"><li>three</li><li>four</li></ol>' in out
+    assert '<ul><li class="checked">done</li><li class="unchecked">open</li></ul>' in out
+
+
+def test_lists_of_two_kinds_at_one_depth_are_two_lists():
+    doc = _from_markdown("- a\n- b\n")
+    cursor = QTextCursor(doc.lastBlock())
+    from PySide6.QtGui import QTextListFormat
+    cursor.createList(QTextListFormat.Style.ListDecimal)
+    out = document_to_html(doc, "T")
+    assert "<ul><li>a</li></ul>\n<ol><li>b</li></ol>" in out
+
+
+def test_headings_inline_styles_and_links_export():
+    md = "## Title\n\nA ~~gone~~ `code` [site](https://x.example/?a=1&b=2) end\n"
+    out = document_to_html(_from_markdown(md), "T")
+    assert "<h2>Title</h2>" in out
+    assert "<s>gone</s>" in out and "<code>code</code>" in out
+    assert '<a href="https://x.example/?a=1&amp;b=2">site</a>' in out
+    assert "<strong>" not in out           # a heading is bold by itself
+
+
+@pytest.mark.parametrize("md", [
+    "- one\n    - inner\n- two\n",
+    "1. first\n2. second\n",
+    "- [x] done\n- [ ] open\n",
+    "# Big\n\n## Smaller\n\nbody\n",
+    "A ~~gone~~ [site](https://x.example) end\n",
+    "Intro\n\n> A quote\n>\n> > deeper\n\nAfter\n",
+    "Above\n\n---\n\nBelow\n",
+    "> - quoted item\n\nend\n",
+])
+def test_markdown_structure_survives_an_html_round_trip(md):
+    # Review F6 (early range): quotes and dividers were lost on save.
+    assert document_to_markdown(_roundtrip(_from_markdown(md))) == md
+
+
+# -- fonts and sizes a page set ------------------------------------------------
+
+def _runs(doc):
+    """(text, char format) of every run of text, pictures left out."""
+    found = []
+    block = doc.begin()
+    while block.isValid():
+        it = block.begin()
+        while not it.atEnd():
+            frag = it.fragment()
+            if frag.isValid() and not frag.charFormat().isImageFormat():
+                found.append((frag.text(), frag.charFormat()))
+            it += 1
+        block = block.next()
+    return found
+
+
+def _opened(page):
+    doc = QTextDocument()
+    doc.setHtml(page)
+    normalize_after_set_html(doc)
+    return doc
+
+
+def _fixed(fmt):
+    from PySide6.QtGui import QTextFormat
+    return [prop for prop in (QTextFormat.Property.FontPixelSize,
+                              QTextFormat.Property.FontPointSize,
+                              QTextFormat.Property.FontFamilies,
+                              QTextFormat.Property.FontFamily) if fmt.hasProperty(prop)]
+
+
+def test_a_saved_document_reopens_in_the_writing_font_and_text_size():
+    """Seen in the app: a document saved as HTML came back in monospace at
+    14 px, the page's CSS for browsers, and the Font and Text Size settings
+    no longer reached it. The writer keeps no fonts or sizes, so none are
+    read back: the text follows the editor's font."""
+    doc = QTextDocument()
+    doc.setPlainText("Written here.")
+    reopened = _opened(document_to_html(doc, "T"))
+    assert [(text, _fixed(fmt)) for text, fmt in _runs(reopened)] == [("Written here.", [])]
+
+
+def test_a_pages_sizes_go_and_headings_stay_larger():
+    """A page's own sizes (a paragraph at 12 px beside a body at 16) would
+    stay while the text size grows around them, against Apple's "maintain
+    the relative hierarchy ... when people adjust text sizes". A heading
+    keeps its size relative to the body."""
+    from PySide6.QtGui import QTextFormat
+    reopened = _opened("<html><body style='font-family:Georgia; font-size:16px'>"
+                       "<p style='font-size:12px'>Small print.</p><h2>Heading</h2></body></html>")
+    assert all(_fixed(fmt) == [] for _text, fmt in _runs(reopened))
+    heading = _runs(reopened)[-1][1]
+    assert heading.property(QTextFormat.Property.FontSizeAdjustment) == 2
+
+
+def test_code_stays_code_through_saving_and_opening():
+    """Words a page sets in a monospace font of their own are code; so is
+    code this editor wrote, which used to come back as plain words. Text
+    that is all in one monospace font is the page's font, not code."""
+    import rich_text
+    doc = QTextDocument()
+    cursor = QTextCursor(doc)
+    cursor.insertText("Run ")
+    cursor.insertText("ls", rich_text.style_format(rich_text.CODE, True))
+    cursor.insertText(" now.", QTextCharFormat())
+    reopened = _opened(document_to_html(doc, "T"))
+    assert [(text, fmt.fontFixedPitch()) for text, fmt in _runs(reopened)] == [
+        ("Run ", False), ("ls", True), (" now.", False)]
+    assert _runs(reopened)[1][1].fontFamilies() == rich_text.CODE_FAMILIES
+    foreign = _opened("<html><body style='font-family:Helvetica'><p>Type "
+                      "<code>make</code>.</p></body></html>")
+    assert [(text, fmt.fontFixedPitch()) for text, fmt in _runs(foreign)] == [
+        ("Type ", False), ("make", True), (".", False)]
+    all_mono = _opened("<html><body style='font-family:Menlo, monospace'><p>Just words.</p>"
+                       "</body></html>")
+    assert not _runs(all_mono)[0][1].fontFixedPitch()
+

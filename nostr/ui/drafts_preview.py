@@ -1,9 +1,24 @@
 # SPDX-FileCopyrightText: 2026 rinbal
 # SPDX-License-Identifier: AGPL-3.0-or-later
-"""Hover preview for one draft: a popover, its geometry and its timing.
+"""The preview of a draft or a published post: a popover, its geometry,
+its timing, and its two sizes.
 
-Resting the pointer on a drafts-panel row for half a second opens a
-floating preview of that draft. It is a **popover**, not a tooltip:
+    rest the pointer on a row   the short preview: cover, title, summary,
+                                and the facts (half a second, goes with
+                                the pointer)
+    click a row, or Space       the full preview: the same header, then
+                                the whole text styled as Nostr shows it,
+                                and the next steps (Continue Editing,
+                                Publish…; Edit Article, Open in Browser)
+    click the row again, Esc,   it goes; one click on another row moves
+    a click elsewhere           it there, and the arrow keys take it along
+
+Both lists of the Drafts panel host it (the drafts, and what was
+published), through the host methods ``PreviewController`` names; a
+published post is handed over in a draft's shape (PublishedRecord).
+
+Resting the pointer on a row for half a second opens a floating preview
+of that draft. It is a **popover**, not a tooltip:
 ``offering-help.md`` limits a tooltip to "a maximum of 60 to 75
 characters", which a hero image plus a summary plus three metadata lines
 is nowhere near. ``popovers.md`` endorses the surface instead: "Consider
@@ -44,6 +59,7 @@ Three seams keep this testable and network-free:
 from __future__ import annotations
 
 import math
+import weakref
 from typing import Dict, List, NamedTuple, Optional, Tuple
 from urllib.parse import urlsplit
 
@@ -60,25 +76,22 @@ from PySide6.QtCore import (
 )
 from PySide6.QtGui import (
     QColor,
-    QFont,
     QGuiApplication,
     QPainter,
     QPainterPath,
     QPen,
     QPixmap,
-    QTextLayout,
-    QTextOption,
 )
 from PySide6.QtWidgets import (
     QApplication,
     QGraphicsDropShadowEffect,
-    QLabel,
-    QSizePolicy,
+    QMenu,
     QVBoxLayout,
     QWidget,
 )
 
 import url_safety
+from i18n import _, ngettext
 
 from ..draft_store import DraftRecord, DraftState
 from ..drafts import flatten_markdown_inline
@@ -89,10 +102,16 @@ from .drafts_common import (
     first_tag,
     format_absolute_date,
     format_absolute_time,
+    format_count,
     scaled,
     secondary_font,
     source_host,
 )
+from .preview_parts import (
+    IMAGE_UNAVAILABLE, IMAGE_WAITING, PAD, RADIUS, ActionBar, ClampedLabel, HeroImage, PreviewAction, PreviewFields,
+    PreviewReader, body_font, preview_css, title_font,
+)
+from .reader_window import ReaderWindow
 
 
 # --------------------------------------------------------------------------- #
@@ -160,13 +179,13 @@ _BASE_WIDTH: int = 360
 _MIN_WIDTH: int = 320
 _MAX_WIDTH: int = 460
 _BASE_MAX_HEIGHT: int = 460
+# The full preview: a comfortable reading width (about 60 characters of
+# body text at 13 pt), as tall as the screen allows, and never so short
+# that its text has no room to be read in.
+_FULL_WIDTH: int = 440
+_MIN_FULL_WIDTH: int = 320
+_MIN_READER_HEIGHT: int = 96
 
-# 14 px on all four sides, more than the panel's 12 px GUTTER. A floating
-# surface needs more air than an inline row, and the popover is not
-# aligned to the panel's gutter anyway, so matching it would be a
-# coincidence rather than an alignment.
-_PAD: int = 14
-_RADIUS: int = 8
 
 # The arrow, required by ``popovers.md``: "Make sure a popover's arrow
 # points as directly as possible to the element that revealed it." It
@@ -224,65 +243,8 @@ _MAX_TAGS: int = 6
 # would say nothing on almost every draft.
 _EXPIRY_HORIZON_DAYS: int = 14
 
-_NO_TITLE = "(no title)"
+_NO_TITLE = _("(no title)")
 _SEP = " · "
-
-_IMAGE_WAITING = "Loading image…"
-_IMAGE_UNAVAILABLE = "Image unavailable"
-
-
-# --------------------------------------------------------------------------- #
-# Style                                                                       #
-# --------------------------------------------------------------------------- #
-
-def preview_css(is_dark: bool) -> str:
-    """One QSS template for both themes, from the panel's token table.
-
-    No ``font-size`` here, for the same reason the panel's sheet carries
-    none: Qt treats both ``px`` and ``pt`` in a stylesheet as absolute
-    and discards ``em``, so a size set here would freeze while the rest
-    of the app scaled around it. QSS carries colour and weight only.
-
-    Every pair is measured in both appearances. Title ``row_fg`` on
-    ``chrome_bg`` is 15.31:1 dark and 16.39:1 light, summary
-    ``chrome_fg`` 9.54 and 11.90, the metadata lines ``muted`` 4.74 and
-    4.87, the expiry ``error_fg`` 6.24 and 4.66, and the image box label
-    ``chrome_fg`` on ``border`` 6.87 and 9.66. ``accessibility.md``:
-    "Text size / Text weight / Minimum contrast ratio / Up to 17 pts /
-    All / 4.5:1", checked "in both light and dark appearances".
-    """
-    t = THEME_TOKENS[bool(is_dark)]
-    return f"""
-QLabel#drafts_preview_title {{ color: {t["row_fg"]}; font-weight: 600; }}
-QLabel#drafts_preview_summary {{ color: {t["chrome_fg"]}; }}
-QLabel#drafts_preview_origin,
-QLabel#drafts_preview_stats,
-QLabel#drafts_preview_tags {{ color: {t["muted"]}; }}
-/* The word "Expires" carries the meaning and the colour only reinforces
-   it. accessibility.md: "Convey information with more than color
-   alone." */
-QLabel#drafts_preview_expiry {{ color: {t["error_fg"]}; }}
-QLabel#drafts_preview_image_note {{ color: {t["chrome_fg"]}; }}
-"""
-
-
-def title_font() -> QFont:
-    """Title 3 from the macOS text-style table: 15 pt at a 13 pt base.
-
-    A ratio of the application font rather than a literal, so the
-    hierarchy survives a user who has enlarged type. ``typography.md``:
-    "In general, avoid light font weights." Nothing here is lighter than
-    Regular; hierarchy is carried by size, weight and the muted token.
-    """
-    font = QFont(QApplication.font())
-    font.setPointSizeF(app_point_size() * 15.0 / BASE_POINT_SIZE)
-    font.setWeight(QFont.DemiBold)
-    return font
-
-
-def body_font() -> QFont:
-    """Body from the same table: the application font, unmodified."""
-    return QFont(QApplication.font())
 
 
 # --------------------------------------------------------------------------- #
@@ -301,26 +263,6 @@ class BodyDigest(NamedTuple):
     words: int
     minutes: int
     opening: str
-
-
-class PreviewFields(NamedTuple):
-    """What one preview shows, already composed, in reading order.
-
-    Every field is a string and a missing one is empty, never a
-    placeholder: the popover drops the line rather than printing "no
-    summary". ``layout.md``: "Make essential information easy to find by
-    giving it sufficient space. People want to view the most important
-    information right away, so don't obscure it by crowding it with
-    nonessential details."
-    """
-
-    title: str
-    summary: str
-    origin: str
-    stats: str
-    tags: str
-    expiry: str
-    image_url: str
 
 
 def article_image_url(record: DraftRecord) -> str:
@@ -435,13 +377,11 @@ def expiry_phrase(expiration: Optional[int], *, now: int) -> str:
     if delta > _EXPIRY_HORIZON_DAYS * 86_400:
         return ""
     if delta < 0:
-        return "Expired"
+        return _("Expired")
     days = delta // 86_400
     if days <= 0:
-        return "Expires today"
-    if days == 1:
-        return "Expires in 1 day"
-    return f"Expires in {days} days"
+        return _("Expires today")
+    return ngettext("Expires in {n} day", "Expires in {n} days", days).format(n=days)
 
 
 def _origin_line(record: DraftRecord) -> str:
@@ -459,6 +399,12 @@ def _origin_line(record: DraftRecord) -> str:
     host = source_host(record)
     if host:
         parts.append(host)
+    if getattr(record, "is_published", False):
+        # Something already out there: when it first went out, no save.
+        first = format_absolute_date(record.created_at)
+        if first:
+            parts.append(_("Published {date}").format(date=first))
+        return _SEP.join(parts)
     published = published_at(record)
     # Two identical dates on one line is noise, so a draft stashed in the
     # same minute it was published shows only the save time.
@@ -470,10 +416,10 @@ def _origin_line(record: DraftRecord) -> str:
     if published > 0 and not same_minute:
         published_text = format_absolute_date(published)
         if published_text:
-            parts.append(f"Published {published_text}")
+            parts.append(_("Published {date}").format(date=published_text))
     saved = format_absolute_time(record.created_at)
     if saved:
-        parts.append(f"Saved {saved}")
+        parts.append(_("Saved {time}").format(time=saved))
     return _SEP.join(parts)
 
 
@@ -483,7 +429,7 @@ def _tags_line(names: List[str]) -> str:
     shown = [f"#{name}" for name in names[:_MAX_TAGS]]
     extra = len(names) - len(shown)
     if extra > 0:
-        shown.append(f"+{extra} more")
+        shown.append(ngettext("+{n} more", "+{n} more", extra).format(n=extra))
     return _SEP.join(shown)
 
 
@@ -517,10 +463,14 @@ def preview_fields(
     if digest is None:
         digest = body_digest(record.content)
     summary = first_tag(record, "summary").strip() or digest.opening
-    stats = (
-        f"{digest.minutes} min read{_SEP}{digest.words:,} words"
-        if digest.words else ""
-    )
+    stats = ""
+    if digest.words:
+        reading = ngettext("{n} min read", "{n} min read", digest.minutes)
+        words = ngettext("{n} word", "{n} words", digest.words)
+        stats = _SEP.join((
+            reading.format(n=digest.minutes),
+            words.format(n=format_count(digest.words)),
+        ))
     return PreviewFields(
         title=record.title or _NO_TITLE,
         summary=summary,
@@ -537,8 +487,13 @@ def preview_is_eligible(
     *,
     now: int,
     digest: Optional[BodyDigest] = None,
+    full: bool = False,
 ) -> bool:
     """Whether a preview would show anything the row does not already.
+
+    A full preview (a click, Space) shows the whole text styled, so every
+    readable record qualifies for it; the short one that resting the
+    pointer opens qualifies only with more to say than its row.
 
     A 360 px window that repeats a row verbatim is exactly what
     ``popovers.md`` means by "Avoid making a popover too big". In
@@ -554,6 +509,8 @@ def preview_is_eligible(
     """
     if record.state is not DraftState.READY:
         return False
+    if full:
+        return True
     if article_image_url(record):
         return True
     if first_tag(record, "summary").strip():
@@ -602,14 +559,15 @@ def preview_announcement(
         digest = body_digest(record.content)
     sentences = []
     if digest.words:
-        minutes = "minute" if digest.minutes == 1 else "minutes"
-        words = "word" if digest.words == 1 else "words"
-        sentences.append(
-            f"{digest.minutes} {minutes} read, {digest.words} {words}"
-        )
+        reading = ngettext("{n} minute read", "{n} minutes read", digest.minutes)
+        words = ngettext("{n} word", "{n} words", digest.words)
+        sentences.append(_("{reading_time}, {word_count}").format(
+            reading_time=reading.format(n=digest.minutes),
+            word_count=words.format(n=digest.words),
+        ))
     names = article_hashtags(record)
     if names:
-        sentences.append("Tagged " + ", ".join(names[:_MAX_TAGS]))
+        sentences.append(_("Tagged {tags}").format(tags=", ".join(names[:_MAX_TAGS])))
     expiry = expiry_phrase(record.expiration, now=now)
     if expiry:
         sentences.append(expiry)
@@ -749,6 +707,18 @@ def preview_max_height(available: QRect) -> int:
     return max(120, min(grown, available.height() - 32))
 
 
+def full_preview_width(available: QRect) -> int:
+    """The full preview's width: a reading column, scaled with the text,
+    narrower only where the screen is."""
+    grown = round(_FULL_WIDTH * app_point_size() / BASE_POINT_SIZE)
+    return max(_MIN_FULL_WIDTH, min(grown, available.width() - 48))
+
+
+def full_preview_max_height(available: QRect) -> int:
+    """The full preview may be as tall as the screen, less a margin."""
+    return max(240, available.height() - 2 * _SCREEN_MARGIN - 16)
+
+
 def uses_child_window(platform_name: str) -> bool:
     """Whether the popover must be a child widget rather than a window.
 
@@ -780,228 +750,6 @@ def screen_available_rect(anchor: QRect, fallback: Optional[QWidget]) -> QRect:
     if screen is None:
         return QRect(0, 0, 1024, 768)
     return screen.availableGeometry()
-
-
-# --------------------------------------------------------------------------- #
-# Labels                                                                      #
-# --------------------------------------------------------------------------- #
-
-class _ClampedLabel(QLabel):
-    """Word-wrapped label capped at N lines, eliding the last one.
-
-    Not a ``QLabel`` with ``wordWrap`` and a fixed height: that hard
-    clips the last line with no sign anything was cut, which is exactly
-    the bug ``_ElidingLabel`` exists to prevent and which produced a row
-    reading ``![One Class, One`` with no trailing dots.
-
-    Laid out at paint time from ``contentsRect().width()`` for the same
-    reason ``_ElidingLabel`` elides there: eliding through ``setText``
-    changes the size hint, which re-runs the layout, which moves the
-    width the elision was computed against.
-
-    The height is fixed by :meth:`apply` from the width the popover was
-    composed at, so the surface can be measured before it is shown and
-    never resizes underneath a reader.
-    """
-
-    def __init__(self, object_name: str, parent: Optional[QWidget] = None) -> None:
-        super().__init__(parent)
-        self.setObjectName(object_name)
-        self._full = ""
-        self._max_lines = 1
-        self._width = 1
-        self.setTextInteractionFlags(Qt.NoTextInteraction)
-        self.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
-
-    def full_text(self) -> str:
-        return self._full
-
-    def max_lines(self) -> int:
-        return self._max_lines
-
-    def apply(self, text: str, *, width: int, max_lines: int) -> int:
-        """Set the text and fix the height. Returns the height taken."""
-        self._full = text or ""
-        self._max_lines = max(1, int(max_lines))
-        self._width = max(1, int(width))
-        # The painted string may be elided and ``text()`` stays empty, so
-        # the accessible name is where the whole string stays reachable.
-        self.setAccessibleName(self._full)
-        height = len(self._ranges(self._width)[0]) * self.fontMetrics().lineSpacing()
-        self.setFixedHeight(height)
-        self.setVisible(bool(self._full))
-        self.update()
-        return height
-
-    def line_count(self) -> int:
-        return len(self._ranges(self._width)[0])
-
-    def is_truncated(self) -> bool:
-        return self._ranges(self._width)[1]
-
-    def painted_lines(self) -> List[str]:
-        """Exactly the strings ``paintEvent`` will draw, ellipsis and all."""
-        width = max(1, self.contentsRect().width() or self._width)
-        ranges, truncated = self._ranges(width)
-        out = []
-        for index, (start, length) in enumerate(ranges):
-            if truncated and index == len(ranges) - 1:
-                out.append(self.fontMetrics().elidedText(
-                    self._full[start:], Qt.ElideRight, width,
-                ))
-            else:
-                out.append(self._full[start:start + length])
-        return out
-
-    def _ranges(self, width: int) -> Tuple[List[Tuple[int, int]], bool]:
-        if not self._full:
-            return [], False
-        layout = QTextLayout(self._full, self.font())
-        option = QTextOption()
-        option.setWrapMode(QTextOption.WrapAtWordBoundaryOrAnywhere)
-        layout.setTextOption(option)
-        layout.beginLayout()
-        ranges: List[Tuple[int, int]] = []
-        truncated = False
-        while len(ranges) < self._max_lines:
-            line = layout.createLine()
-            if not line.isValid():
-                break
-            line.setLineWidth(width)
-            ranges.append((line.textStart(), line.textLength()))
-        else:
-            truncated = layout.createLine().isValid()
-        layout.endLayout()
-        return ranges, truncated
-
-    def paintEvent(self, event) -> None:
-        if not self._full:
-            return
-        painter = QPainter(self)
-        painter.setFont(self.font())
-        # Through the palette, which is where the stylesheet's ``color``
-        # lands after a polish, so the token table stays the only source
-        # of colour here as well.
-        painter.setPen(QPen(self.palette().color(self.foregroundRole())))
-        rect = self.contentsRect()
-        metrics = self.fontMetrics()
-        y = rect.top() + metrics.ascent()
-        for text in self.painted_lines():
-            painter.drawText(rect.left(), y, text)
-            y += metrics.lineSpacing()
-
-
-class _HeroImage(QWidget):
-    """The 16:9 hero box, whose geometry never depends on the bytes.
-
-    A fixed box rather than the image's own ratio, so frames one, two
-    and three are identical in size: reserved and empty, reserved and
-    labelled, and filled. Nothing below it ever moves, and the window is
-    never resized after it is shown.
-
-    ``layout.md``: "When necessary, scale artwork in response to display
-    changes... don't change the aspect ratio of the artwork; instead,
-    scale it so that important visual content remains visible."
-    Expanding plus a centre crop preserves the ratio and keeps the
-    middle, which is where a hero image puts its subject.
-
-    No spinner, no shimmer, no skeleton animation. Qt exposes no
-    portable reduce-motion query, so the only safe design is one that
-    needs no toggle: a static fill and a word.
-    """
-
-    def __init__(self, parent: Optional[QWidget] = None, *, is_dark: bool = True) -> None:
-        super().__init__(parent)
-        self.setObjectName("drafts_preview_image")
-        self._is_dark = bool(is_dark)
-        self._pixmap: Optional[QPixmap] = None
-        # NIP-23 carries no alt text, so the name says what the thing is
-        # and no description invents what it depicts.
-        self.setAccessibleName("Article image")
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(_PAD, _PAD, _PAD, _PAD)
-        self._note = QLabel("", self)
-        self._note.setObjectName("drafts_preview_image_note")
-        self._note.setAlignment(Qt.AlignCenter)
-        self._note.setWordWrap(True)
-        self._note.hide()
-        layout.addWidget(self._note)
-
-    def note(self) -> QLabel:
-        return self._note
-
-    def note_text(self) -> str:
-        return self._note.text() if self._note.isVisibleTo(self) else ""
-
-    def has_pixmap(self) -> bool:
-        return self._pixmap is not None and not self._pixmap.isNull()
-
-    def reset(self, *, width: int) -> None:
-        self._pixmap = None
-        self._note.setText("")
-        self._note.setFont(secondary_font())
-        self._note.hide()
-        pad = scaled(_PAD)
-        self.layout().setContentsMargins(pad, pad, pad, pad)
-        self.setFixedSize(width, round(width * 9 / 16))
-        self.update()
-
-    def set_note(self, text: str) -> None:
-        """Say what is happening in the reserved box, without resizing it."""
-        self._note.setText(text)
-        self._note.setVisible(bool(text) and not self.has_pixmap())
-        self.update()
-
-    def set_pixmap(self, pixmap: QPixmap) -> None:
-        if pixmap is None or pixmap.isNull():
-            return
-        box = self.size()
-        # ``images.md``: "High-resolution 2D displays have higher pixel
-        # densities, such as 2:1 or 3:1." A hero rendered at 1x on a 2x
-        # display is visibly soft next to the crisp text beside it.
-        dpr = float(self.devicePixelRatioF() or 1.0)
-        target = QSize(
-            max(1, round(box.width() * dpr)), max(1, round(box.height() * dpr)),
-        )
-        grown = pixmap.scaled(
-            target, Qt.KeepAspectRatioByExpanding, Qt.SmoothTransformation,
-        )
-        x = max(0, (grown.width() - target.width()) // 2)
-        y = max(0, (grown.height() - target.height()) // 2)
-        cropped = grown.copy(x, y, target.width(), target.height())
-        cropped.setDevicePixelRatio(dpr)
-        self._pixmap = cropped
-        self._note.hide()
-        self.update()
-
-    def apply_theme(self, is_dark: bool) -> None:
-        self._is_dark = bool(is_dark)
-        self.update()
-
-    def paintEvent(self, event) -> None:
-        painter = QPainter(self)
-        painter.setRenderHint(QPainter.Antialiasing, True)
-        rect = self.rect()
-        # Top corners follow the surface; the bottom ones are square
-        # because the text block continues straight below.
-        path = QPainterPath()
-        path.moveTo(rect.left(), rect.bottom() + 1)
-        path.lineTo(rect.left(), rect.top() + _RADIUS)
-        path.quadTo(rect.left(), rect.top(), rect.left() + _RADIUS, rect.top())
-        path.lineTo(rect.right() + 1 - _RADIUS, rect.top())
-        path.quadTo(
-            rect.right() + 1, rect.top(), rect.right() + 1, rect.top() + _RADIUS,
-        )
-        path.lineTo(rect.right() + 1, rect.bottom() + 1)
-        path.closeSubpath()
-        painter.setClipPath(path)
-        # The fill is deliberately quiet: ``border`` on ``chrome_bg`` is
-        # 1.39:1 dark and 1.23:1 light, and a placeholder fill is not
-        # text. The label on top of it is what carries meaning, at
-        # 6.87:1 and 9.66:1.
-        painter.fillRect(rect, QColor(THEME_TOKENS[self._is_dark]["border"]))
-        if self.has_pixmap():
-            painter.drawPixmap(rect, self._pixmap)
 
 
 # --------------------------------------------------------------------------- #
@@ -1086,7 +834,7 @@ class _Surface(QWidget):
         card = self._card.geometry()
         painter.setPen(QPen(border, 1))
         painter.setBrush(fill)
-        painter.drawRoundedRect(card.adjusted(0, 0, -1, -1), _RADIUS, _RADIUS)
+        painter.drawRoundedRect(card.adjusted(0, 0, -1, -1), RADIUS, RADIUS)
         if self._arrow < 0:
             return
         tip, base_a, base_b = self._arrow_points(card)
@@ -1152,14 +900,22 @@ class PreviewPopover(QWidget):
     that. Qt gives no Liquid Glass, and the panel's cross-platform
     discipline forbids a per-platform blur path.
 
-    It carries no interactive content at all. ``popovers.md`` asks to
-    "limit the amount of functionality in the popover to a few related
-    tasks"; here the number of tasks is zero, and everything actionable
-    stays in the context menu, which is reachable by pointer and by the
-    Menu key.
+    Two sizes of one surface (``popovers.md``: "Some popovers provide both
+    condensed and expanded views of the same information"). The short one,
+    which resting the pointer on a row opens, carries nothing interactive:
+    the title, the summary and the facts. The full one, which a click or
+    Space opens, adds the whole text styled as Nostr shows it (the
+    editor's Preview renderer), scrolling inside, and a bar with the next
+    steps (``popovers.md``: "limit the amount of functionality in the
+    popover to a few related tasks"); its host says which
+    (PreviewAction), and ``action_chosen(key)`` says which was picked.
     """
 
     dismissed = Signal()
+    action_chosen = Signal(str)
+    # The full preview dragged by its header: keep it open in a window
+    # (``popovers.md``: "Consider letting people detach a popover").
+    detach_requested = Signal()
 
     def __init__(
         self,
@@ -1176,6 +932,8 @@ class PreviewPopover(QWidget):
         self._card = QSize(0, 0)
         self._fields = PreviewFields("", "", "", "", "", "", "")
         self._plan = LADDER[0]
+        self._full = False
+        self._drag_from = None
         self._closing = False
         # With no loader wired up there is no way to fill a hero box, so
         # none is reserved: a permanently empty 203 px rectangle is worse
@@ -1183,7 +941,7 @@ class PreviewPopover(QWidget):
         self._images_enabled = False
 
         self.setObjectName("drafts_preview")
-        self.setAccessibleName("Draft preview")
+        self.setAccessibleName(_("Draft preview"))
         # Qt has no per-widget accessible-role setter, so this window
         # cannot advertise itself as a dialog the way an AppKit popover
         # does. Every child below carries its own accessible name
@@ -1192,7 +950,7 @@ class PreviewPopover(QWidget):
         # and ``preview_announcement`` puts the same facts on the row for
         # a reader that never enters it at all.
         self.setAccessibleDescription(
-            "Preview of one draft. Press Escape to close."
+            _("Preview of one draft. Press Escape to close.")
         )
         self.setFocusPolicy(Qt.NoFocus)
         if not self._child_mode:
@@ -1210,21 +968,21 @@ class PreviewPopover(QWidget):
         card_layout = QVBoxLayout(card)
         card_layout.setContentsMargins(0, 0, 0, 0)
         card_layout.setSpacing(0)
-        self._hero = _HeroImage(card, is_dark=self._is_dark)
+        self._hero = HeroImage(card, is_dark=self._is_dark)
         card_layout.addWidget(self._hero)
         self._body = QWidget(card)
         card_layout.addWidget(self._body)
         card_layout.addStretch(1)
 
         body_layout = QVBoxLayout(self._body)
-        body_layout.setContentsMargins(_PAD, _PAD, _PAD, _PAD)
+        body_layout.setContentsMargins(PAD, PAD, PAD, PAD)
         body_layout.setSpacing(0)
-        self._title = _ClampedLabel("drafts_preview_title", self._body)
-        self._summary = _ClampedLabel("drafts_preview_summary", self._body)
-        self._origin = _ClampedLabel("drafts_preview_origin", self._body)
-        self._stats = _ClampedLabel("drafts_preview_stats", self._body)
-        self._tags = _ClampedLabel("drafts_preview_tags", self._body)
-        self._expiry = _ClampedLabel("drafts_preview_expiry", self._body)
+        self._title = ClampedLabel("drafts_preview_title", self._body)
+        self._summary = ClampedLabel("drafts_preview_summary", self._body)
+        self._origin = ClampedLabel("drafts_preview_origin", self._body)
+        self._stats = ClampedLabel("drafts_preview_stats", self._body)
+        self._tags = ClampedLabel("drafts_preview_tags", self._body)
+        self._expiry = ClampedLabel("drafts_preview_expiry", self._body)
         self._rows = (
             ("title", self._title),
             ("summary", self._summary),
@@ -1252,6 +1010,24 @@ class PreviewPopover(QWidget):
         # the pointer happens to be over.
         for child in self.findChildren(QWidget):
             child.setAttribute(Qt.WA_TransparentForMouseEvents, True)
+
+        # The full preview's text and its commands: the only parts that
+        # take the pointer (made after the loop above, which keeps the
+        # short preview's labels out of the pointer's way).
+        self._reader = PreviewReader(dark=self._is_dark, parent=card)
+        self._reader.hide()
+        card_layout.insertWidget(card_layout.indexOf(self._body) + 1, self._reader)
+        self._bar = ActionBar(card, is_dark=self._is_dark)
+        self._bar.chosen.connect(self.action_chosen)
+        self._bar.hide()
+        # Their way to the pointer: Qt routes no press or wheel into the
+        # children of a widget transparent for it, so the surface and the
+        # card that hold them take the pointer again. The short preview's
+        # labels stay out of its way, and a press on them reaches the
+        # window (dragging the full preview by its header).
+        for holder in (self._surface, card):
+            holder.setAttribute(Qt.WA_TransparentForMouseEvents, False)
+        card_layout.insertWidget(card_layout.indexOf(self._reader) + 1, self._bar)
 
         # One effect for the widget's lifetime, recoloured on a theme
         # switch. ``setGraphicsEffect`` destroys whatever was there
@@ -1287,6 +1063,9 @@ class PreviewPopover(QWidget):
         self.setStyleSheet(preview_css(self._is_dark))
         self._surface.apply_theme(self._is_dark)
         self._hero.apply_theme(self._is_dark)
+        if hasattr(self, "_reader"):
+            self._reader.set_dark(self._is_dark)
+            self._bar.apply_theme(self._is_dark)
         # The shadow is what separates the surface from arbitrary editor
         # content behind it, which no border token can do on its own, so
         # it is heavier in dark where the border has least to work with.
@@ -1307,7 +1086,41 @@ class PreviewPopover(QWidget):
     def plan(self) -> Plan:
         return self._plan
 
-    def labels(self) -> Tuple[Tuple[str, _ClampedLabel], ...]:
+    def is_full(self) -> bool:
+        return self._full
+
+    def image_pixmap(self) -> Optional[QPixmap]:
+        """The cover as it is shown, for a window the preview goes into."""
+        return self._hero.pixmap() if self._hero.has_pixmap() else None
+
+    def mousePressEvent(self, event) -> None:
+        # The header's labels hand the pointer to the window, so a press
+        # here is on the header: the place a detachable popover is dragged
+        # by.
+        if self._full and event.button() == Qt.LeftButton:
+            self._drag_from = event.globalPosition().toPoint()
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event) -> None:
+        if self._drag_from is not None and event.buttons() & Qt.LeftButton:
+            moved = (event.globalPosition().toPoint() - self._drag_from).manhattanLength()
+            if moved >= 2 * QApplication.startDragDistance():
+                self._drag_from = None
+                self.detach_requested.emit()
+                return
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event) -> None:
+        self._drag_from = None
+        super().mouseReleaseEvent(event)
+
+    def reader(self) -> "PreviewReader":
+        return self._reader
+
+    def action_bar(self) -> ActionBar:
+        return self._bar
+
+    def labels(self) -> Tuple[Tuple[str, ClampedLabel], ...]:
         return self._rows
 
     def set_images_enabled(self, enabled: bool) -> None:
@@ -1326,30 +1139,65 @@ class PreviewPopover(QWidget):
         max_height: int,
         now: int,
         digest: Optional[BodyDigest] = None,
+        full: bool = False,
+        actions: Tuple[PreviewAction, ...] = (),
     ) -> Optional[QSize]:
         """Lay the record out at ``width``, degrading until it fits.
 
         The ladder runs once, here, at open time. Nothing in it may run
         later, or the window would resize while it was being read.
         Returns the card size, or ``None`` when even the last rung is
-        taller than ``max_height``.
+        taller than ``max_height``. ``full`` adds the text, styled, and
+        the bar of ``actions`` under the header (the full preview).
         """
+        self._full = bool(full)
         self._fields = preview_fields(record, now=now, digest=digest)
+        # What a screen reader says as it opens: what this is a preview of.
+        self.setAccessibleName(_("Preview of {title}").format(title=self._fields.title))
+        if self._full:
+            # The text itself follows, so the header carries a summary only
+            # where the writer gave one; its opening words would repeat.
+            self._fields = self._fields._replace(
+                summary=first_tag(record, "summary").strip())
         self._title.setFont(title_font())
         self._summary.setFont(body_font())
         footnote = secondary_font()
         for label in (self._origin, self._stats, self._tags, self._expiry):
             label.setFont(footnote)
 
+        self._reader.setVisible(self._full)
+        self._bar.setVisible(self._full)
+        reader_height = bar_height = 0
+        if self._full:
+            if int(getattr(record, "inner_kind", 0) or 0) == 30023:
+                self._reader.show_markdown(record.content or "")
+            else:
+                self._reader.show_note(record.content or "")
+            self._bar.set_actions(tuple(actions))
+            # Never narrower than its commands: a longer language's words
+            # (Weiter bearbeiten) are shown whole, not clipped.
+            width = max(width, self._bar.sizeHint().width())
+            bar_height = self._bar.sizeHint().height()
+            reader_height = self._reader.text_height(width)
         for plan in LADDER:
-            height = self._apply_plan(plan, width=width)
-            if height <= max_height:
-                self._plan = plan
-                self._card = QSize(width, height)
-                self._surface.set_card_size(self._card)
-                halo = self.halo()
-                self.resize(width + 2 * halo, height + 2 * halo)
-                return QSize(self._card)
+            header = self._apply_plan(plan, width=width)
+            room = max_height - header - bar_height
+            if not self._full and header <= max_height:
+                height = header
+            elif self._full and room >= _MIN_READER_HEIGHT:
+                # The text as tall as it is, up to the room left: longer
+                # texts scroll inside.
+                shown = min(reader_height, room)
+                self._reader.setFixedHeight(shown)
+                height = header + shown + bar_height
+            else:
+                continue
+            self._plan = plan
+            self._card = QSize(width, height)
+            self._surface.set_card_size(self._card)
+            halo = self.halo()
+            self.resize(width + 2 * halo, height + 2 * halo)
+            return QSize(self._card)
         return None
 
     def _apply_plan(self, plan: Plan, *, width: int) -> int:
@@ -1362,7 +1210,7 @@ class PreviewPopover(QWidget):
         # are measured against. Measuring against a different width from
         # the one the labels are given is how a clamp ends up drawing a
         # line more than it counted, and clipping it.
-        pad = scaled(_PAD)
+        pad = scaled(PAD)
         inner = max(1, width - 2 * pad)
 
         heights = {
@@ -1536,6 +1384,23 @@ class PreviewPopover(QWidget):
 # Controller                                                                  #
 # --------------------------------------------------------------------------- #
 
+class _OutsideClicks(QObject):
+    """Watches the whole application, while a full preview is up, for a
+    press outside it and outside its list, and says so (``pressed``). Its
+    own object: the controller's filter on the list would otherwise see
+    every press on the list twice, once from the application."""
+
+    def __init__(self, is_outside, pressed, parent: QObject) -> None:
+        super().__init__(parent)
+        self._is_outside = is_outside
+        self._pressed = pressed
+
+    def eventFilter(self, obj, event) -> bool:
+        if event.type() == QEvent.MouseButtonPress and self._is_outside(obj):
+            self._pressed()
+        return False
+
+
 class PreviewController(QObject):
     """Owns the dwell timing, the one popover, and every dismissal path.
 
@@ -1551,14 +1416,28 @@ class PreviewController(QObject):
     exactly as ``_on_current_item_changed`` already had to guard against
     with its ``try / except RuntimeError``.
 
-    The panel is the only thing it talks to, through four small methods:
-    ``preview_record``, ``preview_current_row``, ``preview_is_available``
-    and ``preview_now``. Everything else is injected or pure.
+    Its host (the Drafts panel, the Published view) is the only thing it
+    talks to, through a few small methods: ``preview_record`` (a draft, or
+    a record of a draft's shape), ``preview_row_at`` (the row under the
+    pointer, in the list's viewport: the rows are painted, so there is no
+    row widget to watch), ``preview_current_row``, ``preview_anchor_for``
+    (where a row is now, as the list scrolls), ``preview_is_available``,
+    ``preview_now``, and for the full preview ``preview_actions`` (its
+    commands, PreviewAction) and ``preview_act`` (do one). Everything else
+    is injected or pure.
     """
+
+    @property
+    def _panel(self):
+        return self._panel_ref()
 
     def __init__(self, panel, *, parent: Optional[QObject] = None) -> None:
         super().__init__(parent if parent is not None else panel)
-        self._panel = panel
+        # Weakly: the controller is the panel's Qt child, and the collector
+        # sees a parent's children. A strong reference back put a panel
+        # without a parent in a cycle only the collector frees, and that
+        # tears the panel's widgets down in an order Qt does not survive.
+        self._panel_ref = weakref.ref(panel)
         self._popover: Optional[PreviewPopover] = None
         self._loader = None
         self._is_dark = True
@@ -1574,6 +1453,12 @@ class PreviewController(QObject):
         self._hovered_id = ""
         self._hovered_anchor = QRect()
         self._keyboard_open = False
+        # The full preview (a click, Space) stays until it is dismissed;
+        # the short one (resting the pointer) goes with the pointer.
+        self._full = False
+        self._windows: list = []
+        self._outside = _OutsideClicks(self._outside_click, self.close, self)
+        self._app_watched = False
         self._disarmed = False
         self._image_url = ""
         # Per session, so a broken hero is not re-requested every time
@@ -1583,6 +1468,7 @@ class PreviewController(QObject):
         # articles does not re-tokenise 60 KB per row.
         self._digests: Dict[Tuple[str, int], BodyDigest] = {}
         self._watched_window: Optional[QWidget] = None
+        self._list = None
 
         # Every timer is parented to this controller, which is a child of
         # the panel, so panel destruction cannot leave one firing into a
@@ -1625,22 +1511,20 @@ class PreviewController(QObject):
             pass
         self._loader = None
 
-    def attach_row(self, row: QWidget) -> None:
-        """Watch one row for hover. Called from the panel's ``_insert_row``.
-
-        The filter cannot go on the list's viewport: the row widget
-        covers the item rect exactly and is not mouse transparent, so
-        the viewport never sees the pointer.
-        """
-        row.setMouseTracking(True)
-        row.installEventFilter(self)
-
     def attach_list(self, list_widget) -> None:
-        """Watch the list for the Space key and for any scrolling."""
+        """Watch the list for the Space key and for any scrolling, and its
+        viewport for the pointer: the rows are painted, so the pointer's
+        row is the one under it (the host's ``preview_row_at``)."""
+        self._list = list_widget
         list_widget.installEventFilter(self)
+        viewport = list_widget.viewport()
+        viewport.setMouseTracking(True)
+        viewport.installEventFilter(self)
         bar = list_widget.verticalScrollBar()
         if bar is not None:
             bar.valueChanged.connect(self._on_scrolled)
+        # The full preview follows the arrow keys, as Quick Look does.
+        list_widget.selectionModel().currentChanged.connect(self._on_current_changed)
 
     def apply_theme(self, is_dark: bool) -> None:
         self._is_dark = bool(is_dark)
@@ -1648,6 +1532,8 @@ class PreviewController(QObject):
             # Re-style in place. A theme switch is not a reason to take
             # the surface away from someone reading it.
             self._popover.apply_theme(self._is_dark)
+        for window in self._windows:
+            window.apply_theme(self._is_dark)
 
     # -- state -------------------------------------------------------------
 
@@ -1675,6 +1561,10 @@ class PreviewController(QObject):
     def opened_by_keyboard(self) -> bool:
         return self._keyboard_open
 
+    def is_full(self) -> bool:
+        """Whether the preview shown is the full one (a click, Space)."""
+        return self._full and self.is_visible()
+
     def has_active_timer(self) -> bool:
         return (
             self._dwell.isActive()
@@ -1693,6 +1583,8 @@ class PreviewController(QObject):
         # after a swap and painting itself into the wrong draft.
         self._image_url = ""
         self._shown_id = ""
+        self._full = False
+        self._unwatch_app()
         if disarm:
             self._disarmed = True
         keyboard, self._keyboard_open = self._keyboard_open, False
@@ -1709,6 +1601,7 @@ class PreviewController(QObject):
     def shutdown(self) -> None:
         """Stop every timer and destroy the window. Nothing outlives this."""
         self.close()
+        self._unwatch_app()
         self._disconnect_loader()
         self._unwatch_window()
         if self._popover is not None:
@@ -1747,12 +1640,13 @@ class PreviewController(QObject):
                 self._dwell.start(PREVIEW_OPEN_DELAY_MS)
             return
         record = self._panel.preview_record(identifier)
-        if record is None or not self._eligible_record(record):
+        if record is None or not self._eligible_record(record, full=self._full):
             self.close()
             return
         # Keeps the anchor and the reserved image box; a height change
         # animates over the swap duration rather than jumping.
-        if not self._render(record, self._shown_anchor, animate=True):
+        if not self._render(record, self._shown_anchor, animate=True, full=self._full,
+                            identifier=identifier):
             self.close()
 
     def on_record_removed(self, identifier: str) -> None:
@@ -1787,32 +1681,38 @@ class PreviewController(QObject):
             if not self._keyboard_open:
                 self.close(disarm=True)
             return False
-        if kind == QEvent.KeyPress and obj is getattr(self._panel, "_list", None):
+        if kind == QEvent.KeyPress and obj is self._list:
             return self._on_list_key(event)
-        identifier = self._row_identifier(obj)
-        if identifier is None:
+        if self._list is None or obj is not self._list.viewport():
             return False
         if kind == QEvent.MouseMove:
-            self._on_row_move(identifier, obj, event)
-        elif kind == QEvent.Enter:
-            # Records where the pointer is and nothing else. Arming is
-            # left to MouseMove, which Qt delivers straight after an
-            # Enter, so a list scrolling under a still pointer cannot
-            # open anything.
-            self._hovered_id = identifier
-            self._hovered_anchor = self._anchor_of(obj)
+            identifier, anchor = self._panel.preview_row_at(event.position().toPoint())
+            if self.is_full():
+                # The full preview stays where it was opened; the pointer
+                # crossing other rows on its way to it changes nothing.
+                return False
+            if not identifier:
+                if self._hovered_id:
+                    self._on_row_leave()
+                return False
+            self._hovered_id, self._hovered_anchor = identifier, anchor
+            self._on_row_move(identifier, anchor, event)
         elif kind == QEvent.Leave:
-            self._on_row_leave()
+            if not self.is_full():
+                self._on_row_leave()
         elif kind == QEvent.MouseButtonPress:
-            # ``popovers.md``: "a popover generally closes when people
-            # click or tap outside its bounds".
+            self._on_row_press(event)
+        elif kind == QEvent.MouseButtonDblClick:
+            # A double click opens the draft itself; the preview makes way.
             self.close(disarm=True)
         elif kind == QEvent.MouseButtonRelease:
             self._disarmed = False
         elif kind == QEvent.Wheel:
-            self.close(disarm=True)
+            if not self.is_full():
+                self.close(disarm=True)
         elif kind == QEvent.ToolTip:
-            return self._suppresses_tooltip(identifier)
+            identifier, _anchor = self._panel.preview_row_at(event.pos())
+            return bool(identifier) and self._suppresses_tooltip(identifier)
         return False
 
     def _suppresses_tooltip(self, identifier: str) -> bool:
@@ -1850,28 +1750,48 @@ class PreviewController(QObject):
         if kind == QEvent.Enter:
             self._closer.stop()
         elif kind == QEvent.Leave:
-            if self.is_open():
+            if self.is_open() and not self.is_full():
                 # Short, because leaving is deliberate; long enough that
                 # a jitter at its own edge while reading does not close
                 # it.
                 self._closer.start(PREVIEW_CLOSE_DELAY_MS)
-        elif kind == QEvent.MouseButtonPress:
+        elif kind == QEvent.MouseButtonPress and not self.is_full():
             self.close(disarm=True)
         return False
 
-    def _row_identifier(self, obj) -> Optional[str]:
-        if not isinstance(obj, QWidget):
-            return None
-        identifier = obj.property("draft_identifier")
-        return identifier if isinstance(identifier, str) and identifier else None
+    def _on_row_press(self, event) -> None:
+        """A click on a row selects it (the list does that) and opens its
+        full preview; a click on the row whose full preview is open closes
+        it, as does a click with a modifier (choosing several rows) or on
+        no row at all. ``popovers.md``: "let people close one popover and
+        open another with a single click"."""
+        identifier, anchor = self._panel.preview_row_at(event.position().toPoint())
+        plain = (event.button() == Qt.LeftButton
+                 and event.modifiers() == Qt.KeyboardModifier.NoModifier)
+        if not identifier or not plain:
+            self.close(disarm=True)
+            return
+        if identifier == self._shown_id and self.is_full():
+            self.close(disarm=True)
+            return
+        self.open_for(identifier, anchor, full=True)
 
-    def _on_row_move(self, identifier: str, row: QWidget, event) -> None:
+    def _on_current_changed(self, *_indexes) -> None:
+        """The arrow keys moved the current row: the full preview follows
+        it, as Quick Look follows the selection in Finder."""
+        if not self.is_full():
+            return
+        identifier, anchor = self._panel.preview_current_row()
+        if identifier and identifier != self._shown_id:
+            if not self.open_for(identifier, anchor, full=True):
+                self.close()
+
+    def _on_row_move(self, identifier: str, anchor: QRect, event) -> None:
         if event.buttons() != Qt.NoButton:
             # A drag is not a dwell.
             return
         self._disarmed = False
         self._closer.stop()
-        anchor = self._anchor_of(row)
         if identifier == self._shown_id:
             self._shown_anchor = anchor
             return
@@ -1904,6 +1824,14 @@ class PreviewController(QObject):
             self._closer.start(PREVIEW_LEAVE_GRACE_MS)
 
     def _on_list_key(self, event) -> bool:
+        if event.modifiers() == Qt.NoModifier and self.is_open():
+            if event.key() == Qt.Key_Escape:
+                self.close()
+                return True
+            if event.key() == Qt.Key_Tab and self.is_full():
+                # Into the preview, to its commands; Escape comes back.
+                self._enter_popover()
+                return True
         if event.key() != Qt.Key_Space or event.modifiers() != Qt.NoModifier:
             return False
         # Space because that is the system's own preview key, in Finder
@@ -1915,6 +1843,21 @@ class PreviewController(QObject):
         return True
 
     def _on_scrolled(self, _value: int) -> None:
+        if self.is_full():
+            # The full preview moves with its row, and goes when the row
+            # scrolls out of sight.
+            anchor = self._panel.preview_anchor_for(self._shown_id)
+            if anchor.isEmpty():
+                self.close()
+                return
+            self._shown_anchor = anchor
+            placement = preview_geometry(anchor, self._popover.card_size(),
+                                         self._available_rect(anchor))
+            if placement is None:
+                self.close()
+            else:
+                self._popover.place(placement)
+            return
         # Without this a stationary pointer plus a wheel flick opens a
         # preview for whatever row happened to slide underneath it.
         self.close(disarm=True)
@@ -1932,50 +1875,148 @@ class PreviewController(QObject):
     # -- opening -----------------------------------------------------------
 
     def toggle_current_row(self) -> bool:
-        """The keyboard route: Space on the focused row toggles the preview."""
+        """The keyboard route: Space on the current row shows or hides its
+        full preview, as Space does Quick Look in Finder. The keyboard
+        stays in the list, so the arrow keys move the preview along; Tab
+        goes into it."""
         identifier, anchor = self._panel.preview_current_row()
         if not identifier:
             return False
-        if self._shown_id == identifier and self.is_visible():
+        if self._shown_id == identifier and self.is_full():
             self.close()
             return False
-        return self.open_for(identifier, anchor, keyboard=True)
+        return self.open_for(identifier, anchor, full=True)
 
     def open_for(
-        self, identifier: str, anchor: QRect, *, keyboard: bool = False,
+        self, identifier: str, anchor: QRect, *, keyboard: bool = False, full: bool = False,
     ) -> bool:
-        """Show the preview for one draft. Returns whether it opened."""
+        """Show the preview for one draft (the short one, or the ``full``
+        one). Returns whether it opened."""
         if not self._panel.preview_is_available():
             return False
         record = self._panel.preview_record(identifier)
-        if record is None or not self._eligible_record(record):
+        if record is None or not self._eligible_record(record, full=full):
             return False
         swap = self.is_open() and not keyboard
         self._closer.stop()
-        if not self._render(record, anchor, animate=swap):
+        self._dwell.stop()
+        self._pending_id = ""
+        if not self._render(record, anchor, animate=swap, full=full,
+                            identifier=identifier):
             self.close()
             return False
         self._shown_id = identifier
         self._shown_anchor = anchor
+        self._full = bool(full)
         self._keyboard_open = bool(keyboard)
         popover = self._ensure_popover()
         if not swap:
             popover.show_preview(keyboard=keyboard)
+        if self._full:
+            self._watch_app()
         self._start_image()
         return True
 
-    def _render(self, record: DraftRecord, anchor: QRect, *, animate: bool) -> bool:
+    def _enter_popover(self) -> None:
+        """Tab from the list: the keyboard goes into the full preview, to
+        its next step; Escape brings it back to the list."""
+        if self._popover is None:
+            return
+        self._keyboard_open = True
+        self._popover.show_preview(keyboard=True)
+        self._popover.activateWindow()
+        target = self._popover.action_bar().primary or self._popover.reader()
+        target.setFocus(Qt.TabFocusReason)
+
+    def _on_action(self, key: str) -> None:
+        """A command of the full preview's bar: the host does it, and the
+        preview makes way (a popover "disappears after people interact
+        with it")."""
+        identifier = self._shown_id
+        if not identifier:
+            return
+        if key == "detach":
+            self.detach()
+            return
+        self.close()
+        self._panel.preview_act(identifier, key)
+
+    def detach(self):
+        """Keep the full preview open in a window of its own (reader_window.py)
+        where it was, and close the popover. Returns the window."""
+        identifier = self._shown_id
+        record = self._panel.preview_record(identifier) if identifier else None
+        popover = self._popover
+        if record is None or popover is None or not self.is_full():
+            return None
+        host = self._panel_ref
+        window = ReaderWindow(
+            fields=popover.fields(), kind=int(getattr(record, "inner_kind", 0) or 0),
+            content=record.content or "",
+            actions=tuple(self._panel.preview_actions(identifier)),
+            size=popover.card_size(), is_dark=self._is_dark, parent=self._panel.window())
+        # Its commands go to the same host, held weakly: the window may
+        # outlive the list it came from.
+
+        def act(key: str, ref=host, post=identifier) -> None:
+            owner = ref()
+            if owner is not None:
+                owner.preview_act(post, key)
+        window.action_chosen.connect(act)
+        pixmap = popover.image_pixmap()
+        url = popover.fields().image_url
+        if pixmap is not None:
+            window.set_image(pixmap)
+        elif url and self._loader is not None and url not in self._image_failures:
+            # Not here yet: the window asks for it itself (from the cache
+            # when it has come meanwhile).
+            window.load_image(self._loader, url)
+        elif url:
+            window.set_image_note(IMAGE_UNAVAILABLE)
+        where = popover.card_rect().topLeft()
+        self.close()
+        window.move(where)
+        window.show()
+        window.raise_()
+        window.activateWindow()
+        self._windows.append(window)
+        window.destroyed.connect(lambda _obj=None, w=window: self._forget_window(w))
+        return window
+
+    def _forget_window(self, window) -> None:
+        if window in self._windows:
+            self._windows.remove(window)
+
+    def windows(self) -> list:
+        """The previews kept open in windows of their own."""
+        return list(self._windows)
+
+    def _on_drag_detach(self) -> None:
+        window = self.detach()
+        handle = window.windowHandle() if window is not None else None
+        if handle is not None:
+            # The window follows the pointer for the rest of the drag.
+            handle.startSystemMove()
+
+    def _render(self, record: DraftRecord, anchor: QRect, *, animate: bool,
+                full: bool = False, identifier: str = "") -> bool:
         popover = self._ensure_popover()
         popover.set_images_enabled(self._loader is not None)
         available = self._available_rect(anchor)
-        width = preview_width(available)
+        width = full_preview_width(available) if full else preview_width(available)
         digest = self._digest(record)
+        actions = (tuple(self._panel.preview_actions(identifier))
+                   + (PreviewAction("detach", _("Open in New Window"), more=True),)
+                   if full else ())
         size = popover.compose(
             record,
             width=width,
-            max_height=preview_max_height(available),
+            max_height=(full_preview_max_height(available) if full
+                        else preview_max_height(available)),
             now=self._now(),
             digest=digest,
+            full=full,
+            actions=actions,
         )
         placement = (
             preview_geometry(anchor, size, available) if size is not None else None
@@ -1989,6 +2030,8 @@ class PreviewController(QObject):
                 max_height=max(120, size.height() // 2),
                 now=self._now(),
                 digest=digest,
+                full=full,
+                actions=actions,
             )
             placement = (
                 preview_geometry(anchor, size, available) if size is not None else None
@@ -2006,6 +2049,8 @@ class PreviewController(QObject):
                 child_mode=uses_child_window(QGuiApplication.platformName()),
             )
             self._popover.dismissed.connect(self._on_dismissed)
+            self._popover.action_chosen.connect(self._on_action)
+            self._popover.detach_requested.connect(self._on_drag_detach)
             self._popover.installEventFilter(self)
         self._watch_window()
         return self._popover
@@ -2019,6 +2064,33 @@ class PreviewController(QObject):
             window.installEventFilter(self)
             self._watched_window = window
 
+    def _watch_app(self) -> None:
+        """While the full preview is up, a click anywhere else in the app
+        closes it (``popovers.md``: "a popover generally closes when people
+        click or tap outside its bounds")."""
+        app = QApplication.instance()
+        if app is not None and not self._app_watched:
+            app.installEventFilter(self._outside)
+            self._app_watched = True
+
+    def _unwatch_app(self) -> None:
+        app = QApplication.instance()
+        if app is not None and self._app_watched:
+            app.removeEventFilter(self._outside)
+        self._app_watched = False
+
+    def _outside_click(self, obj) -> bool:
+        """Whether a press on ``obj`` is outside the preview and its list."""
+        if not isinstance(obj, QWidget) or self._popover is None:
+            return False
+        if obj is self._popover or self._popover.isAncestorOf(obj):
+            return False
+        if self._list is not None and (obj is self._list.viewport()
+                                       or self._list.isAncestorOf(obj)):
+            return False
+        # A menu the preview opened (the ⋯ and "Open in" pull-downs).
+        return not isinstance(obj.window(), QMenu)
+
     def _unwatch_window(self) -> None:
         if self._watched_window is None:
             return
@@ -2031,9 +2103,8 @@ class PreviewController(QObject):
     def _return_focus(self) -> None:
         # Escape leaves the current row exactly where it was; only the
         # focus comes back.
-        list_widget = getattr(self._panel, "_list", None)
-        if list_widget is not None:
-            list_widget.setFocus(Qt.OtherFocusReason)
+        if self._list is not None:
+            self._list.setFocus(Qt.OtherFocusReason)
 
     # -- image -------------------------------------------------------------
 
@@ -2056,7 +2127,7 @@ class PreviewController(QObject):
             # then no box was reserved at all: the user did not ask for
             # an image and cannot act on the refusal. A box that was
             # reserved and cannot be filled is the only case that speaks.
-            popover.set_image_note(_IMAGE_UNAVAILABLE)
+            popover.set_image_note(IMAGE_UNAVAILABLE)
             return
         self._image_url = url
         self._slow.start(PREVIEW_IMAGE_SLOW_MS)
@@ -2067,7 +2138,7 @@ class PreviewController(QObject):
             # ``loading.md``: "Show something as soon as possible... show
             # placeholder text, graphics, or animations as content loads,
             # replacing these elements as content becomes available."
-            self._popover.set_image_note(_IMAGE_WAITING)
+            self._popover.set_image_note(IMAGE_WAITING)
 
     def _on_image_ready(self, url: str, _sha: str, pixmap) -> None:
         if url != self._image_url or self._popover is None:
@@ -2080,7 +2151,7 @@ class PreviewController(QObject):
         if url != self._image_url or self._popover is None:
             return
         self._slow.stop()
-        self._popover.set_image_note(_IMAGE_UNAVAILABLE)
+        self._popover.set_image_note(IMAGE_UNAVAILABLE)
 
     # -- helpers -----------------------------------------------------------
 
@@ -2096,13 +2167,10 @@ class PreviewController(QObject):
         record = self._panel.preview_record(identifier)
         return record is not None and self._eligible_record(record)
 
-    def _eligible_record(self, record: DraftRecord) -> bool:
+    def _eligible_record(self, record: DraftRecord, *, full: bool = False) -> bool:
         return preview_is_eligible(
-            record, now=self._now(), digest=self._digest(record),
+            record, now=self._now(), digest=self._digest(record), full=full,
         )
-
-    def _anchor_of(self, row: QWidget) -> QRect:
-        return QRect(row.mapToGlobal(row.rect().topLeft()), row.size())
 
     def shown_anchor(self) -> QRect:
         return QRect(self._shown_anchor)

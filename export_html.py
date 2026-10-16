@@ -7,8 +7,11 @@ inline style on every paragraph; bullets stay literal "• " text and images
 point at machine-local cache paths. This module replaces it with clean,
 semantic, fully self-contained HTML:
 
-- bullets become real nested <ul><li> lists,
-- bold/italic/underline become <strong>/<em>/<u>,
+- bullets typed as text become real nested <ul><li> lists, and real
+  lists (bulleted, numbered, checklists) stay what they are,
+- headings become <h1> to <h6>,
+- bold/italic/underline/strikethrough become <strong>/<em>/<u>/<s>,
+  inline code becomes <code>, a link an <a href>,
 - colors stay inline styles (Qt ignores <style> blocks on setHtml, so
   inline is the only representation that survives reopening the file),
 - images are embedded as base64 data URIs so a shared file carries its
@@ -19,10 +22,10 @@ only through an ImageRootPolicy built from the caller's image_roots.
 The default is empty, which reads nothing: a caller that forgets the
 argument exports a placeholder instead of leaking a file.
 
-normalize_lists_after_set_html() is the inverse half of the round-trip:
-after loading any HTML file, real QTextList items are converted back to
-the editor's literal "• " bullet convention so the bullet key handlers
-keep working.
+normalize_after_set_html() tidies what Qt's HTML reader leaves behind
+when a file is opened: the empty paragraphs this exporter writes as
+&nbsp;, and stray whitespace from pretty-printed HTML. Lists stay real
+lists: the editor edits them as such.
 """
 
 import base64
@@ -32,13 +35,20 @@ from PySide6.QtGui import (
     QTextBlockFormat,
     QTextCharFormat,
     QTextCursor,
+    QTextFormat,
     QTextImageFormat,
+    QTextListFormat,
 )
 
+import media_files
+import rich_text
 from constants import DARK_BG, DARK_FG, LIGHT_BG, LIGHT_FG, MONO_FONT
+from fonts import names_monospace
+from i18n import _
 from doc_walk import (
-    INDENT_STEP,
     bullet_depth,
+    doc_length,
+    doc_offset,
     iter_block_runs,
     iter_blocks,
     parse_bullet_line,
@@ -63,7 +73,7 @@ _OBJ = "\ufffc"
 _LINE_SEP = "\u2028"
 
 
-def _data_uri(data: bytes) -> str | None:
+def image_data_uri(data: bytes) -> str | None:
     """Base64 data URI for image bytes, or None when unrecognized."""
     mime = sniff_image_mime(data)
     if mime is None:
@@ -86,9 +96,10 @@ def _font_stack() -> str:
 
 
 def _head_css() -> str:
-    # The page CSS is for browsers only; Qt ignores <style> blocks when the
-    # file is reopened, which is fine because everything that must round-trip
-    # (colors, pre-wrap paragraphs) is also emitted inline.
+    # The page CSS is for browsers. Everything that must round-trip (colors,
+    # pre-wrap paragraphs) is also emitted inline. Qt does apply some of it
+    # when the file is reopened: the body margin moves every paragraph in,
+    # and normalize_after_set_html takes it off again.
     return f"""    :root {{ color-scheme: light dark; }}
     body {{
       margin: 2rem auto;
@@ -107,7 +118,11 @@ def _head_css() -> str:
     ul {{ margin: 0; padding-left: 1.5em; }}
     ul ul {{ list-style-type: circle; }}
     ul ul ul {{ list-style-type: square; }}
-    img {{ max-width: 100%; height: auto; }}"""
+    img {{ max-width: 100%; height: auto; }}
+    li.checked, li.unchecked {{ list-style: none; }}
+    li.checked::before {{ content: "\\2611\\00a0"; }}
+    li.unchecked::before {{ content: "\\2610\\00a0"; }}
+    code {{ font-family: {_font_stack()}; }}"""
 
 
 def _render_image(img_fmt, source_url_for, policy, asset_resolver) -> str:
@@ -128,6 +143,19 @@ def _render_image(img_fmt, source_url_for, policy, asset_resolver) -> str:
     source_url = source_url_for(name) if source_url_for else None
     data = None
     resolved = asset_resolver(name) if asset_resolver else None
+    kind = media_files.kind_of(str(getattr(resolved, "mime", "") or ""))
+    if kind is not None:
+        # Audio or video: a link to it once it is on a media server, where a
+        # reader of the page finds it; nothing while it is not (never a
+        # picture of it, never a placeholder).
+        mime = str(getattr(resolved, "mime", "") or "")
+        remote = str(getattr(resolved, "remote_url", "") or "")
+        if not remote:
+            return ""
+        remote = media_files.address_with_extension(remote, mime)
+        words = media_files.link_words(mime, alt or remote.rsplit("/", 1)[-1])
+        return f'<a href="{html.escape(remote, quote=True)}">{html.escape(words)}</a>'
+
     if resolved is not None and getattr(resolved, "data", b""):
         data = resolved.data
         remote_url = str(getattr(resolved, "remote_url", "") or "")
@@ -138,7 +166,7 @@ def _render_image(img_fmt, source_url_for, policy, asset_resolver) -> str:
     if data is None:
         data = policy.read(name)
 
-    uri = _data_uri(data) if data else None
+    uri = image_data_uri(data) if data else None
     if uri is not None:
         return f'<img src="{uri}"{attrs}>'
     if is_portable_image_source(name):
@@ -152,34 +180,64 @@ def _render_image(img_fmt, source_url_for, policy, asset_resolver) -> str:
         # Bytes are gone from the cache; the original URL is better than
         # nothing even though it breaks strict self-containment.
         return f'<img src="{html.escape(source_url, quote=True)}"{attrs}>'
-    return "<em>[image unavailable]</em>"
+    return f"<em>{html.escape(_('[image unavailable]'))}</em>"
 
 
-def _render_text_run(text: str, fmt: QTextCharFormat) -> str:
+def _render_text_run(text: str, fmt: QTextCharFormat, heading: bool = False) -> str:
     out = html.escape(text).replace(_LINE_SEP, "<br>")
-    if fmt.fontUnderline():
+    if fmt.fontFixedPitch():
+        out = f"<code>{out}</code>"
+    if fmt.fontStrikeOut():
+        out = f"<s>{out}</s>"
+    if fmt.fontUnderline() and not fmt.isAnchor():
         out = f"<u>{out}</u>"
     if fmt.fontItalic():
         out = f"<em>{out}</em>"
-    if fmt.fontWeight() > 400:
+    if fmt.fontWeight() > 400 and not heading:
+        # A heading is bold by its own format; that is not emphasis.
         out = f"<strong>{out}</strong>"
-    if fmt.hasProperty(QTextCharFormat.ForegroundBrush):
+    if fmt.hasProperty(QTextCharFormat.ForegroundBrush) and not fmt.isAnchor():
+        # A link's color is how links look, not a color of the text.
         color = fmt.foreground().color().name()
         out = f'<span style="color:{color}">{out}</span>'
     return out
 
 
-def _render_runs(runs, render_image) -> str:
+def _render_runs(runs, render_image, heading: bool = False) -> str:
     parts = []
+    link = ""            # the address of the <a> open in parts, if any
     for text, fmt in runs:
+        href = fmt.anchorHref() if fmt.isAnchor() else ""
+        if href != link:
+            if link:
+                parts.append("</a>")
+            if href:
+                parts.append(f'<a href="{html.escape(href, quote=True)}">')
+            link = href
         if fmt.isImageFormat():
             parts.append(render_image(fmt.toImageFormat()))
             continue
         # Defensive: strip stray object-replacement chars from plain runs.
         text = text.replace(_OBJ, "")
         if text:
-            parts.append(_render_text_run(text, fmt))
+            parts.append(_render_text_run(text, fmt, heading))
+    if link:
+        parts.append("</a>")
     return "".join(parts)
+
+
+_ORDERED_STYLES = {QTextListFormat.Style.ListDecimal, QTextListFormat.Style.ListLowerAlpha,
+                   QTextListFormat.Style.ListUpperAlpha, QTextListFormat.Style.ListLowerRoman,
+                   QTextListFormat.Style.ListUpperRoman}
+
+
+def _list_item_class(block) -> str:
+    marker = block.blockFormat().marker()
+    if marker == QTextBlockFormat.MarkerType.Checked:
+        return ' class="checked"'
+    if marker == QTextBlockFormat.MarkerType.Unchecked:
+        return ' class="unchecked"'
+    return ""
 
 
 def _needs_pre_wrap(text: str) -> bool:
@@ -213,6 +271,47 @@ def document_to_html(doc, title: str = "", source_url_for=None, *,
     list_buf: list[str] = []
     depth = 0             # how many <ul> levels are open
     li_open: list[bool] = [False]  # index = level, [0] unused
+    # Real lists: the tags open, outermost first, and whether each level
+    # has an <li> open.
+    real_tags: list[str] = []
+    real_li: list[bool] = []
+    real_buf: list[str] = []
+
+    def close_real(target: int):
+        while len(real_tags) > target:
+            if real_li.pop():
+                real_buf.append("</li>")
+            real_buf.append(f"</{real_tags.pop()}>")
+        if target == 0 and real_buf:
+            body.append("".join(real_buf))
+            real_buf.clear()
+
+    def real_item(block, text_list):
+        level = max(1, text_list.format().indent())
+        ordered = text_list.format().style() in _ORDERED_STYLES
+        tag = "ol" if ordered else "ul"
+        close_real(min(len(real_tags), level))       # leave deeper levels
+        if len(real_tags) == level and real_tags[-1] != tag:
+            # Another kind at the same depth is a list of its own.
+            close_real(level - 1)
+        while len(real_tags) < level:
+            if real_tags and not real_li[-1]:
+                # A depth jump: an item that only holds the nested list.
+                real_buf.append("<li>")
+                real_li[-1] = True
+            opening = tag if len(real_tags) == level - 1 else "ul"
+            start = text_list.format().start() if hasattr(text_list.format(), "start") else 1
+            first = text_list.itemNumber(block) == 0
+            extra = (f' start="{start}"' if opening == "ol" and first and start not in (0, 1)
+                     else "")
+            real_buf.append(f"<{opening}{extra}>")
+            real_tags.append(opening)
+            real_li.append(False)
+        if real_li[-1]:
+            real_buf.append("</li>")
+        real_buf.append(f"<li{_list_item_class(block)}>")
+        real_li[-1] = True
+        real_buf.append(_render_runs(list(iter_block_runs(block)), render_image))
 
     def close_to(target: int):
         nonlocal depth
@@ -226,8 +325,34 @@ def document_to_html(doc, title: str = "", source_url_for=None, *,
             body.append("".join(list_buf))
             list_buf.clear()
 
+    quotes = 0            # how many <blockquote> levels are open
+
+    def quote_to(level: int):
+        nonlocal quotes
+        if level == quotes:
+            return
+        close_to(0)
+        close_real(0)
+        while quotes > level:
+            body.append("</blockquote>")
+            quotes -= 1
+        while quotes < level:
+            body.append("<blockquote>")
+            quotes += 1
+
     for block in iter_blocks(doc):
         text = block.text()
+        text_list = block.textList()
+        quote_to(rich_text.quote_depth(block))
+        if text_list is not None:
+            close_to(0)
+            real_item(block, text_list)
+            continue
+        close_real(0)
+        if rich_text.is_divider(block):
+            close_to(0)
+            body.append("<hr>")
+            continue
         spaces, has_bullet = parse_bullet_line(text)
 
         if has_bullet:
@@ -255,19 +380,24 @@ def document_to_html(doc, title: str = "", source_url_for=None, *,
         close_to(0)
         if not text and block.begin().atEnd():
             # &nbsp; is the only form Qt re-parses as exactly one (visually
-            # blank) paragraph; normalize_lists_after_set_html turns it back
+            # blank) paragraph; normalize_after_set_html turns it back
             # into a truly empty block on load.
             body.append("<p>&nbsp;</p>")
             continue
-        content = _render_runs(list(iter_block_runs(block)), render_image)
-        if _needs_pre_wrap(text):
+        heading = min(6, block.blockFormat().headingLevel())
+        content = _render_runs(list(iter_block_runs(block)), render_image, heading > 0)
+        if heading:
+            body.append(f"<h{heading}>{content}</h{heading}>")
+        elif _needs_pre_wrap(text):
             body.append(f'<p style="white-space:pre-wrap">{content}</p>')
         else:
             body.append(f"<p>{content}</p>")
 
     close_to(0)
+    close_real(0)
+    quote_to(0)
 
-    page_title = html.escape(title) if title else "Untitled"
+    page_title = html.escape(title or _("Untitled"))
     body_html = "\n".join(body)
     return f"""<!doctype html>
 <html>
@@ -286,56 +416,116 @@ def document_to_html(doc, title: str = "", source_url_for=None, *,
 """
 
 
-def normalize_lists_after_set_html(doc) -> None:
-    """Convert QTextList items back to the editor's literal bullet lines.
+def _quote_depths(doc) -> None:
+    """Qt's reader marks every <blockquote> as the first quote level and
+    only moves an inner one further in; a page's style sheet can move
+    every paragraph in as well (the body margin of the pages this module
+    writes). The depth is read back from how far each quoted paragraph
+    sits in from the others, and the page's own margin is taken off."""
+    blocks = list(iter_blocks(doc))
+    quoted = [b for b in blocks if rich_text.quote_depth(b)]
+    plain = [b.blockFormat().leftMargin() for b in blocks
+             if not rich_text.quote_depth(b) and b.textList() is None]
+    if plain:
+        base = min(plain)
+    elif quoted:
+        base = min(b.blockFormat().leftMargin() for b in quoted) - rich_text.QUOTE_INDENT
+    else:
+        return
+    base = max(0.0, base)
+    cursor = QTextCursor(doc)
+    cursor.beginEditBlock()
+    if base:
+        for block in blocks:
+            fmt = block.blockFormat()
+            if fmt.leftMargin() >= base:
+                fmt.setLeftMargin(fmt.leftMargin() - base)
+                QTextCursor(block).setBlockFormat(fmt)
+    for block in quoted:
+        depth = max(1, round(block.blockFormat().leftMargin() / rich_text.QUOTE_INDENT))
+        rich_text.set_quote_depth(block, depth)
+    cursor.endEditBlock()
 
-    Qt parses <ul><li> into QTextList objects, but the editor's bullet
-    behavior (Tab, Enter, Backspace handlers) operates on literal "• "
-    lines. Called after every setHtml so both our own exports and foreign
-    HTML files edit consistently. Depth N becomes N*4 leading spaces.
-    """
-    NBSP = "\u00a0"
-    list_targets = []
-    nbsp_targets = []
+
+# What a page sets about its text that this editor has its own choice for:
+# the font and the size are the person's (Settings, View > Zoom In).
+_PAGE_FONT = (QTextFormat.Property.FontFamilies, QTextFormat.Property.FontFamily,
+              QTextFormat.Property.FontPointSize, QTextFormat.Property.FontPixelSize)
+
+
+def _drop_page_fonts(doc) -> None:
+    """Take off the fonts and sizes the page set, as a paste does (paste.py):
+    the text is in the font and at the size the person chose, and grows
+    with the text size, headings staying larger by their own measure (Apple:
+    "maintain the relative hierarchy ... when people adjust text sizes").
+    Nothing is lost by it: the writer keeps no fonts or sizes. This file's
+    own CSS for browsers (_head_css) is one such page font.
+
+    Words in a monospace font of their own, apart from the page's, are code
+    (a code element, or code this editor wrote); text all in one monospace
+    font is the page's font."""
+    runs = []
+    page_counts = {}
     for block in iter_blocks(doc):
-        lst = block.textList()
-        if lst is not None:
-            list_targets.append((block.position(), max(1, lst.format().indent())))
+        it = block.begin()
+        while not it.atEnd():
+            fragment = it.fragment()
+            fmt = fragment.charFormat()
+            if fragment.isValid() and not fmt.isImageFormat():
+                families = tuple(fmt.fontFamilies() or ())
+                runs.append((fragment.position(), fragment.length(), fmt, families))
+                page_counts[families] = page_counts.get(families, 0) + fragment.length()
+            it += 1
+    if not runs:
+        return
+    page = max(page_counts, key=page_counts.get)
+    cursor = QTextCursor(doc)
+    for position, length, fmt, families in runs:
+        if not any(fmt.hasProperty(prop) for prop in _PAGE_FONT):
+            continue
+        for prop in _PAGE_FONT:
+            fmt.clearProperty(prop)
+        if families != page and names_monospace(families):
+            fmt.setFontFixedPitch(True)
+            fmt.setFontFamilies(rich_text.CODE_FAMILIES)
+        cursor.setPosition(position)
+        cursor.setPosition(position + length, QTextCursor.MoveMode.KeepAnchor)
+        cursor.setCharFormat(fmt)
+
+
+def normalize_after_set_html(doc) -> None:
+    """Tidy a document Qt's HTML reader just read (a file being opened, a
+    crash backup restored).
+
+    Empty paragraphs come back empty: this exporter writes them as
+    <p>&nbsp;</p>, because Qt drops <p></p> and doubles <p><br></p>.
+    Whitespace that pretty-printed HTML leaves at the end of a list item,
+    or after </html>, is trimmed. Lists stay real lists. Quotes get their
+    depth back (see _quote_depths). The page's fonts and sizes go, code
+    staying code (see _drop_page_fonts).
+    """
+    _quote_depths(doc)
+    _drop_page_fonts(doc)
+    NBSP = "\u00a0"
+    nbsp_targets = []
+    items = []
+    for block in iter_blocks(doc):
+        if block.textList() is not None:
+            items.append(block.position())
         elif block.text() == NBSP:
-            # Our own exports encode empty lines as <p>&nbsp;</p> because Qt
-            # drops <p></p> and doubles <p><br></p>; restore true emptiness.
             nbsp_targets.append(block.position())
 
-    # Process bottom-up so earlier positions stay valid while we mutate.
-    for pos in reversed(nbsp_targets):
+    # Bottom-up, so earlier positions stay valid while we change text.
+    for pos in reversed(sorted(nbsp_targets + items)):
         block = doc.findBlock(pos)
-        cursor = QTextCursor(block)
-        cursor.movePosition(QTextCursor.EndOfBlock, QTextCursor.KeepAnchor)
-        cursor.removeSelectedText()
-
-    for pos, depth in reversed(list_targets):
-        block = doc.findBlock(pos)
-        lst = block.textList()
-        if lst is not None:
-            lst.remove(block)
-
-        # Pretty-printed foreign HTML often leaves "item\n" whitespace that
-        # Qt parses into trailing spaces; trim them from the item.
-        stripped_len = len(block.text().rstrip())
-        cursor = QTextCursor(block)
-        cursor.setBlockFormat(QTextBlockFormat())
-        if stripped_len < len(block.text()):
-            cursor.setPosition(block.position() + stripped_len)
+        text = block.text()
+        keep = 0 if text == NBSP and block.textList() is None else len(text.rstrip())
+        if keep < len(text):
+            cursor = QTextCursor(block)
+            # (A place in the text, as a place in the document.)
+            cursor.setPosition(block.position() + doc_offset(text, keep))
             cursor.movePosition(QTextCursor.EndOfBlock, QTextCursor.KeepAnchor)
             cursor.removeSelectedText()
-
-        marker_fmt = QTextCharFormat()
-        marker_fmt.setFontWeight(400)
-        marker_fmt.setFontItalic(False)
-        marker_fmt.setFontUnderline(False)
-        marker_fmt.clearForeground()
-        cursor.setPosition(block.position())
-        cursor.insertText(" " * (depth * INDENT_STEP) + "• ", marker_fmt)
 
     # Qt folds whitespace after </html> (e.g. the file's final newline) into
     # the last paragraph as a trailing space; trim it.
@@ -344,6 +534,6 @@ def normalize_lists_after_set_html(doc) -> None:
     trimmed = text.rstrip(" " + NBSP)
     if len(trimmed) < len(text):
         cursor = QTextCursor(last)
-        cursor.setPosition(last.position() + len(trimmed))
+        cursor.setPosition(last.position() + doc_length(trimmed))
         cursor.movePosition(QTextCursor.EndOfBlock, QTextCursor.KeepAnchor)
         cursor.removeSelectedText()

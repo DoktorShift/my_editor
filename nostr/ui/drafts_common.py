@@ -18,12 +18,14 @@ of the app scaled around it.
 
 from __future__ import annotations
 
-import time
 from urllib.parse import urlparse
 
+from PySide6.QtCore import QDateTime, QLocale
 from PySide6.QtGui import QFont, QFontInfo
 from PySide6.QtWidgets import QApplication
 
+import i18n
+import theme
 from constants import (
     DARK_BG,
     DARK_BORDER,
@@ -84,14 +86,10 @@ THEME_TOKENS = {
         "control_pressed_bg": DARK_BG,
         "selected_bg": "#094771",
         "selected_fg": "#FFFFFF",
-        "selected_muted": "#C9D9E5",        # 6.76 on the selection fill
         "accent": "#007ACC",                # focus ring
-        # The selection bar sits on top of the selection fill, so it is
-        # not the accent: #007ACC on #094771 is 2.16:1 and the shape cue
-        # disappears exactly where it has to be legible. 3.82:1 here.
-        "selection_bar": "#4DA6FF",
         "text_selection_bg": DARK_SELECTION,
         "error_fg": "#F48771",
+        "link": theme.dialog_link_color(True),    # 6.28 list
     },
     False: {
         "panel_bg": LIGHT_BG,
@@ -107,11 +105,10 @@ THEME_TOKENS = {
         "control_pressed_bg": "#D0D0D0",
         "selected_bg": "#DCEEFA",
         "selected_fg": "#1A1A1A",
-        "selected_muted": "#565656",        # 6.17 on the selection fill
         "accent": "#0078D4",
-        "selection_bar": "#0F5FA8",         # 5.48 on the selection fill
         "text_selection_bg": LIGHT_SELECTION,
         "error_fg": "#C8412A",
+        "link": theme.dialog_link_color(False),   # 4.53 list
     },
 }
 
@@ -168,6 +165,16 @@ def secondary_font() -> QFont:
     app_pt = app_point_size()
     font.setPointSizeF(min(max(MIN_TEXT_PT, app_pt - 1.0), app_pt))
     return font
+
+
+# The rows of the panel's lists (post_list.py): two stacked lines from one
+# gutter; a selected row is a rounded shape inset from the list's edges,
+# a shape as well as a fill (``accessibility.md``: "Offer visual
+# indicators, like distinct shapes or icons, in addition to color"). The
+# vertical values add up to the row height.
+LIST_GUTTER: int = 12
+ROW_PAD_V: int = 7
+ROW_LINE_GAP: int = 2
 
 
 def scaled(base: int) -> int:
@@ -237,29 +244,49 @@ def source_host(record: DraftRecord) -> str:
     return f"{host[:head]}…{host[head - keep:]}"
 
 
-def format_absolute_time(ts: int) -> str:
-    """The exact save time, in words, for tooltips and screen readers.
+def display_locale() -> QLocale:
+    """The locale dates and numbers are written in: the language MyEditor
+    speaks (i18n.display_locale, the one place that decides it)."""
+    return i18n.display_locale()
 
-    It was previously unavailable to every user by any means.
-    """
+
+def format_count(n: int) -> str:
+    """A number with the language's thousands separator: 1,240 or 1.240."""
+    return display_locale().toString(int(n))
+
+
+def _moment(ts: int):
+    """``ts`` as a local QDateTime, or None when it is no time."""
     if ts <= 0:
-        return ""
+        return None
     try:
-        return time.strftime("%d %B %Y at %H:%M", time.localtime(int(ts)))
-    except (ValueError, OverflowError, OSError):
-        return ""
+        moment = QDateTime.fromSecsSinceEpoch(int(ts))
+    except (ValueError, OverflowError):
+        return None
+    return moment if moment.isValid() else None
+
+
+def format_absolute_time(ts: int) -> str:
+    """The exact save time, in words, for tooltips and screen readers:
+    the language's own way of writing a day and a time ("January 6, 2027
+    at 2:05 PM", "6. Januar 2027 um 14:05")."""
+    moment = _moment(ts)
+    return i18n.format_moment(moment) if moment is not None else ""
 
 
 def format_absolute_date(ts: int) -> str:
     """The day only, for a publication date that has no useful clock time.
 
-    Same ``strftime`` family as :func:`format_absolute_time` so the two
-    dates on the preview's origin line cannot be formatted differently
-    from one another.
+    Same day as :func:`format_absolute_time` writes, so the two dates on
+    the preview's origin line cannot be formatted differently from one
+    another.
     """
-    if ts <= 0:
-        return ""
-    try:
-        return time.strftime("%d %B %Y", time.localtime(int(ts)))
-    except (ValueError, OverflowError, OSError):
-        return ""
+    moment = _moment(ts)
+    return i18n.format_day(moment) if moment is not None else ""
+
+
+def format_short_date(ts: int) -> str:
+    """The day with a short month, for a list row with little room
+    ("Jan 6, 2027", "6. Jan. 2027")."""
+    moment = _moment(ts)
+    return i18n.format_day(moment, short_month=True) if moment is not None else ""

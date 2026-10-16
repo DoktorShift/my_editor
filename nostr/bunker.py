@@ -31,14 +31,17 @@ from __future__ import annotations
 
 import json
 import secrets
+import time
 from dataclasses import dataclass
 from typing import Callable, Dict, List, Optional, Tuple
 from urllib.parse import parse_qs, quote, urlsplit
 
 from PySide6.QtCore import QObject, QTimer, Signal
 
-from . import CLIENT_NAME, crypto, events
-from .relay import RelayPool, Subscription
+from i18n import _
+
+from . import CLIENT_NAME, crypto, events, refs
+from .relay import KeySignIn, RelayPool, Subscription
 
 
 # --------------------------------------------------------------------------- #
@@ -62,6 +65,11 @@ DEFAULT_RPC_TIMEOUT_MS = 30_000
 # we need is somewhere else.
 PING_TIMEOUT_MS = 6_000
 
+# A signer that answered anything this recently is taken to be there
+# (``check_alive``): asking again only to find out would cost a signer that
+# ignores ping six seconds, right after it proved itself.
+ANSWERED_RECENTLY_MS = 30_000
+
 # A signer may answer any request with an "auth_url" challenge instead of a
 # result, meaning the user has to authenticate in a browser first. The real
 # answer arrives later under the same request id, so the pending request is
@@ -77,10 +85,32 @@ SIGNER_SILENT_NEEDLES: Tuple[str, ...] = (
 )
 
 
+# The failure reasons this client gives itself when its session to the
+# signer app is not there (not connected yet, closed, reopened, dropped):
+# the signer app was never asked, so nothing it would say is known.
+SESSION_ERROR_NEEDLES: Tuple[str, ...] = (
+    "not connected",
+    "user pubkey not yet known",
+    "closed by client",
+    "reopening channel",
+    "dropped from session pool",
+    "application shutdown",
+)
+
+
 def is_signer_silent(reason: str) -> bool:
     """True if ``reason`` means the signer never answered."""
     lowered = (reason or "").lower()
     return any(needle in lowered for needle in SIGNER_SILENT_NEEDLES)
+
+
+def is_signer_answer(reason: str) -> bool:
+    """True if ``reason`` is the signer app's own answer (a refusal, an
+    error it sent), rather than silence or this client's session not being
+    there: asking again would be answered the same way."""
+    lowered = (reason or "").lower()
+    return not is_signer_silent(lowered) and not any(
+        needle in lowered for needle in SESSION_ERROR_NEEDLES)
 
 
 def humanize_failure(reason: str) -> str:
@@ -93,11 +123,23 @@ def humanize_failure(reason: str) -> str:
     through unchanged rather than blurred into a generic apology.
     """
     if is_signer_silent(reason):
-        return (
-            "Your signer did not answer. Open your signer app, make sure "
-            "it is running, and try again."
+        return _(
+            "Your signer app did not answer. Open it, make sure it is "
+            "running, and try again."
         )
     return reason
+
+
+# Where MyEditor and a signer app meet to pair (NIP-46 nostrconnect).
+# Transport only, never anyone's home relay. theforest.nostr1.com and
+# relay.primal.net are among Amber's own defaults, so a phone that pairs
+# usually already listens on one of them.
+NIP46_RELAYS: tuple = (
+    "wss://relay.primal.net",
+    "wss://relay.damus.io",
+    "wss://nos.lol",
+    "wss://theforest.nostr1.com",
+)
 
 
 # Permissions we request at connect time. Comma-separated per spec.
@@ -107,15 +149,32 @@ def humanize_failure(reason: str) -> str:
 #   sign_event:31234  NIP-37 draft wraps (private encrypted drafts)
 #   nip44_encrypt     encrypting draft payloads to the user's own pubkey
 #   nip44_decrypt     decrypting drafts pulled back from relays
+#   nip04_decrypt     reading a list of sources an older app saved
 #   get_public_key    required for the post-connect user-pubkey lookup
 #   ping              keepalive
+#   sign_event:22242  signing in to the account's relays that ask (NIP-42)
 #
 # Signers that don't recognise an entry typically ignore it silently;
 # the actual capability check happens lazily when we invoke each method.
 DEFAULT_PERMS = (
     "get_public_key,"
     "sign_event:1,sign_event:30023,sign_event:31234,"
+    # Proof of identity for EINUNDZWANZIG membership requests (NIP-98), and
+    # adding the members' relay to the user's relay list (NIP-65).
+    "sign_event:27235,sign_event:10002,"
+    # Publishing the profile of an account created or edited in MyEditor.
+    "sign_event:0,"
+    # Media servers: proving who uploads, lists or deletes a file
+    # (BUD-11), and the list of servers the account uses (BUD-03).
+    "sign_event:24242,sign_event:10063,"
+    # The synced feed list (NIP-78) and where drafts are kept (NIP-37).
+    "sign_event:30078,sign_event:10013,"
+    # Signing in to the account's own relays that ask for it (NIP-42).
+    "sign_event:22242,"
     "nip44_encrypt,nip44_decrypt,"
+    # Reading a list of sources an older app saved with NIP-04 (never
+    # used to encrypt anything).
+    "nip04_decrypt,"
     "ping"
 )
 
@@ -143,20 +202,21 @@ def parse_bunker_uri(uri: str) -> BunkerURI:
         raise ValueError("bunker URI must be a string")
     uri = uri.strip()
     if not uri.startswith("bunker://"):
-        raise ValueError("expected a bunker:// URI")
+        raise ValueError(_("expected a bunker:// URI"))
 
     parts = urlsplit(uri)
     pubkey = (parts.netloc or parts.path.lstrip("/")).strip().lower()
     if len(pubkey) != 64 or not all(c in "0123456789abcdef" for c in pubkey):
-        raise ValueError("bunker URI must contain a 32-byte hex pubkey")
+        raise ValueError(_("bunker URI must contain a 32-byte hex pubkey"))
 
     qs = parse_qs(parts.query, keep_blank_values=False)
     relays = [r.strip() for r in qs.get("relay", []) if r.strip()]
     if not relays:
-        raise ValueError("bunker URI must specify at least one relay")
+        raise ValueError(_("bunker URI must specify at least one relay"))
     for relay in relays:
         if not (relay.startswith("wss://") or relay.startswith("ws://")):
-            raise ValueError(f"relay must be ws:// or wss://, got {relay!r}")
+            raise ValueError(_("relay must be ws:// or wss://, got {relay}").format(
+                relay=repr(relay)))
 
     secret_values = qs.get("secret", [])
     secret = secret_values[0] if secret_values else None
@@ -284,6 +344,8 @@ class BunkerClient(QObject):
         self._pending: Dict[str, _Pending] = {}
         self._is_connected = False
         self._warned_unreadable = False
+        # When the signer last answered anything (time.monotonic()).
+        self._answered_at: Optional[float] = None
 
         # nostrconnect:// state, only used while listen_for_nostrconnect
         # is the active flow.
@@ -392,6 +454,7 @@ class BunkerClient(QObject):
         self._subscription = self._pool.subscribe(
             self._relays,
             filters=[{"kinds": [24133], "#p": [self._local_pk_hex]}],
+            sign_in=self._channel_sign_in(),
         )
         self._subscription.event.connect(self._on_nostrconnect_event)
 
@@ -500,7 +563,7 @@ class BunkerClient(QObject):
             tags=[["p", self._bunker_pk_hex]],
             sk=self._local_sk,
         )
-        self._pool.publish(self._relays, event)
+        self._pool.publish(self._relays, event, sign_in=self._channel_sign_in())
 
     # -- high-level: silently re-attach from a saved profile ---------------
 
@@ -546,11 +609,55 @@ class BunkerClient(QObject):
                 return
             _ok("pong")
 
+        self._probe(_ok, _confirm_identity, on_failure, timeout_ms)
+
+    def check_alive(
+        self,
+        on_answer: Callable[[], None],
+        on_silence: Callable[[str], None],
+        *,
+        timeout_ms: int = DEFAULT_RPC_TIMEOUT_MS,
+    ) -> None:
+        """Find out whether the signer app is there before asking it for
+        something that waits on a person or on a 30-second timeout.
+
+        Asked the way ``reattach`` proves the channel, with questions no
+        signer asks a person about. Any reply counts, a refusal too: someone
+        is there to give it. ``on_silence`` gets the reason when nothing came
+        back. A signer that answered within ``ANSWERED_RECENTLY_MS`` is not
+        asked at all.
+        """
+        recently = self._answered_at is not None and (
+            time.monotonic() - self._answered_at) * 1000 < ANSWERED_RECENTLY_MS
+        if recently:
+            # On a later turn, as every answer arrives.
+            QTimer.singleShot(0, self, on_answer)
+            return
+
+        def _failed(reason: str) -> None:
+            if is_signer_answer(reason):
+                on_answer()
+            else:
+                on_silence(reason)
+
+        self._probe(lambda _pong: on_answer(), lambda _pk: on_answer(), _failed, timeout_ms)
+
+    def _probe(
+        self,
+        on_ping: Callable[[str], None],
+        on_public_key: Callable[[str], None],
+        on_failure: Callable[[str], None],
+        timeout_ms: int,
+    ) -> None:
+        """Prove the channel: ``ping``, then ``get_public_key`` if the ping
+        fails. Not every signer answers ping (Amber does not); every signer
+        implements ``get_public_key``, and we already hold permission for it."""
+
         def _ping_failed(_reason: str) -> None:
             self._send_request(
                 method="get_public_key",
                 params=[],
-                on_success=_confirm_identity,
+                on_success=on_public_key,
                 on_failure=on_failure,
                 timeout_ms=timeout_ms,
             )
@@ -558,7 +665,7 @@ class BunkerClient(QObject):
         self._send_request(
             method="ping",
             params=[],
-            on_success=_ok,
+            on_success=on_ping,
             on_failure=_ping_failed,
             # The probe gets a short leash so the fallback that actually
             # works is reached quickly. ``min`` so a caller asking for an
@@ -584,6 +691,10 @@ class BunkerClient(QObject):
         """
         if not self._is_connected:
             on_failure("not connected")
+            return
+        refusal = refs.signing_refusal(unsigned_event)
+        if refusal:
+            on_failure(refusal)
             return
 
         payload = {
@@ -704,6 +815,58 @@ class BunkerClient(QObject):
             timeout_ms=timeout_ms,
         )
 
+    def nip04_decrypt(
+        self,
+        peer_pubkey_hex: str,
+        content: str,
+        on_success: Callable[[str], None],
+        on_failure: Callable[[str], None],
+        *,
+        timeout_ms: int = DEFAULT_RPC_TIMEOUT_MS,
+    ) -> None:
+        """Ask the signer to read a NIP-04 message from ``peer_pubkey_hex``
+        (NIP-46 ``nip04_decrypt``): what an older app saved. Nothing is ever
+        encrypted with NIP-04 here."""
+        if not self._is_connected:
+            on_failure("not connected")
+            return
+        peer = peer_pubkey_hex.strip().lower()
+        if len(peer) != 64 or not all(c in "0123456789abcdef" for c in peer):
+            on_failure(f"invalid peer pubkey: {peer_pubkey_hex!r}")
+            return
+        if not content:
+            on_failure("ciphertext is empty")
+            return
+
+        def _ok(result: str) -> None:
+            if not result:
+                on_failure("signer returned empty plaintext")
+                return
+            on_success(result)
+
+        self._send_request(
+            method="nip04_decrypt",
+            params=[peer, content],
+            on_success=_ok,
+            on_failure=on_failure,
+            timeout_ms=timeout_ms,
+        )
+
+    def nip04_decrypt_self(
+        self,
+        content: str,
+        on_success: Callable[[str], None],
+        on_failure: Callable[[str], None],
+        *,
+        timeout_ms: int = DEFAULT_RPC_TIMEOUT_MS,
+    ) -> None:
+        """Read a NIP-04 message the account sent to itself."""
+        if self._user_pubkey is None:
+            on_failure("user pubkey not yet known")
+            return
+        self.nip04_decrypt(self._user_pubkey, content, on_success, on_failure,
+                           timeout_ms=timeout_ms)
+
     def nip44_encrypt_self(
         self,
         plaintext: str,
@@ -805,8 +968,16 @@ class BunkerClient(QObject):
                 "authors": [self._bunker_pk_hex],
                 "#p": [self._local_pk_hex],
             }],
+            sign_in=self._channel_sign_in(),
         )
         self._subscription.event.connect(self._on_response_event)
+
+    def _channel_sign_in(self) -> KeySignIn:
+        """A relay of the channel that asks for a sign-in gets the
+        channel's own key: the one it is asked to deliver messages to,
+        which says nothing about the account."""
+        assert self._local_sk is not None
+        return KeySignIn(self._local_sk)
 
     def _on_connect_acked(
         self,
@@ -877,7 +1048,8 @@ class BunkerClient(QObject):
         self._pending[request_id] = _Pending(method, on_success, on_failure, timer)
         timer.start()
 
-        publish_job = self._pool.publish(self._relays, event, timeout_ms=8000)
+        publish_job = self._pool.publish(self._relays, event, timeout_ms=8000,
+                                         sign_in=self._channel_sign_in())
         publish_job.all_done.connect(
             lambda results, rid=request_id: self._on_publish_done(rid, results)
         )
@@ -905,6 +1077,7 @@ class BunkerClient(QObject):
         request_id = payload.get("id")
         if not isinstance(request_id, str) or request_id not in self._pending:
             return
+        self._answered_at = time.monotonic()
 
         error = payload.get("error")
         result = payload.get("result")
@@ -961,37 +1134,59 @@ class BunkerClient(QObject):
 
 
 # --------------------------------------------------------------------------- #
-# BunkerSessionPool: one connected client per profile, cached process-wide   #
+# BunkerSessionPool: one signer per profile, cached process-wide             #
 # --------------------------------------------------------------------------- #
 
 class BunkerSessionPool(QObject):
-    """Lazy cache of ``BunkerClient`` instances keyed by user pubkey.
+    """Lazy cache of signers keyed by user pubkey.
 
-    The first ``get(profile, …)`` call for a profile creates a fresh
-    client and triggers a ``reattach`` handshake (sends ``ping``). On
-    success the client is memoized and reused for subsequent ``sign_event``
-    calls, no extra WebSocket handshakes per publish.
+    A profile that signs with a signer app gets a ``BunkerClient``: the
+    first ``get(profile, …)`` creates one and triggers a ``reattach``
+    handshake, and on success the client is memoized and reused for every
+    later call, with no extra WebSocket handshakes per publish. A profile
+    whose key is kept on this computer gets a ``LocalSigner``.
 
-    Closing the pool tears down every active client (used at app shutdown).
+    The cached signer is for the way the profile signed when it was made.
+    When that changes (an account paired with a signer app is restored
+    with its key, or a local account is paired with a signer app), the
+    old signer is dropped instead of being handed out, so nothing keeps
+    signing the old way.
+
+    Closing the pool tears down every signer (used at app shutdown).
     """
 
-    def __init__(self, pool: RelayPool, parent: Optional[QObject] = None) -> None:
+    def __init__(self, pool: RelayPool, parent: Optional[QObject] = None, *,
+                 vault=None) -> None:
         super().__init__(parent)
         self._pool = pool
-        self._clients: Dict[str, BunkerClient] = {}
-        # pubkey -> pending callbacks waiting on the first reattach to finish.
-        self._inflight: Dict[str, List[tuple[Callable[[BunkerClient], None], Callable[[str], None]]]] = {}
+        # Keys kept on this computer, for profiles that sign locally.
+        self._vault = vault
+        # pubkey -> BunkerClient or LocalSigner, and how that one signs.
+        self._clients: Dict[str, QObject] = {}
+        self._signers: Dict[str, str] = {}
+        # pubkey -> the client whose reattach is in flight, and the
+        # callbacks waiting on it.
+        self._attaching: Dict[str, BunkerClient] = {}
+        self._inflight: Dict[str, List[Tuple[Callable[[QObject], None], Callable[[str], None]]]] = {}
 
     def get(
         self,
         profile,  # nostr.profiles.Profile, not imported to avoid a cycle
-        on_ready: Callable[[BunkerClient], None],
+        on_ready: Callable[[QObject], None],
         on_error: Callable[[str], None],
     ) -> None:
+        from .local_signer import LOCAL
         pubkey = profile.user_pubkey
+        signer = LOCAL if getattr(profile, "signer", "remote") == LOCAL else "remote"
+        if pubkey in self._clients and self._signers.get(pubkey) != signer:
+            self.drop(pubkey)
         client = self._clients.get(pubkey)
         if client is not None and client.is_connected:
             on_ready(client)
+            return
+
+        if signer == LOCAL:
+            self._get_local(pubkey, on_ready, on_error)
             return
 
         # Coalesce: if a reattach is already in flight for this profile,
@@ -1000,12 +1195,34 @@ class BunkerSessionPool(QObject):
         if waiters is not None:
             waiters.append((on_ready, on_error))
             return
-        self._inflight[pubkey] = [(on_ready, on_error)]
 
+        try:
+            local_sk = bytes.fromhex(profile.local_secret_hex)
+        except ValueError:
+            on_error("saved local secret is malformed; please re-connect the signer")
+            return
+
+        self._inflight[pubkey] = [(on_ready, on_error)]
         new_client = BunkerClient(self._pool, parent=self)
+        self._attaching[pubkey] = new_client
+
+        def current() -> bool:
+            # A reattach that was given up on (the account signs locally
+            # now, or was dropped) must not come back as the cached client.
+            # It is left to finish rather than closed mid-handshake, and
+            # closed here when it does.
+            if self._attaching.get(pubkey) is new_client:
+                del self._attaching[pubkey]
+                return True
+            new_client.close(reason="no longer wanted")
+            new_client.deleteLater()
+            return False
 
         def _ok() -> None:
+            if not current():
+                return
             self._clients[pubkey] = new_client
+            self._signers[pubkey] = "remote"
             for ready_cb, _err_cb in self._inflight.pop(pubkey, []):
                 try:
                     ready_cb(new_client)
@@ -1013,7 +1230,12 @@ class BunkerSessionPool(QObject):
                     pass
 
         def _err(reason: str) -> None:
+            if not current():
+                return
+            # Gone for good: drafts that wait for a signer app ask again
+            # every minute, each time with a client of its own.
             new_client.close(reason=reason)
+            new_client.deleteLater()
             for _ready_cb, err_cb in self._inflight.pop(pubkey, []):
                 try:
                     err_cb(reason)
@@ -1021,28 +1243,59 @@ class BunkerSessionPool(QObject):
                     pass
 
         try:
-            local_sk = bytes.fromhex(profile.local_secret_hex)
-        except ValueError:
-            self._inflight.pop(pubkey, None)
-            on_error("saved local secret is malformed; please re-connect the signer")
-            return
+            new_client.reattach(
+                bunker_pubkey=profile.bunker_pubkey,
+                relays=list(profile.bunker_relays),
+                local_sk=local_sk,
+                user_pubkey=profile.user_pubkey,
+                on_success=_ok,
+                on_failure=_err,
+            )
+        except Exception as exc:  # noqa: BLE001
+            # A saved pairing that cannot even start (a malformed key) must
+            # fail every waiter now, not leave them waiting for good.
+            _err(f"the saved signer pairing could not be opened: {exc}")
 
-        new_client.reattach(
-            bunker_pubkey=profile.bunker_pubkey,
-            relays=list(profile.bunker_relays),
-            local_sk=local_sk,
-            user_pubkey=profile.user_pubkey,
-            on_success=_ok,
-            on_failure=_err,
-        )
+    def _get_local(self, pubkey: str, on_ready, on_error) -> None:
+        """A key kept on this computer: no channel to open, no phone to
+        ask. The same calls are answered by a LocalSigner."""
+        from .key_vault import KeyVault
+        from .local_signer import LOCAL, LocalSigner
+        # A reattach started while the account still signed with an app
+        # is given up; whoever waited on it gets the local signer instead.
+        waiters = [(on_ready, on_error)] + self._inflight.pop(pubkey, [])
+        self._attaching.pop(pubkey, None)
+        vault = self._vault if self._vault is not None else KeyVault()
+        secret = vault.load(pubkey)
+        if secret is None:
+            for _ready_cb, err_cb in waiters:
+                err_cb("the private key for this account is not on this computer")
+            return
+        local = LocalSigner(secret, parent=self)
+        self._clients[pubkey] = local
+        self._signers[pubkey] = LOCAL
+        for ready_cb, _err_cb in waiters:
+            ready_cb(local)
 
     def drop(self, user_pubkey: str) -> None:
+        """Forget the profile's signer, and any reattach still in flight."""
         client = self._clients.pop(user_pubkey, None)
+        self._signers.pop(user_pubkey, None)
         if client is not None:
             client.close(reason="dropped from session pool")
+            client.deleteLater()
+        self._attaching.pop(user_pubkey, None)
+        for _ready_cb, err_cb in self._inflight.pop(user_pubkey, []):
+            try:
+                err_cb("dropped from session pool")
+            except Exception:  # noqa: BLE001
+                pass
 
     def close_all(self) -> None:
         for client in self._clients.values():
             client.close(reason="application shutdown")
+            client.deleteLater()
         self._clients.clear()
+        self._signers.clear()
+        self._attaching.clear()
         self._inflight.clear()

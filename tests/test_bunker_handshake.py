@@ -15,6 +15,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+import time
 
 import pytest
 
@@ -23,7 +24,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtCore import QCoreApplication, QObject, Signal
 
-from nostr import crypto, events
+from nostr import bunker, crypto, events
 from nostr.bunker import BunkerClient, connect_handshake_secret
 
 
@@ -62,12 +63,12 @@ class FakePool(QObject):
         super().__init__()
         self.subs = []
 
-    def subscribe(self, urls, filters, sub_id=None):
+    def subscribe(self, urls, filters, sub_id=None, *, sign_in=None):
         sub = _Sub(filters)
         self.subs.append(sub)
         return sub
 
-    def publish(self, urls, event, timeout_ms=8000):
+    def publish(self, urls, event, timeout_ms=8000, *, sign_in=None):
         for sub in list(self.subs):
             if sub.closed:
                 continue
@@ -100,6 +101,7 @@ class FakeSigner:
         self.auth_url_for_connect = None
         self.withhold_after_auth = False
         self.refuse_ping = False
+        self.refuse_public_key = False
         self.client_pk = None
 
     def watch(self, client_pk):
@@ -133,7 +135,10 @@ class FakeSigner:
         if method == "connect":
             self.send({"id": rid, "result": "ack"})
         elif method == "get_public_key":
-            self.send({"id": rid, "result": self.user_pk})
+            if self.refuse_public_key:
+                self.send({"id": rid, "error": "not allowed"})
+            else:
+                self.send({"id": rid, "result": self.user_pk})
         elif method == "ping":
             if self.refuse_ping:
                 self.send({"id": rid, "error": "unknown method"})
@@ -400,3 +405,59 @@ def test_reattach_refuses_a_signer_holding_a_different_account():
     )
     assert "different account" in outcome.get("err", "")
     assert not client.is_connected
+
+
+# --------------------------------------------------------------------- #
+# Is the signer app there?                                               #
+# --------------------------------------------------------------------- #
+
+def _asked(client, **kw):
+    """Ask ``client`` whether its signer app is there; what came back."""
+    outcome = {}
+    client.check_alive(on_answer=lambda: outcome.setdefault("answered", True),
+                       on_silence=lambda reason: outcome.setdefault("silent", reason), **kw)
+    deadline = time.monotonic() + 5
+    while not outcome and time.monotonic() < deadline:
+        QCoreApplication.processEvents()
+        time.sleep(0.002)
+    return outcome
+
+
+def test_a_signer_that_answered_just_now_is_not_asked_again():
+    # Amber does not answer ping: asking again right after the channel was
+    # proven would cost six seconds before the first draft opens.
+    signer, client, _outcome = _reattach(signer_answers_ping=False)
+    before = len(signer.seen)
+    assert _asked(client) == {"answered": True}
+    assert len(signer.seen) == before
+
+
+def test_the_signer_is_asked_with_a_ping(monkeypatch):
+    monkeypatch.setattr(bunker, "ANSWERED_RECENTLY_MS", 0)
+    signer, client, _outcome = _reattach()
+    assert _asked(client) == {"answered": True}
+    assert [p["method"] for p in signer.seen] == ["ping", "ping"]
+
+
+def test_a_signer_that_ignores_ping_is_asked_for_its_public_key(monkeypatch):
+    monkeypatch.setattr(bunker, "ANSWERED_RECENTLY_MS", 0)
+    signer, client, _outcome = _reattach(signer_answers_ping=False)
+    assert _asked(client) == {"answered": True}
+    assert [p["method"] for p in signer.seen][-2:] == ["ping", "get_public_key"]
+
+
+def test_a_refusal_is_an_answer(monkeypatch):
+    # Someone is there to say no: the drafts need not wait for anyone.
+    monkeypatch.setattr(bunker, "ANSWERED_RECENTLY_MS", 0)
+    signer, client, _outcome = _reattach(signer_answers_ping=False)
+    signer.refuse_public_key = True
+    assert _asked(client) == {"answered": True}
+
+
+def test_silence_is_reported_as_silence(monkeypatch):
+    monkeypatch.setattr(bunker, "ANSWERED_RECENTLY_MS", 0)
+    signer, client, _outcome = _reattach()
+    signer._sub.close()                       # the phone went to sleep
+    outcome = _asked(client, timeout_ms=5)
+    assert bunker.is_signer_silent(outcome.get("silent", ""))
+    assert [p["method"] for p in signer.seen] == ["ping"]

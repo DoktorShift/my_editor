@@ -161,6 +161,20 @@ class LooksLikeHtmlTests(unittest.TestCase):
     def test_atom_is_not_html(self) -> None:
         self.assertFalse(looks_like_html("<feed xmlns='http://www.w3.org/2005/Atom'>"))
 
+    def test_html_quoted_in_a_feed_is_not_html(self) -> None:
+        # A <header> in an item's CDATA once read as "<head", and the
+        # feed was taken for a web page.
+        feed = ('<?xml version="1.0"?>\n<?xml-stylesheet href="s.xsl"?>\n'
+                "<rss><channel><item><description><![CDATA[<header>Hi</header>"
+                "<html><body>x</body></html>]]></description></item></channel></rss>")
+        self.assertFalse(looks_like_html(feed))
+
+    def test_cdata_alone_is_not_html(self) -> None:
+        self.assertFalse(looks_like_html("<![CDATA[<head><body>"))
+
+    def test_header_is_not_head(self) -> None:
+        self.assertFalse(looks_like_html("<header>site</header>"))
+
     def test_json_feed_is_not_html(self) -> None:
         self.assertFalse(looks_like_html('{"version":"https://jsonfeed.org/v/1.1"}'))
 

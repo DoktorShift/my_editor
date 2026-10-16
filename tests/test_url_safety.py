@@ -137,3 +137,15 @@ def test_same_origin_is_case_insensitive_on_host_only():
 def test_invalid_port_is_not_a_crash():
     assert is_safe_media_url("https://a.example:notaport/x") is False
     assert origin_of("https://a.example:notaport/x") is None
+
+
+@pytest.mark.parametrize("url", [
+    "http://localhost:7811/avatar.png",
+    "https://router/admin.png",
+    "https://nas.local/photo.jpg",
+    "https://printer.lan/a.png",
+    "https://service.internal/x.png",
+    "https://127.1/x.png",
+])
+def test_a_strangers_image_cannot_point_into_the_local_network(url):
+    assert is_safe_mirror_source(url) is False

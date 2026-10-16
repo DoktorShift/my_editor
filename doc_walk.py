@@ -14,6 +14,8 @@ and a char format where isImageFormat() is true; exporters decide how to
 serialize them.
 """
 
+import re
+
 BULLET_MARKER = "• "
 
 # Spaces per bullet nesting level. Mirrors tab_width in editor.py; kept as a
@@ -27,6 +29,56 @@ OBJECT_REPLACEMENT = "\ufffc"
 # maps it to a newline; fragment text does not, so any serializer that
 # replaces toPlainText has to do the mapping itself.
 LINE_SEPARATOR = "\u2028"
+
+
+# Python counts a string in code points; a QTextDocument counts positions
+# in UTF-16 units, where a character beyond U+FFFF (an emoji, a skin tone,
+# a flag, a rare CJK character) takes two. A place found in a block's
+# text by Python (a regular expression's match) is converted before it
+# is added to the block's position, and a position in a block before it
+# slices the block's text.
+_BEYOND_BMP = re.compile("[\U00010000-\U0010FFFF]")
+
+
+def doc_length(text: str) -> int:
+    """How many document positions ``text`` takes (its UTF-16 units)."""
+    return len(text) + len(_BEYOND_BMP.findall(text))
+
+
+def doc_offset(text: str, index: int) -> int:
+    """The offset in the document of ``text[index]`` (``text`` being a
+    block's text, or its start)."""
+    return doc_length(text[:index])
+
+
+def text_index(text: str, offset: int) -> int:
+    """The index in ``text`` of the document offset ``offset`` within it
+    (``cursor.positionInBlock()`` in ``block.text()``); one in the middle
+    of a character counts as that character's end."""
+    if not _BEYOND_BMP.search(text):
+        return min(max(offset, 0), len(text))
+    units = 0
+    for index, char in enumerate(text):
+        if units >= offset:
+            return index
+        units += 2 if ord(char) > 0xFFFF else 1
+    return len(text)
+
+
+def block_units(block) -> bytes:
+    """``block``'s text as Qt holds it: its UTF-16 units, little-endian, a
+    lone surrogate included, which PySide leaves out of ``block.text()``
+    (so places found in that text would not be Qt's). Read unit by unit
+    from the document only when the text holds fewer units (doc_length)
+    than the block. Where whole characters are enough, doc_offset and
+    text_index convert a place; this keeps every unit (mac_words)."""
+    text = block.text()
+    if doc_length(text) == block.length() - 1:
+        return text.encode("utf-16-le", "surrogatepass")
+    doc = block.document()
+    return "".join(doc.characterAt(position) for position in range(
+        block.position(), block.position() + block.length() - 1)).encode(
+            "utf-16-le", "surrogatepass")
 
 
 def iter_blocks(doc):

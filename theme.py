@@ -18,8 +18,11 @@ constants.py so there is no second list to keep in sync. Call
 apply_app_theme() once at startup and again on every theme change.
 """
 
-from PySide6.QtGui import QColor, QPalette
-from PySide6.QtWidgets import QApplication
+from typing import Optional
+
+from PySide6.QtCore import QRectF, Qt
+from PySide6.QtGui import QColor, QPainter, QPalette, QPen
+from PySide6.QtWidgets import QApplication, QDialogButtonBox, QProxyStyle, QStyle, QWidget
 
 from constants import (
     DARK_BG, DARK_BORDER, DARK_FG, DARK_MENU_BG, DARK_MUTED_FG, DARK_SELECTION,
@@ -33,6 +36,12 @@ from constants import (
 _DIALOG_ACCENT = {True: ("#007ACC", "#1177C7"), False: (LIGHT_SELECTION, "#106EBE")}
 _DIALOG_DESTRUCTIVE = {True: "#FF6B5E", False: "#C0392B"}
 _DIALOG_LINK = {True: "#4FA3F7", False: LIGHT_SELECTION}
+# The ring around the control that has the keyboard focus: the link blue
+# around a plain button (3:1 or more against the button and the window),
+# and around the accent-filled default button a color that stands out
+# from the accent itself.
+_FOCUS_RING = {True: "#4FA3F7", False: LIGHT_SELECTION}
+_FOCUS_RING_ON_ACCENT = {True: "#FFFFFF", False: "#0A2540"}
 
 
 def _palette(is_dark: bool) -> QPalette:
@@ -93,27 +102,89 @@ def dialog_stylesheet(is_dark: bool) -> str:
 
     Covers the surface, text, and the three kinds of push button: normal,
     default (``setDefault(True)``), and destructive (objectName
-    ``destructive``). Dialogs append their own rules after it.
+    ``destructive``), each with a ring that shows when it has the keyboard
+    focus (a thicker border, with the padding reduced to match, so the
+    button keeps its size). Dialogs append their own rules after it.
     """
     if is_dark:
         bg, fg, muted, border, field = DARK_BG, DARK_FG, DARK_MUTED_FG, DARK_BORDER, DARK_MENU_BG
     else:
         bg, fg, muted, border, field = LIGHT_BG, LIGHT_FG, LIGHT_MUTED_FG, LIGHT_BORDER, LIGHT_MENU_BG
-    accent, accent_hover = _DIALOG_ACCENT[is_dark]
     destructive = _DIALOG_DESTRUCTIVE[is_dark]
     return f"""
     QDialog {{ background: {bg}; }}
     QLabel {{ color: {fg}; font-size: 13px; }}
+    QLabel:disabled {{ color: {muted}; }}
     QPushButton {{
         background: {field}; color: {fg}; border: 1px solid {border};
         padding: 6px 14px; border-radius: 5px; min-width: 72px;
     }}
     QPushButton:hover {{ border-color: {muted}; }}
-    QPushButton:default {{ background: {accent}; color: #FFFFFF; border-color: {accent}; }}
-    QPushButton:default:hover {{ background: {accent_hover}; border-color: {accent_hover}; }}
     QPushButton#destructive {{ color: {destructive}; }}
     QPushButton#destructive:hover {{ border-color: {destructive}; }}
+    QPushButton:disabled {{ background: {field}; color: {muted}; border-color: {border}; }}
+    {default_and_focus_css(is_dark)}
     """
+
+
+def default_and_focus_css(is_dark: bool) -> str:
+    """Style rules for a dialog's push buttons that show what the keyboard
+    will do: the ring around the button with the focus (2 px, the padding
+    giving up the extra pixel so the button keeps its size; 6 px by 14 px
+    padding and a 1 px border are what it is drawn for) and the default
+    button in the accent. Every dialog with its own button style appends
+    them after it, so the default and the focus show there too.
+
+    A destructive button is never the default by design, but on Windows and
+    Linux the default moves to the button with the focus; it then keeps the
+    plain fill and its red label (red on the accent cannot be read) and the
+    ring that marks the focus."""
+    ring = _FOCUS_RING[is_dark]
+    field = DARK_MENU_BG if is_dark else LIGHT_MENU_BG
+    destructive = _DIALOG_DESTRUCTIVE[is_dark]
+    return (f"QPushButton:focus, QPushButton#destructive:focus "
+            f"{{ border: 2px solid {ring}; padding: 5px 13px; }}\n"
+            + accent_button_css("QPushButton:default", is_dark)
+            + f"QPushButton#destructive:default {{ background: {field}; color: {destructive}; "
+              f"border: 2px solid {ring}; padding: 5px 13px; }}\n")
+
+
+def accent_button_css(selector: str, is_dark: bool) -> str:
+    """Style rules that draw the buttons ``selector`` matches as the
+    accent-filled button (a dialog's default action): the fill, its hover,
+    with the keyboard focus a ring in the color that stands out from the
+    fill (the plain ring would be blue on blue), and while it cannot be
+    chosen the plain button's dimmed look, as a Mac dims a default button.
+    The rules for the plain button must come first or be less specific."""
+    accent, accent_hover = _DIALOG_ACCENT[is_dark]
+    ring = _FOCUS_RING_ON_ACCENT[is_dark]
+    if is_dark:
+        field, muted, border = DARK_MENU_BG, DARK_MUTED_FG, DARK_BORDER
+    else:
+        field, muted, border = LIGHT_MENU_BG, LIGHT_MUTED_FG, LIGHT_BORDER
+    return (f"{selector} {{ background: {accent}; color: #FFFFFF; border-color: {accent}; }}\n"
+            f"{selector}:hover {{ background: {accent_hover}; border-color: {accent_hover}; }}\n"
+            f"{selector}:focus {{ border: 2px solid {ring}; }}\n"
+            f"{selector}:disabled {{ background: {field}; color: {muted}; "
+            f"border-color: {border}; }}\n")
+
+
+def focus_ring_color(is_dark: bool) -> str:
+    """The color of the ring around a control with the keyboard focus, for
+    dialogs that draw their own controls (link-like buttons)."""
+    return _FOCUS_RING[is_dark]
+
+
+def focus_ring_on_accent_color(is_dark: bool) -> str:
+    """The ring's color on a control filled with the accent or its tint (a
+    checked toolbar button), where the plain ring would not show."""
+    return _FOCUS_RING_ON_ACCENT[is_dark]
+
+
+def error_text_color(is_dark: bool) -> str:
+    """Color of a short error said next to a field (why an address cannot
+    be a link), the destructive red of the theme."""
+    return _DIALOG_DESTRUCTIVE[is_dark]
 
 
 def dialog_link_color(is_dark: bool) -> str:
@@ -125,6 +196,66 @@ def dialog_link_color(is_dark: bool) -> str:
     return _DIALOG_LINK[is_dark]
 
 
+def attention_color(is_dark: bool) -> str:
+    """The red that marks a problem (a destructive button, a failed check),
+    readable on its theme's background."""
+    return _DIALOG_DESTRUCTIVE[is_dark]
+
+
+def check_box_border(palette: QPalette) -> QColor:
+    """A check box's frame that people can see on either theme: the text
+    colour over the field, about half and half, which keeps the 3:1 that
+    controls need against the field and the window (Fusion's own frame
+    is the window colour darkened, 1.07:1 on the dark theme)."""
+    text = palette.color(QPalette.ColorRole.Text)
+    base = palette.color(QPalette.ColorRole.Base)
+    share = 0.55
+    return QColor(round(text.red() * share + base.red() * (1 - share)),
+                  round(text.green() * share + base.green() * (1 - share)),
+                  round(text.blue() * share + base.blue() * (1 - share)))
+
+
+class AppStyle(QProxyStyle):
+    """Fusion, with check boxes and radio buttons whose frame can be seen
+    on the dark theme too (review M5; Fusion's radio ring was as faint as
+    its check box frame, so an unchecked choice in Create Account and in
+    Settings showed no circle at all), and with every dialog's buttons in
+    the order the HIG gives on every system: Cancel, then the default
+    action at the trailing end, as MyEditor's alerts have them (a button
+    box would otherwise put the default first on Windows and KDE, so one
+    flow showed both orders). Everything else is Fusion's."""
+
+    _BOXES = (QStyle.PrimitiveElement.PE_IndicatorCheckBox,
+              QStyle.PrimitiveElement.PE_IndicatorItemViewItemCheck)
+    _RADIO = QStyle.PrimitiveElement.PE_IndicatorRadioButton
+
+    def styleHint(self, hint, option=None, widget=None, returnData=None):  # noqa: N802
+        if hint == QStyle.StyleHint.SH_DialogButtonLayout:
+            return QDialogButtonBox.ButtonLayout.MacLayout.value
+        return super().styleHint(hint, option, widget, returnData)
+
+    def drawPrimitive(self, element, option, painter, widget=None):  # noqa: N802
+        super().drawPrimitive(element, option, painter, widget)
+        if option is None or (element not in self._BOXES and element != self._RADIO):
+            return
+        painter.save()
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.setPen(QPen(check_box_border(option.palette), 1))
+        frame = QRectF(option.rect).adjusted(0.5, 0.5, -0.5, -0.5)
+        if element == self._RADIO:
+            painter.drawEllipse(frame)
+        else:
+            painter.drawRoundedRect(frame, 2, 2)
+        painter.restore()
+
+
+# The system's own selection color (the accent color people choose in
+# System Settings on a Mac, the Windows accent), read once before the
+# app's palette replaces it; None until then.
+_SYSTEM_HIGHLIGHT: Optional[QColor] = None
+
+
 def apply_app_theme(is_dark: bool) -> None:
     """Push the light/dark palette onto the running QApplication.
 
@@ -132,7 +263,94 @@ def apply_app_theme(is_dark: bool) -> None:
     import QApplication or thread it through. A no-op if no application
     exists yet (e.g. during import in tests).
     """
+    global _SYSTEM_HIGHLIGHT
     app = QApplication.instance()
     if app is None:
         return
+    if _SYSTEM_HIGHLIGHT is None:
+        _SYSTEM_HIGHLIGHT = QColor(app.palette().color(QPalette.ColorRole.Highlight))
     app.setPalette(_palette(is_dark))
+
+
+def _luminance(colour: QColor) -> float:
+    def channel(value: float) -> float:
+        return value / 12.92 if value <= 0.03928 else ((value + 0.055) / 1.055) ** 2.4
+    return (0.2126 * channel(colour.redF()) + 0.7152 * channel(colour.greenF())
+            + 0.0722 * channel(colour.blueF()))
+
+
+def list_selection_color(is_dark: bool) -> QColor:
+    """The fill of a selected row in a list that has the keyboard focus:
+    the system's selection color, so it follows the accent color people
+    chose, as every list on a Mac does; the theme's own blue where the
+    system's would not carry white text at 4.5:1 (or is not known)."""
+    system = _SYSTEM_HIGHLIGHT
+    if system is not None and system.isValid():
+        if (1.05) / (_luminance(system) + 0.05) >= 4.5:
+            return QColor(system)
+    return QColor(DARK_SELECTION if is_dark else LIGHT_SELECTION)
+
+
+def inactive_selection_color(is_dark: bool) -> QColor:
+    """A selected row's fill while its list does not have the focus: a
+    quiet grey, as a Mac list shows it, so only one place on screen wears
+    the accent."""
+    return QColor(255, 255, 255, 26) if is_dark else QColor(0, 0, 0, 20)
+
+
+# Qt keeps a widget's parsed style sheet under the widget's address as soon
+# as anything in it is measured, and forgets it when the widget goes only if
+# the widget was polished. A window given a style sheet and dropped without
+# ever being shown (a dialog built and then not needed) left its style sheet
+# behind under its address, and the next window allocated at that address
+# drew with it (review M1: Publish in the Media Library's grey, not the
+# accent). So every widget is polished as soon as it is given a style sheet.
+#
+# The wrapper below covers every call made from Python, which is every call
+# in this app. It cannot see a call Qt makes in C++ (a .ui file loaded with
+# QUiLoader, a style sheet set from C++ code), nor a bound method taken
+# before it was installed; polish_style_sheets covers those, and
+# QApplication.setStyleSheet is not wrapped at all. The app loads no .ui
+# files and sets no application style sheet, and a test keeps it so
+# (tests/test_theme.py).
+
+# Qt's own method, also after this module is reloaded (then the method on
+# QWidget is the wrapper already, which keeps the original).
+_set_style_sheet = getattr(QWidget.setStyleSheet, "_qt_set_style_sheet",
+                           QWidget.setStyleSheet)
+
+
+def _set_style_sheet_and_polish(self: QWidget, styleSheet: str) -> None:  # noqa: N803
+    """QWidget.setStyleSheet, then the widget polished (see above)."""
+    _set_style_sheet(self, styleSheet)
+    if styleSheet and not self.testAttribute(Qt.WidgetAttribute.WA_WState_Polished):
+        self.ensurePolished()
+
+
+_set_style_sheet_and_polish._qt_set_style_sheet = _set_style_sheet
+
+
+def polish_style_sheets(root: Optional[QWidget] = None) -> None:
+    """Polish every widget with a style sheet that is not polished yet: in
+    ``root`` and under it, or everywhere. For style sheets set past the
+    wrapper (before it was installed, or by Qt itself)."""
+    widgets = ([root, *root.findChildren(QWidget)] if root is not None
+               else QApplication.allWidgets())
+    for widget in widgets:
+        if (widget.styleSheet()
+                and not widget.testAttribute(Qt.WidgetAttribute.WA_WState_Polished)):
+            widget.ensurePolished()
+
+
+def style_sheet_guard_installed() -> bool:
+    """Whether every style sheet set from Python is polished at once."""
+    return getattr(QWidget.setStyleSheet, "_qt_set_style_sheet", None) is not None
+
+
+def install_style_sheet_guard(app: QApplication) -> None:
+    """Polish every widget a style sheet is set on from Python, and those
+    given one before (polish_style_sheets). ``app``: the application, which
+    must exist."""
+    if QWidget.setStyleSheet is not _set_style_sheet_and_polish:
+        QWidget.setStyleSheet = _set_style_sheet_and_polish
+    polish_style_sheets()

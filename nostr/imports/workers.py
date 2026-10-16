@@ -16,6 +16,11 @@ it, so callbacks never fire into dead objects.
 Callers that need determinism (tests) skip this module entirely by
 injecting an inline executor with the same ``(fn, on_done, on_error)``
 shape.
+
+:func:`run_for_size` is the same for work on a file or a buffer of
+``size`` bytes: off the GUI thread when it is large enough to be felt
+(reading and hashing a video), at once otherwise, where a thread would
+cost more than it saves.
 """
 
 from __future__ import annotations
@@ -32,6 +37,10 @@ _log = logging.getLogger(__name__)
 # without this registry the holder (and its pending queued event) could
 # be garbage-collected before the caller's thread processes it.
 _ACTIVE_HOLDERS: set = set()
+
+# From this many bytes on, reading or hashing is work the window would
+# feel (some tens of milliseconds), so it goes off the GUI thread.
+BACKGROUND_FROM_BYTES = 4 * 1024 * 1024
 
 
 class _CallbackHolder(QObject):
@@ -88,9 +97,18 @@ class _Task(QRunnable):
         try:
             result = self._fn()
         except BaseException as exc:  # noqa: BLE001, must never kill the pool thread
-            self._holder.failed.emit(exc)
+            self._deliver(self._holder.failed, exc)
             return
-        self._holder.done.emit(result)
+        self._deliver(self._holder.done, result)
+
+    @staticmethod
+    def _deliver(signal, value) -> None:
+        try:
+            signal.emit(value)
+        except RuntimeError:
+            # The holder went with its parent (a closed document, the app
+            # quitting): there is no one to deliver to.
+            pass
 
 
 def run_blocking(
@@ -108,3 +126,28 @@ def run_blocking(
     """
     holder = _CallbackHolder(on_done, on_error, parent)
     (pool or QThreadPool.globalInstance()).start(_Task(fn, holder))
+
+
+def run_for_size(
+    size: int,
+    fn: Callable[[], Any],
+    on_done: Callable[[Any], None],
+    on_error: Optional[Callable[[BaseException], None]] = None,
+    *,
+    parent: Optional[QObject] = None,
+) -> None:
+    """``fn()`` on ``size`` bytes, delivered as :func:`run_blocking`
+    delivers it: on a worker thread from BACKGROUND_FROM_BYTES on, else at
+    once, on this thread."""
+    if size >= BACKGROUND_FROM_BYTES:
+        run_blocking(fn, on_done, on_error, parent=parent)
+        return
+    try:
+        result = fn()
+    except Exception as exc:  # noqa: BLE001, delivered as run_blocking does
+        if on_error is None:
+            _log.warning("run_for_size task failed: %s", exc)
+            return
+        on_error(exc)
+        return
+    on_done(result)

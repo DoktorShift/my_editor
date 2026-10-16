@@ -156,10 +156,13 @@ def test_entries_survive_a_restart(tmp_path):
 def test_the_file_is_versioned_and_private_on_disk(tmp_path):
     led = ledger(tmp_path)
     led.record(public())
-    data = json.loads((tmp_path / "media_public.json").read_text())
+    data = json.loads((tmp_path / "media_public.json").read_text(encoding="utf-8"))
     assert data["version"] == CURRENT_LEDGER_VERSION
-    mode = os.stat(tmp_path / "media_public.json").st_mode & 0o777
-    assert mode == 0o600
+    # Windows keeps the file private through the user profile's access
+    # list; it has no owner-only mode bits to check.
+    if os.name == "posix":
+        mode = os.stat(tmp_path / "media_public.json").st_mode & 0o777
+        assert mode == 0o600
 
 
 def test_a_missing_file_is_simply_empty(tmp_path):
@@ -168,7 +171,7 @@ def test_a_missing_file_is_simply_empty(tmp_path):
 
 
 def test_a_corrupt_file_degrades_instead_of_raising(tmp_path):
-    (tmp_path / "media_public.json").write_text("{not json")
+    (tmp_path / "media_public.json").write_text("{not json", encoding="utf-8")
     led = ledger(tmp_path)
     assert led.degraded and len(led) == 0
 
@@ -183,7 +186,7 @@ def test_one_bad_row_does_not_cost_the_rest_of_the_ledger(tmp_path):
             None,
             {"sha256": C, "url": "https://cdn.example/c"},
         ],
-    }))
+    }), encoding="utf-8")
     led = ledger(tmp_path)
     assert led.is_public(B) and led.is_public(C) and len(led) == 2
 
@@ -195,11 +198,11 @@ def test_a_newer_file_is_left_alone(tmp_path):
         {"sha256": B, "url": "https://cdn.example/b"},
     ]})
     path = tmp_path / "media_public.json"
-    path.write_text(original)
+    path.write_text(original, encoding="utf-8")
     led = ledger(tmp_path)
     assert led.read_only and len(led) == 0
     assert not led.record(public(sha=C))
-    assert path.read_text() == original
+    assert path.read_text(encoding="utf-8") == original
 
 
 def test_a_degraded_ledger_is_not_overwritten_by_the_first_commit(tmp_path):
@@ -212,27 +215,27 @@ def test_a_degraded_ledger_is_not_overwritten_by_the_first_commit(tmp_path):
         {"sha256": B, "url": "https://cdn.example/b", "source_hash": A},
     ]})
     path = tmp_path / "media_public.json"
-    path.write_text(original[:-9])   # a truncated write
+    path.write_text(original[:-9], encoding="utf-8")   # a truncated write
     led = ledger(tmp_path)
     assert led.degraded and len(led) == 0
 
     assert led.record(public(sha=C)) is False
-    assert path.read_text() == original[:-9]
+    assert path.read_text(encoding="utf-8") == original[:-9]
 
 
 def test_a_degraded_ledger_does_not_forget_its_way_to_an_empty_file(tmp_path):
-    (tmp_path / "media_public.json").write_text("{not json")
+    (tmp_path / "media_public.json").write_text("{not json", encoding="utf-8")
     led = ledger(tmp_path)
 
     assert led.forget(B) is False
-    assert (tmp_path / "media_public.json").read_text() == "{not json"
+    assert (tmp_path / "media_public.json").read_text(encoding="utf-8") == "{not json"
 
 
 def test_a_write_failure_is_reported_not_swallowed(tmp_path):
     # An unlisted public blob cannot be revoked by a user who cannot see
     # it, so the caller has to learn that the write did not happen.
     led = ledger(tmp_path / "nope" / "deeper")
-    (tmp_path / "nope").write_text("this is a file, not a directory")
+    (tmp_path / "nope").write_text("this is a file, not a directory", encoding="utf-8")
     assert led.record(public()) is False
 
 

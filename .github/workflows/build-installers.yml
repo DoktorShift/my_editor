@@ -32,21 +32,50 @@ jobs:
         with:
           python-version: "3.12"
 
-      # Qt's xcb platform plugin needs libxcb-cursor at runtime (Qt >= 6.5).
-      # Install it BEFORE PyInstaller so it gets bundled into the AppImage.
+      # Qt's xcb and multimedia modules need these system libraries.
+      # Install them BEFORE PyInstaller so they get bundled into the AppImage.
       - name: Install Linux system libraries
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y libxcb-cursor0 libegl1 libxkbcommon0
+          sudo apt-get install -y libxcb-cursor0 libegl1 libxkbcommon0 libpulse0
 
+      # Wheels only: a package with no wheel for this system would be
+      # compiled here, against whatever libraries the runner has, and can
+      # break the app bundle (cryptography did on the Intel Mac). Then the
+      # build stops here instead, naming the package.
       - name: Install Python dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt pyinstaller
+          pip install --require-hashes --only-binary :all: -r packaging/requirements-build.lock
 
       - name: Build app bundle (PyInstaller)
         run: pyinstaller --noconfirm packaging/my_editor.spec
+
+      # A bundle that lost a module, a Qt plugin, its translations or its
+      # TLS support fails here, before it becomes an installer
+      # (`my-editor --self-test`, see self_test.py).
+      - name: Check the built app starts (macOS, Linux)
+        if: runner.os != 'Windows'
+        shell: bash
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: |
+          if [ "$RUNNER_OS" = "macOS" ]; then app="dist/MyEditor.app/Contents/MacOS/my-editor"
+          else app="dist/my-editor/my-editor"; fi
+          "$app" --self-test
+
+      # The Windows build has no console: wait for it and read its report.
+      - name: Check the built app starts (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          QT_QPA_PLATFORM: offscreen
+          MYEDITOR_SELF_TEST_REPORT: self-test.txt
+        run: |
+          $p = Start-Process -FilePath dist\my-editor\my-editor.exe -ArgumentList '--self-test' -Wait -PassThru
+          Get-Content self-test.txt
+          exit $p.ExitCode
 
       - name: Package Windows installer (Inno Setup)
         if: runner.os == 'Windows'

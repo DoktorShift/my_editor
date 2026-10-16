@@ -32,11 +32,11 @@ from __future__ import annotations
 
 import json
 import os
-import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional
 
+from atomic_file import write_text
 from . import assets as _assets
 
 
@@ -297,25 +297,11 @@ class PublicLedger:
             os.chmod(directory, 0o700)
         except OSError:
             pass
-        tmp_path = ""
         try:
-            fd, tmp_path = tempfile.mkstemp(
-                prefix=self._path.name + ".", dir=str(directory),
-            )
-            with os.fdopen(fd, "w", encoding="utf-8") as f:
-                json.dump(payload, f, indent=2)
-                f.flush()
-                os.fsync(f.fileno())
-            os.chmod(tmp_path, 0o600)
-            os.replace(tmp_path, self._path)
-            return True
+            write_text(self._path, json.dumps(payload, indent=2))
         except OSError:
-            if tmp_path:
-                try:
-                    os.unlink(tmp_path)
-                except OSError:
-                    pass
             return False
+        return True
 
 
 def needs_public_copy(

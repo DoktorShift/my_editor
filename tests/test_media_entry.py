@@ -201,20 +201,37 @@ def test_ctrl_v_reports_a_clipboard_image_to_its_listener(qt_app):
 
 
 def test_ctrl_v_pastes_normally_with_nobody_listening(qt_app):
-    # The widget has to stay usable on its own, so an unconsumed image
-    # paste falls through to the plain-text path rather than vanishing.
-    QApplication.clipboard().setImage(_clipboard_image())
+    # The widget has to stay usable on its own: with nobody handling
+    # pictures, a paste still brings in what text the clipboard holds.
+    mime = QMimeData()
+    mime.setImageData(_clipboard_image())
+    mime.setText("caption")
+    QApplication.clipboard().setMimeData(mime)
     ed = HtmlEditor()
     seen = []
-    pasted = []
-    ed.paste_normalized = lambda: pasted.append(True)
     ed.image_pasted.connect(seen.append)
     ed.image_pasted.disconnect()
 
     _ctrl_v(ed)
 
     assert seen == []
-    assert pasted == [True]
+    assert ed.toPlainText() == "caption"
+
+
+def test_a_picture_copied_with_its_text_pastes_the_text(qt_app):
+    # A web page selection carries a picture of itself next to its text:
+    # the text is what was meant.
+    mime = QMimeData()
+    mime.setImageData(_clipboard_image())
+    mime.setText("words")
+    QApplication.clipboard().setMimeData(mime)
+    ed = HtmlEditor()
+    seen = []
+    ed.image_pasted.connect(seen.append)
+
+    _ctrl_v(ed)
+
+    assert seen == [] and ed.toPlainText() == "words"
 
 
 def _drop_urls(editor, *paths):
@@ -275,7 +292,10 @@ class _EntryWindow:
     _handle_pasted_image = MainWindow._handle_pasted_image
     _handle_dropped_images = MainWindow._handle_dropped_images
     _handle_dropped_urls = MainWindow._handle_dropped_urls
+    _library_file_at = MainWindow._library_file_at
     _confirm_paste_upload = MainWindow._confirm_paste_upload
+    _paste_choice = MainWindow._paste_choice
+    _store_paste_choice = MainWindow._store_paste_choice
     _insert_asset = MainWindow._insert_asset
 
     def __init__(self, cache_dir, *, profile=None):
@@ -298,6 +318,9 @@ class _EntryWindow:
 
     def current_editor(self):
         return self.editor
+
+    def _keeps_pictures(self, ed):
+        return True                  # a document that keeps pictures (Markdown)
 
     def new_tab(self):
         return None
@@ -333,6 +356,11 @@ def _png_file(tmp_path, name="shot.png", data=PNG_BYTES):
     return str(path)
 
 
+def _speaks_of_nostr(messages) -> bool:
+    words = ("signer", "upload", "nostr", "blossom", "server")
+    return any(word in message.lower() for message in messages for word in words)
+
+
 def test_a_paste_lands_in_the_document_with_no_signer(tmp_path):
     # A pasted screenshot exists nowhere else. Nothing about signers,
     # servers or networks may be a reason for it to vanish.
@@ -343,7 +371,9 @@ def test_a_paste_lands_in_the_document_with_no_signer(tmp_path):
     assert len(win.image_names()) == 1
     assert win.image_names()[0].startswith(f"{ASSET_SCHEME}:")
     assert win._uploader.calls == []
-    assert any("Connect a signer" in m for m in win.status.messages)
+    # Without an account the editor says nothing of Nostr: a local image
+    # is just an image (uploading is asked when publishing).
+    assert not _speaks_of_nostr(win.status.messages)
 
 
 def test_a_paste_that_cannot_encode_falls_back_to_a_normal_paste(tmp_path):
@@ -391,14 +421,14 @@ def test_ask_consults_the_prompt_and_keeps_local_by_default(tmp_path,
     monkeypatch.setattr(alerts, "Alert", box)
     monkeypatch.setattr(main_window_module, "save_setting",
                         lambda *a, **k: pytest.fail("nothing to remember"))
-    monkeypatch.setattr(main_window_module, "BlossomSettings",
-                        lambda: types.SimpleNamespace(
-                            configured_servers=lambda: ["https://cdn.example"]))
     win = _EntryWindow(tmp_path / "cache", profile=object())
+    win._media_store = types.SimpleNamespace(target_servers=lambda: ["https://cdn.example"])
 
     win._handle_pasted_image(win.editor, _clipboard_image())
 
-    assert [d.title for d in shown] == ["Upload this image to cdn.example?"]
+    assert [d.title for d in shown] == ["Upload this image to your media servers?"]
+    assert shown[0].message == ("Anyone with the link can view it. The image is already in "
+                                "your document and stays there either way.")
     assert shown[0].default.label == "Keep Local"
     assert win._uploader.calls == []
     assert len(win.image_names()) == 1
@@ -413,10 +443,8 @@ def test_ask_uploads_when_the_prompt_is_answered_with_upload(tmp_path,
     monkeypatch.setattr(alerts, "Alert", box)
     monkeypatch.setattr(main_window_module, "save_setting",
                         lambda key, value: remembered.append((key, value)))
-    monkeypatch.setattr(main_window_module, "BlossomSettings",
-                        lambda: types.SimpleNamespace(
-                            configured_servers=lambda: ["https://cdn.example"]))
     win = _EntryWindow(tmp_path / "cache", profile=object())
+    win._media_store = types.SimpleNamespace(target_servers=lambda: ["https://cdn.example"])
 
     win._handle_pasted_image(win.editor, _clipboard_image())
 
@@ -425,11 +453,31 @@ def test_ask_uploads_when_the_prompt_is_answered_with_upload(tmp_path,
     assert shown[0].checkbox == "Remember this choice"
 
 
+def test_remember_this_choice_shows_at_once_in_an_open_settings_window(tmp_path,
+                                                                      monkeypatch):
+    # Review L5: Settings stays open beside the document, and kept saying
+    # Ask Every Time after the alert had stored the answer.
+    settings = {"upload_pasted_images": "ask"}
+    monkeypatch.setattr(main_window_module, "load_settings", lambda: dict(settings))
+    monkeypatch.setattr(main_window_module, "save_setting", settings.__setitem__)
+    monkeypatch.setattr(main_window_module, "ask_with_checkbox",
+                        lambda *args, **kwargs: (True, True))     # Upload, remembered
+    win = _EntryWindow(tmp_path / "cache", profile=object())
+    win._media_store = types.SimpleNamespace(target_servers=lambda: ["https://cdn.example"])
+    shown = []
+    win._settings_window = types.SimpleNamespace(refresh=lambda: shown.append(win._paste_choice()))
+
+    win._handle_pasted_image(win.editor, _clipboard_image())
+
+    assert settings["upload_pasted_images"] == "always"
+    assert shown == ["always"]
+
+
 def test_a_failed_upload_leaves_the_image_in_the_document(tmp_path,
                                                           paste_choice):
     paste_choice("always")
     win = _EntryWindow(tmp_path / "cache", profile=object())
-    win._uploader.fail_synchronously = "server said no"
+    win._uploader.fail_synchronously = "UPLOAD_FAILED"
 
     win._handle_pasted_image(win.editor, _clipboard_image())
 
@@ -448,7 +496,7 @@ def test_a_drop_inserts_every_image_with_no_signer(tmp_path):
 
     assert len(win.image_names()) == 2
     assert win._uploader.calls == []
-    assert any("Connect a signer" in m for m in win.status.messages)
+    assert not _speaks_of_nostr(win.status.messages)    # none without an account
 
 
 def test_a_dropped_image_keeps_the_filename_as_its_alt_text(tmp_path):
@@ -466,7 +514,8 @@ def test_a_drop_uploads_only_when_the_prompt_is_accepted(tmp_path, monkeypatch):
 
     win._handle_dropped_images([_png_file(tmp_path)])
 
-    assert [d.title for d in shown] == ["Upload 1 image to your Blossom servers?"]
+    assert [d.title for d in shown] == ["Upload 1 image to your media servers?"]
+    assert shown[0].message.startswith("Anyone with the link can view them.")
     assert shown[0].default.label == "Upload", "dropping is a deliberate act"
     assert win._uploader.calls == []
     assert len(win.image_names()) == 1
@@ -495,6 +544,22 @@ def test_a_file_that_is_not_an_image_is_named_and_nothing_is_inserted(tmp_path):
 
     assert win.image_names() == []
     assert any("notes.png" in m for m in win.status.messages)
+
+
+def test_a_tile_dragged_from_the_media_library_is_inserted(tmp_path):
+    """A tile dragged out of the library carries the file's address; the
+    document takes it as Insert Image would, the private gate included."""
+    win = _EntryWindow(tmp_path / "cache", profile=object())
+    sha = "e" * 64
+    record = types.SimpleNamespace(hash=sha, url=f"https://cdn.example/{sha}.png")
+    win._media_store = types.SimpleNamespace(files={sha: record})
+    inserted = []
+    win._insert_media_at_cursor = lambda media, editor, alt="": inserted.append((media, editor))
+
+    win._handle_dropped_urls([QUrl(record.url), QUrl("https://elsewhere.example/a.png")])
+
+    assert inserted == [(record, win.editor)]
+    assert win.bar.unsupported == []
 
 
 def test_dropped_files_are_routed_by_extension(tmp_path):
@@ -571,3 +636,108 @@ def test_a_refresh_for_bytes_that_never_arrived_changes_nothing(tmp_path):
     win._refresh_asset_in_documents("e" * 64)
 
     assert ed.document().isModified() is False
+
+
+def test_the_prompt_says_who_can_see_the_image_not_which_hosts(
+        tmp_path, paste_choice, monkeypatch):
+    # What the person decides is whether the image may be seen by anyone
+    # with its link; the servers are their own, listed in Media Servers,
+    # and a row of host names is not what they can judge it by.
+    paste_choice("ask")
+    box, shown = fake_alert()
+    monkeypatch.setattr(alerts, "Alert", box)
+    win = _EntryWindow(tmp_path / "cache", profile=object())
+    win._media_store = types.SimpleNamespace(target_servers=lambda: [
+        "https://cdn.example", "https://blossom.einundzwanzig.space"])
+
+    win._handle_pasted_image(win.editor, _clipboard_image())
+
+    assert shown[0].title == "Upload this image to your media servers?"
+    assert "cdn.example" not in shown[0].title + shown[0].message
+
+def test_a_drop_goes_where_it_is_dropped_not_at_the_caret(qt_app):
+    """As in Pages and TextEdit: the caret moves to the drop point, and
+    whoever takes the urls inserts there."""
+    ed = HtmlEditor()
+    ed.resize(400, 200)
+    ed.show()
+    ed.setPlainText("first line\nsecond line\nthird line")
+    cursor = ed.textCursor()
+    cursor.setPosition(0)
+    ed.setTextCursor(cursor)
+    from PySide6.QtGui import QTextCursor
+    third = ed.document().findBlockByNumber(2)
+    point = ed.cursorRect(QTextCursor(third)).center()
+    at_drop = []
+    ed.urls_dropped.connect(lambda urls: at_drop.append(ed.textCursor().position()))
+    mime = QMimeData()
+    mime.setUrls([QUrl.fromLocalFile("/tmp/a.png")])
+    ed.dropEvent(QDropEvent(QPointF(point), Qt.CopyAction, mime,
+                            Qt.LeftButton, Qt.NoModifier))
+    assert at_drop and ed.document().findBlock(at_drop[0]).blockNumber() == 2
+
+
+def test_a_library_audio_file_becomes_the_same_card_insert_audio_makes(tmp_path, monkeypatch):
+    """Whichever way a file arrives (Insert Audio or Video, or a tile from
+    the Media Library), the document holds the same object: a card named
+    by the file's asset, already uploaded, nothing sent again."""
+    from nostr.media.media_visibility import MediaVisibility
+    from nostr.ui import media_card
+    from nostr.ui.publish_copy_dialog import PickResolution
+    sha = "a1" * 32
+    url = f"https://one.example/{sha}.mp3"
+    record = types.SimpleNamespace(hash=sha, url=url, mime_type="audio/mpeg", size=4096,
+                                   urls=[{"server": "https://one.example", "url": url}],
+                                   uploaded_at_ms=0)
+    monkeypatch.setattr(main_window_module, "resolve_pick", lambda media, **kw: PickResolution(
+        sha256=sha, url=url, mime="audio/mpeg", size=4096, ok=True))
+    win = _EntryWindow(tmp_path / "cache", profile=object())
+    win._uploader.files[sha] = record
+    win._media_store = types.SimpleNamespace(files={sha: record},
+                                             name_of=lambda s: "Podcast intro.mp3")
+    win._media_visibility = MediaVisibility()
+    win._copy_maker = None
+    win._media_progress = {}
+    win.is_dark_theme = False
+    win._may_insert_audio_video = lambda ed: True
+    for name in ("_insert_media_at_cursor", "_insert_media_card", "_media_card",
+                 "_library_name", "_insert_url_as_text"):
+        setattr(win, name, getattr(MainWindow, name).__get__(win))
+
+    win._insert_media_at_cursor(record, win.editor)
+
+    [asset] = win.assets()
+    assert asset.is_media and asset.is_uploaded and asset.alt == "Podcast intro.mp3"
+    assert asset.servers == ["https://one.example"]
+    fmt = next(f for f in _image_formats(win.editor) if f.name() == asset.key)
+    assert (fmt.width(), fmt.height()) == (media_card.WIDTH, media_card.HEIGHT)
+    assert win._uploader.calls == []
+
+
+def _image_formats(editor):
+    """Every image format in the editor's text."""
+    from PySide6.QtGui import QTextCharFormat  # noqa: F401
+    found = []
+    block = editor.document().begin()
+    while block.isValid():
+        it = block.begin()
+        while not it.atEnd():
+            fmt = it.fragment().charFormat()
+            if fmt.isImageFormat():
+                found.append(fmt.toImageFormat())
+            it += 1
+        block = block.next()
+    return found
+
+
+def test_a_library_file_with_no_name_is_called_by_its_day():
+    from types import SimpleNamespace
+    from PySide6.QtCore import QDateTime
+    import i18n
+    host = SimpleNamespace(_media_store=SimpleNamespace(name_of=lambda s: ""),
+                           _media_visibility=SimpleNamespace(name_of=lambda s: ""))
+    media = SimpleNamespace(hash="c" * 64, uploaded_at_ms=1_780_000_000_000)
+    expected = i18n.format_day(QDateTime.fromMSecsSinceEpoch(1_780_000_000_000),
+                               short_month=True)
+    assert MainWindow._library_name(host, media) == expected
+    assert MainWindow._library_name(host, SimpleNamespace(hash="d" * 64, uploaded_at_ms=0)) == ""

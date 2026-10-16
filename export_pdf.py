@@ -25,7 +25,6 @@ Geometry notes, established empirically against QPdfDocument:
   outside the trusted-root policy.
 """
 
-import json
 import os
 from dataclasses import dataclass
 
@@ -33,19 +32,22 @@ from PySide6.QtCore import QMarginsF, QRectF, QSizeF, Qt, QLocale, QUrl
 from PySide6.QtGui import (
     QAbstractTextDocumentLayout,
     QColor,
-    QFont,
     QImage,
     QPageLayout,
     QPageSize,
     QPainter,
     QPalette,
     QPdfWriter,
+    QTextCharFormat,
     QTextCursor,
     QTextDocument,
     QTextImageFormat,
 )
 
-from constants import MONO_FONT
+import media_files
+from atomic_file import read_json, write_json
+from fonts import monospace_font
+from i18n import _
 from image_safety import ImageRootPolicy, data_uri_bytes, decode_image_bytes
 
 CREATOR = "minimal texteditor"
@@ -85,12 +87,8 @@ def default_page_setup() -> dict:
 
 def load_page_setup() -> dict:
     setup = default_page_setup()
-    try:
-        with open(_CONFIG_PATH, "r", encoding="utf-8") as f:
-            data = json.load(f)
-    except (OSError, json.JSONDecodeError):
-        return setup
-    if isinstance(data, dict):
+    data = read_json(_CONFIG_PATH, dict)
+    if data:
         if data.get("page_size") in PAGE_SIZES:
             setup["page_size"] = data["page_size"]
         if data.get("orientation") in ("portrait", "landscape"):
@@ -102,9 +100,7 @@ def load_page_setup() -> dict:
 
 
 def save_page_setup(setup: dict) -> None:
-    os.makedirs(os.path.dirname(_CONFIG_PATH), exist_ok=True)
-    with open(_CONFIG_PATH, "w", encoding="utf-8") as f:
-        json.dump(setup, f, indent=2)
+    write_json(_CONFIG_PATH, setup, indent=2)
 
 
 def make_page_layout(setup: dict) -> QPageLayout:
@@ -151,6 +147,43 @@ def _prime_clone_images(clone, policy: ImageRootPolicy, asset_resolver) -> dict:
         clone.addResource(QTextDocument.ImageResource, QUrl(name), image)
         sizes[name] = image.size()
     return sizes
+
+
+def _media_as_links(clone, asset_resolver) -> None:
+    """Audio and video on paper: a link to the file once it is on a media
+    server, as the HTML export writes it; left out while it is not. Never
+    a picture of it, never the grey stand-in."""
+    if asset_resolver is None:
+        return
+    found = []
+    block = clone.begin()
+    while block.isValid():
+        it = block.begin()
+        while not it.atEnd():
+            fragment = it.fragment()
+            fmt = fragment.charFormat()
+            if fragment.isValid() and fmt.isImageFormat():
+                resolved = asset_resolver(fmt.toImageFormat().name())
+                mime = str(getattr(resolved, "mime", "") or "")
+                if media_files.kind_of(mime) is not None:
+                    found.append((fragment.position(), fragment.length(), resolved, fmt))
+            it += 1
+        block = block.next()
+    for position, length, resolved, fmt in reversed(found):
+        cursor = QTextCursor(clone)
+        cursor.setPosition(position)
+        cursor.setPosition(position + length, QTextCursor.MoveMode.KeepAnchor)
+        remote = str(getattr(resolved, "remote_url", "") or "")
+        if not remote:
+            cursor.removeSelectedText()
+            continue
+        mime = str(resolved.mime)
+        name = str(fmt.toImageFormat().property(QTextImageFormat.ImageAltText) or "")
+        link = QTextCharFormat()
+        link.setAnchor(True)
+        link.setAnchorHref(media_files.address_with_extension(remote, mime))
+        link.setFontUnderline(True)
+        cursor.insertText(media_files.link_words(mime, name or remote.rsplit("/", 1)[-1]), link)
 
 
 def _iter_image_names(doc):
@@ -232,6 +265,7 @@ def paginate(doc, device, resolution: int, *, image_roots=(), asset_resolver=Non
     content_h = float(paint.height()) - footer_px
 
     clone = doc.clone()
+    _media_as_links(clone, asset_resolver)
     sizes = _prime_clone_images(clone, ImageRootPolicy(image_roots), asset_resolver)
     # Layout must measure fonts against the device's dpi, exactly as
     # doc.print_() would.
@@ -239,7 +273,7 @@ def paginate(doc, device, resolution: int, *, image_roots=(), asset_resolver=Non
     # Print in points, not the editor's 14 screen pixels, and force a white
     # page regardless of the active theme. Palette colors (Material 600)
     # are chosen to stay readable on white.
-    clone.setDefaultFont(QFont(MONO_FONT, BODY_POINT_SIZE))
+    clone.setDefaultFont(monospace_font(BODY_POINT_SIZE))
     frame_fmt = clone.rootFrame().frameFormat()
     frame_fmt.setBackground(QColor("white"))
     clone.rootFrame().setFrameFormat(frame_fmt)
@@ -259,7 +293,7 @@ def paint_pages(painter: QPainter, device, paged: PagedDocument, page_numbers) -
     printed range still says "Page 3 of 7".
     """
     layout = paged.clone.documentLayout()
-    footer_font = QFont(MONO_FONT, FOOTER_POINT_SIZE)
+    footer_font = monospace_font(FOOTER_POINT_SIZE)
     content_h = paged.content_height
     for n, number in enumerate(page_numbers):
         page = number - 1
@@ -281,7 +315,8 @@ def paint_pages(painter: QPainter, device, paged: PagedDocument, page_numbers) -
             painter.setFont(footer_font)
             painter.drawText(QRectF(0, content_h, paged.page_width, paged.footer_height),
                              Qt.AlignHCenter | Qt.AlignVCenter,
-                             f"Page {number} of {paged.page_count}")
+                             _("Page {number} of {count}").format(
+                                 number=number, count=paged.page_count))
             painter.restore()
 
 

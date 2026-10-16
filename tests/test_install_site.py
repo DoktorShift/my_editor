@@ -207,7 +207,7 @@ def test_an_offline_build_is_complete_and_deployable(tmp_path):
     assert (out / "install" / "index.html").is_file()
     assert (out / "install" / "icon.png").is_file()
     assert (out / ".nojekyll").is_file()
-    assert json.loads((out / "install" / "downloads.json").read_text()) == {
+    assert json.loads((out / "install" / "downloads.json").read_text(encoding="utf-8")) == {
         "version": "", "page": "", "files": {}}
 
 
@@ -216,7 +216,7 @@ def test_a_build_from_a_saved_release(tmp_path):
     saved.write_text(json.dumps(RELEASE), encoding="utf-8")
     out = tmp_path / "_site"
     assert build_site.main(["--out", str(out), "--release-json", str(saved)]) == 0
-    downloads = json.loads((out / "install" / "downloads.json").read_text())
+    downloads = json.loads((out / "install" / "downloads.json").read_text(encoding="utf-8"))
     assert downloads["files"]["mac-arm64"]["name"] == "my-editor-3.3-macos-arm64.dmg"
 
 

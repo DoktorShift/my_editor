@@ -48,10 +48,15 @@ release.
 
 Each OS can only build its own installer (no cross-compiling).
 
-Dev tools (in addition to `requirements.txt`):
+A release installs exactly what `packaging/requirements-build.lock` names
+(every package at one version, checked against its hash), so two builds of
+the same commit ship the same libraries. It installs wheels only: a package
+compiled on the build machine links against whatever libraries are there,
+and the app bundle may not load it. Do the same locally:
 
 ```bash
-pip install pyinstaller pillow      # pillow only needed to regenerate icons/background
+pip install --require-hashes --only-binary :all: -r packaging/requirements-build.lock
+pip install pillow      # only needed to regenerate icons/background
 ```
 
 Common first step on every OS:
@@ -59,6 +64,17 @@ Common first step on every OS:
 ```bash
 pyinstaller --noconfirm packaging/my_editor.spec
 ```
+
+The spec includes QtMultimedia and QtMultimediaWidgets for local playback
+and video thumbnails. PyInstaller's Qt hooks collect the multimedia
+plugins and the FFmpeg libraries shipped with PySide6. QtWebEngine remains
+excluded. Check native playback in each platform's built app when changing
+Qt or PyInstaller versions; a decoder unavailable on a computer is reported
+in Quick Look with Save As as the fallback.
+
+Linux needs `libpulse0` for QtMultimedia to load, even without an audio
+server. Both Linux workflows install it before Python tests or packaging,
+and the Debian package declares it as a runtime dependency.
 
 Then:
 
@@ -69,6 +85,32 @@ Then:
 - **Windows:** install [Inno Setup](https://jrsoftware.org/isinfo.php), then
   `iscc /DMyAppVersion=<ver> packaging\windows\installer.iss`
   -> `dist\my-editor-<ver>-windows-setup.exe`
+
+## Exact versions (lock files)
+
+`requirements.txt` says which versions the app works with;
+`packaging/requirements-build.lock` (release builds) and
+`packaging/requirements-test.lock` (the test workflow) say which ones are
+used, for Windows, macOS and Linux alike, with hashes. They are compiled from
+`packaging/requirements-*.in` with [uv](https://docs.astral.sh/uv/). After
+adding or changing a requirement, or to move to newer versions on purpose
+(add `--upgrade`):
+
+```bash
+uv pip compile packaging/requirements-build.in --universal --python-version 3.12 \
+    --generate-hashes -o packaging/requirements-build.lock
+uv pip compile packaging/requirements-test.in --universal --python-version 3.12 \
+    --generate-hashes -o packaging/requirements-test.lock
+```
+
+`tests/test_dependency_locks.py` fails when a requirement is missing from a
+lock file.
+
+Every package in the build lock needs a wheel for each system the
+installers are built on. When a new version drops one, hold that system
+back in `requirements.txt` with an environment marker, as is done for
+cryptography on Intel Macs (from 49 on it ships macOS wheels for Apple
+Silicon only), and compile the locks again.
 
 ## Regenerating icons
 
@@ -107,6 +149,10 @@ Keep the icon centers in the generator in sync with `icon_locations` in
 - The Linux `.deb` installs the app under `/opt/my-editor`, symlinks
   `/usr/bin/my-editor` onto `PATH`, adds the menu launcher and icon, and declares
   the Qt runtime libraries as dependencies so `apt` pulls them in automatically.
+- Spell checking uses each system's own checker (see [`docs/spelling.md`](../docs/spelling.md)).
+  macOS needs `rubicon-objc` (pure Python, in the bundle); Windows needs nothing;
+  on Linux the system's Enchant is used and never bundled, and the `.deb`
+  recommends `libenchant-2-2`, which brings an English dictionary.
 - QtWebEngine is excluded in the spec (the app does not use it), which keeps
   bundles around 100-200 MB instead of 500 MB+.
 - macOS double-click file association via Finder is handled by the app itself:

@@ -16,7 +16,7 @@ the final installer for each platform. See packaging/<os>/ and the CI workflow.
 import os
 import sys
 
-from PyInstaller.utils.hooks import collect_dynamic_libs, collect_submodules
+from PyInstaller.utils.hooks import collect_dynamic_libs, collect_submodules, copy_metadata
 
 # SPECPATH is the directory containing this spec (packaging/); the repo root is
 # its parent. Resolve everything relative to the root so builds are CWD-safe.
@@ -39,6 +39,10 @@ else:
 # Bundle the window icon, preserving its repo-relative path so resource_path()
 # in main.py finds it identically from source and when frozen.
 datas = [(os.path.join(ICON_DIR, "icon-256.png"), os.path.join("packaging", "icons"))]
+# The translations (i18n.py reads locale/<language>.po at startup).
+datas += [(os.path.join(ROOT, "locale", name), "locale")
+          for name in sorted(os.listdir(os.path.join(ROOT, "locale")))
+          if name.endswith(".po")]
 
 # Static analysis misses these (native ext / lazily-imported Qt submodules).
 hiddenimports = [
@@ -46,6 +50,13 @@ hiddenimports = [
     "PySide6.QtNetwork",
     "PySide6.QtWebSockets",
     "PySide6.QtPrintSupport",
+    # Local Quick Look playback and video thumbnails. PyInstaller's Qt
+    # hooks collect the multimedia backend plugins and their libraries.
+    "PySide6.QtMultimedia",
+    "PySide6.QtMultimediaWidgets",
+    # Edit > Speech (speech.py), imported at the first word read; the Qt
+    # hook brings the system's voice engines (texttospeech plugins).
+    "PySide6.QtTextToSpeech",
     # Full-text recovery (nostr/imports/fulltext.py): readability-lxml
     # rides on lxml's compiled extensions, which static analysis can
     # only partially see.
@@ -62,6 +73,29 @@ hiddenimports = [
 hiddenimports += collect_submodules("coincurve")
 coincurve_binaries = collect_dynamic_libs("coincurve")
 
+# Spell checking (spelling/) uses the system's own checker. Its backend
+# module is imported by platform when checking starts, so name it here.
+# macOS reaches NSSpellChecker through rubicon-objc, which reads its own
+# version from its package metadata when imported.
+if sys.platform == "darwin":
+    hiddenimports += ["spelling.macos"] + collect_submodules("rubicon.objc")
+    datas += copy_metadata("rubicon-objc")
+elif sys.platform == "win32":
+    hiddenimports += ["spelling.windows"]   # ctypes and COM only, nothing to collect
+else:
+    # Enchant is the system's library, loaded at run time and deliberately
+    # not bundled: it finds its providers and dictionaries where it was
+    # installed. The .deb recommends it (build_deb.sh).
+    hiddenimports += ["spelling.enchant"]
+
+# Dictation on this computer (dictation/on_device.py), on Windows and Linux:
+# sherpa-onnx, its compiled module and ONNX Runtime beside it, imported only
+# when someone dictates. A Mac dictates with the system's own.
+dictation_binaries = []
+if sys.platform != "darwin":
+    hiddenimports += collect_submodules("sherpa_onnx")
+    dictation_binaries = collect_dynamic_libs("sherpa_onnx")
+
 # QtPdf backs the built-in PDF viewer (pdf_viewer.py) and must ship in
 # every bundle. Trim the rest and make sure the giant, unused Qt
 # WebEngine never sneaks in.
@@ -76,8 +110,6 @@ excludes = [
     "PySide6.Qt3DRender",
     "PySide6.QtCharts",
     "PySide6.QtDataVisualization",
-    "PySide6.QtMultimedia",
-    "PySide6.QtMultimediaWidgets",
     "PySide6.QtBluetooth",
     "PySide6.QtNfc",
     "PySide6.QtPositioning",
@@ -93,7 +125,7 @@ excludes = [
 a = Analysis(
     [os.path.join(ROOT, "main.py")],
     pathex=[ROOT],
-    binaries=coincurve_binaries,
+    binaries=coincurve_binaries + dictation_binaries,
     datas=datas,
     hiddenimports=hiddenimports,
     hookspath=[],
@@ -200,6 +232,10 @@ if sys.platform == "darwin":
             "CFBundleVersion": VERSION,
             "NSHighResolutionCapable": True,
             "LSApplicationCategoryType": "public.app-category.productivity",
+            # The languages the app speaks, so macOS shows its own panels
+            # (Open, Save, the app menu) in the same one.
+            "CFBundleLocalizations": ["en", "de"],
+            "CFBundleDevelopmentRegion": "en",
             "CFBundleDocumentTypes": [
                 {
                     "CFBundleTypeName": "Text Document",

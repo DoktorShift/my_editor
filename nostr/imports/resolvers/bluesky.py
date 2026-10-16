@@ -14,6 +14,8 @@ with a clear explanation rather than imported as a one-liner.
 
 from __future__ import annotations
 
+from i18n import ngettext
+
 from ...rss.parser import Feed
 from ..errors import ERROR_CODES, SourceError
 from ..registry import ResolveContext, ResolveInput, ResolveResult, SourceResolver
@@ -45,9 +47,14 @@ def _resolve(input_: ResolveInput, ctx: ResolveContext) -> None:
             ))
             return
         who = result["display_name"] or f"@{result['handle']}"
+        title = ngettext(
+            "Bluesky thread by {name} ({n} post)",
+            "Bluesky thread by {name} ({n} posts)",
+            result["count"],
+        )
         feed = Feed(
             format="bluesky",
-            title=f"Bluesky thread by {who} ({result['count']} posts)",
+            title=title.format(name=who, n=result["count"]),
             link=item.link,
             description=None,
             items=(item,),

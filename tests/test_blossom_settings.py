@@ -101,6 +101,14 @@ def test_normalize_strips_path_and_lowercases_host():
     assert settings._normalize("HTTPS://Blossom.Band/foo/bar") == "https://blossom.band"
 
 
+def test_a_host_in_another_script_is_kept_in_its_ascii_form():
+    """As the Media Servers sheet adds a typed one: the two ways of writing
+    it are one server, shown by one rule, wherever it came from."""
+    assert settings._normalize("https://Bücher.de:8443/x") == "https://xn--bcher-kva.de:8443"
+    assert settings._normalize("https://xn--bcher-kva.de") == "https://xn--bcher-kva.de"
+    assert settings._normalize("https://exаmple.com") == "https://xn--exmple-4nf.com"
+
+
 # --------------------------------------------------------------------------- #
 # Scheme policy: https anywhere, http only on loopback
 # --------------------------------------------------------------------------- #
@@ -302,3 +310,14 @@ def test_the_derived_keys_are_written_beside_version_1(tmp_path):
     assert data["config_origin"] == CONFIG_ORIGIN_BUD03
     assert data["discovered"] == PUBLISHED
     assert data["discovered_pubkey"] == PUBKEY
+
+
+@pytest.mark.parametrize("bad", ["https://media example com", "https://ex ample.com",
+                                 "https://\tx.example"])
+def test_an_address_with_spaces_is_never_a_server(tmp_path, bad):
+    """Also from a published list: a host with spaces is no server, and
+    uploads to it would only seem to succeed."""
+    s = settings.BlossomSettings(tmp_path / "b.json")
+    s.set_custom_servers(["https://one.example"])
+    assert s.add_server(bad) == ["https://one.example"]
+    assert s.set_custom_servers(["https://one.example", bad]) == ["https://one.example"]

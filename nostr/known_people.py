@@ -6,7 +6,7 @@ Populated from three sources, recorded so the picker can show provenance:
 
   ``contact``  the user's NIP-02 follow list (kind 3)
   ``search``   results streamed back from NIP-50 search relays
-  ``mention``  manually-pasted nostr:n… URI in a publish dialog
+  ``mention``  manually-pasted nostr:n… URI in a publish sheet
 
 Persisted to ``~/.config/my_editor/known_people.json`` with atomic
 rewrites so a crash mid-write can't corrupt the cache.
@@ -15,11 +15,14 @@ rewrites so a crash mid-write can't corrupt the cache.
 from __future__ import annotations
 
 import json
-import os
-import tempfile
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Iterable, List, Optional
+
+from atomic_file import write_text
+
+from . import refs
+from .bech32 import encode_npub
 
 
 KNOWN_PEOPLE_FILE = Path.home() / ".config" / "my_editor" / "known_people.json"
@@ -34,8 +37,8 @@ class Person:
     picture: str = ""                   # avatar URL
     nip05: str = ""                     # NIP-05 identifier (alice@example.com)
     relay_hint: str = ""                # best-known relay for them
-    source: str = ""                    # "contact" / "search" / "mention" — provenance
-    updated_at: int = 0                 # unix seconds — when metadata last refreshed
+    source: str = ""                    # provenance: "contact", "search" or "mention"
+    updated_at: int = 0                 # unix seconds when metadata last refreshed
 
     def search_haystack(self) -> str:
         """Lowercased blob the picker matches against."""
@@ -64,6 +67,14 @@ class KnownPeople:
 
     def get(self, pubkey_hex: str) -> Optional[Person]:
         return self._people.get(pubkey_hex)
+
+    def name_of(self, pubkey_hex: str) -> str:
+        """How a person is called: their name when known, else their short
+        Nostr address, never their key."""
+        person = self._people.get(pubkey_hex)
+        if person is not None and person.display_name:
+            return person.display_name
+        return refs.short_key(encode_npub(pubkey_hex))
 
     def all(self) -> List[Person]:
         return list(self._people.values())
@@ -108,19 +119,25 @@ class KnownPeople:
     def upsert(self, person: Person, *, defer_save: bool = False) -> Person:
         """Insert or merge by pubkey.
 
-        Merging rules: any non-empty field on the new record wins; empty
-        fields preserve whatever we had. ``source`` follows the same rule
-        (so a later ``contact`` overrides an earlier ``mention``).
+        Merging rules: the profile fields (name, picture, nip05) come from
+        whichever record is newer by ``updated_at``, the new one on a tie;
+        the older one only fills fields the newer leaves empty. So an old
+        profile, or a contact list's petname (time 0), never overwrites a
+        newer profile. ``relay_hint`` and ``source`` are not profile data:
+        any non-empty value on the new record wins (so a later ``contact``
+        overrides an earlier ``mention``).
         """
         existing = self._people.get(person.pubkey)
         if existing is None:
             self._people[person.pubkey] = person
         else:
+            newer, older = ((person, existing) if person.updated_at >= existing.updated_at
+                            else (existing, person))
             merged = Person(
                 pubkey=person.pubkey,
-                display_name=person.display_name or existing.display_name,
-                picture=person.picture or existing.picture,
-                nip05=person.nip05 or existing.nip05,
+                display_name=newer.display_name or older.display_name,
+                picture=newer.picture or older.picture,
+                nip05=newer.nip05 or older.nip05,
                 relay_hint=person.relay_hint or existing.relay_hint,
                 source=person.source or existing.source,
                 updated_at=max(person.updated_at, existing.updated_at),
@@ -131,7 +148,7 @@ class KnownPeople:
         return self._people[person.pubkey]
 
     def upsert_many(self, people: Iterable[Person]) -> None:
-        """Bulk version — single disk write at the end."""
+        """Bulk version: a single disk write at the end."""
         for p in people:
             self.upsert(p, defer_save=True)
         self._save()
@@ -164,20 +181,5 @@ class KnownPeople:
                 self._people[p.pubkey] = p
 
     def _save(self) -> None:
-        self._path.parent.mkdir(parents=True, exist_ok=True)
         payload = {"people": [asdict(p) for p in self._people.values()]}
-        fd, tmp_path = tempfile.mkstemp(
-            prefix=".known_people_", suffix=".json.tmp", dir=str(self._path.parent)
-        )
-        try:
-            with os.fdopen(fd, "w", encoding="utf-8") as f:
-                json.dump(payload, f, ensure_ascii=False)
-                f.flush()
-                os.fsync(f.fileno())
-            os.replace(tmp_path, self._path)
-        except OSError:
-            try:
-                os.unlink(tmp_path)
-            except OSError:
-                pass
-            raise
+        write_text(self._path, json.dumps(payload, ensure_ascii=False))

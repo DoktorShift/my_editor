@@ -16,7 +16,8 @@ Three critical correctness properties from the code-review pass live here:
   3. Inner-pubkey verification: a misbehaving signer cannot smuggle an
      inner event whose declared pubkey differs from the active profile.
 
-Plus relay-selection precedence for ``_select_read_relays``.
+Plus where drafts are read from: the account's private relays, the set
+drafts are written to, followed again when a newer relay list arrives.
 """
 
 from __future__ import annotations
@@ -29,13 +30,15 @@ import pytest
 from PySide6.QtCore import QCoreApplication
 
 from nostr.draft_store import DraftState, DraftStore
-from nostr.draft_sync import DraftSync, _select_read_relays
+from nostr.draft_sync import DraftSync
 from nostr.drafts import (
     DraftWrapMeta,
     build_inner_event,
     serialize_inner_event,
 )
-from nostr.outbox import RelayList
+from nostr.outbox import RelayList, defaults, policy
+from nostr.outbox.policy import LookupState
+from tests.outbox_fakes import FakeRelayDirectory, settle
 
 
 PK = "a" * 64
@@ -57,12 +60,18 @@ def _make_profile(pubkey: str):
     return p
 
 
+def no_draft_list(_profile, on_done):
+    """The account has chosen no relays for its drafts."""
+    on_done([])
+
+
 def _make_sync(store: DraftStore | None = None) -> DraftSync:
     return DraftSync(
         relay_pool=MagicMock(),
-        relay_list_cache=MagicMock(),
+        relay_directory=MagicMock(),
         session_pool=MagicMock(),
         store=store or DraftStore(),
+        read_draft_list=no_draft_list,
     )
 
 
@@ -111,8 +120,8 @@ def test_relay_list_callback_from_stopped_session_does_not_proceed():
     gen_a = sync._generation
     sync.stop()
 
-    # The session_pool.get is the next step after _on_relay_list_ready.
-    sync._on_relay_list_ready(gen_a, RelayList(write=["wss://x/"], read=[]))
+    # The session_pool.get is the next step after _on_relays_ready.
+    sync._on_relays_ready(gen_a, ["wss://x/"])
     sync._session_pool.get.assert_not_called()
 
 
@@ -250,7 +259,7 @@ def test_inner_pubkey_mismatch_fails_the_record():
 
     record = sync._store.get("y")
     assert record.state is DraftState.FAILED
-    assert "different identity" in record.failure_reason
+    assert record.failure_reason == "Saved by another account"
 
 
 def test_inner_pubkey_match_accepts_the_record():
@@ -312,8 +321,9 @@ def test_per_call_failure_does_not_latch():
 # --------------------------------------------------------------------------- #
 
 def test_retry_decrypt_resends_ciphertext_after_timeout():
-    """User missed the Amber prompt → decrypt timed out → retry must
-    re-send the exact same ciphertext without needing a relay re-fetch."""
+    """User missed the Amber prompt → decrypt timed out → the draft waits
+    → retry must re-send the exact same ciphertext without needing a
+    relay re-fetch."""
     sync = _make_sync()
     sync._profile = _make_profile(PK)
     sync._store.bind_profile(PK)
@@ -335,14 +345,14 @@ def test_retry_decrypt_resends_ciphertext_after_timeout():
         sync._generation, "x", "e1", "timed out waiting for signer",
     )
     record = sync._store.get("x")
-    assert record.state is DraftState.FAILED
-    # The row says who is not answering rather than quoting the transport,
-    # because the person reading it is holding the thing that has to change.
-    assert "signer" in record.failure_reason
+    # Nobody answering is not the draft's failure: it waits for the
+    # signer app, with nothing to say on its row.
+    assert record.state is DraftState.LOADING
+    assert record.failure_reason == ""
     # Ciphertext still cached
     assert record.ciphertext == "THE-CIPHERTEXT"
 
-    # User clicks retry, same ciphertext sent again, state flips to LOADING
+    # The person tries again: the same ciphertext is sent again
     sync.retry_decrypt("x")
     assert calls == ["THE-CIPHERTEXT", "THE-CIPHERTEXT"]
     assert sync._store.get("x").state is DraftState.LOADING
@@ -402,32 +412,97 @@ def test_set_decrypted_clears_ciphertext_on_success():
 
 
 # --------------------------------------------------------------------------- #
-# 5. _select_read_relays precedence                                           #
+# 5. Drafts are read where they are written                                   #
 # --------------------------------------------------------------------------- #
 
-def test_read_relays_prefer_user_read_over_write_over_bunker():
-    rl = RelayList(write=["wss://w.example"], read=["wss://r.example"])
-    result = _select_read_relays(rl, bunker_relays=["wss://b.example"])
-    # Read first, then write, then bunker: most-trusted-user-choice first.
-    assert result.index("wss://r.example") < result.index("wss://w.example")
-    assert result.index("wss://w.example") < result.index("wss://b.example")
+MEMBER_RELAY = "wss://members.example"
 
 
-def test_read_relays_fall_back_to_defaults_when_nothing_specific():
-    result = _select_read_relays(RelayList(write=[], read=[]), bunker_relays=())
-    assert result  # never empty
-    # The DEFAULT_RELAYS set lives in nostr/__init__.py, so checking
-    # length-non-zero is the contract.
+def _own_list(write=(), read=()):
+    return RelayList(write=list(write), read=list(read), state=LookupState.FOUND)
 
 
-def test_read_relays_deduplicate_case_and_slash():
-    rl = RelayList(
-        write=["wss://X.example/"],
-        read=["wss://x.example", "wss://X.example/"],
+def _running_sync(directory, *, entitled=(), read_draft_list=no_draft_list):
+    """A DraftSync bound to PK whose signer answers at once."""
+    pool = MagicMock()
+    session_pool = MagicMock()
+    session_pool.get.side_effect = (
+        lambda profile, on_ready, on_error: on_ready(MagicMock()))
+    sync = DraftSync(
+        relay_pool=pool, relay_directory=directory, session_pool=session_pool,
+        store=DraftStore(), entitled_relays=lambda: list(entitled),
+        read_draft_list=read_draft_list,
     )
-    result = _select_read_relays(rl, bunker_relays=())
-    # All three normalize to one key.
-    assert sum(1 for u in result if "x.example" in u.lower()) == 1
+    profile = _make_profile(PK)
+    sync.start_for(profile)
+    settle()
+    return sync, pool, profile
+
+
+def _subscribed(pool):
+    return [call.args[0] for call in pool.subscribe.call_args_list]
+
+
+def test_drafts_are_read_from_the_private_relays():
+    directory = FakeRelayDirectory(
+        {PK: _own_list(write=["wss://w.example"], read=["wss://r.example"])})
+    _sync, pool, profile = _running_sync(directory, entitled=[MEMBER_RELAY])
+    expected = policy.private_relays(
+        directory.cached(PK), entitled=[MEMBER_RELAY], legacy=profile.bunker_relays,
+        reading=True)
+    assert _subscribed(pool) == [expected]
+    assert expected == ["wss://w.example", "wss://r.example", MEMBER_RELAY,
+                        "wss://bunker.test", *defaults.FALLBACK_RELAYS]
+
+
+def test_a_newer_relay_list_moves_the_subscription():
+    directory = FakeRelayDirectory()                 # nothing known yet
+    _sync, pool, _profile = _running_sync(directory)
+    first = pool.subscribe.return_value
+    assert "wss://bunker.test" in _subscribed(pool)[0]
+
+    directory.set(PK, _own_list(write=["wss://new-home.example"]))
+    directory.changed.emit(PK)
+    settle()
+
+    assert len(_subscribed(pool)) == 2
+    assert _subscribed(pool)[1][0] == "wss://new-home.example"
+    first.close.assert_called()
+
+
+def test_someone_elses_relay_list_leaves_the_subscription_alone():
+    directory = FakeRelayDirectory({PK: _own_list(write=["wss://w.example"])})
+    _sync, pool, _profile = _running_sync(directory)
+    directory.set(OTHER_PK, _own_list(write=["wss://theirs.example"]))
+    directory.changed.emit(OTHER_PK)
+    settle()
+    assert len(_subscribed(pool)) == 1
+
+
+def test_an_unchanged_set_is_not_resubscribed():
+    directory = FakeRelayDirectory({PK: _own_list(write=["wss://w.example"])})
+    _sync, pool, _profile = _running_sync(directory)
+    directory.changed.emit(PK)
+    settle()
+    assert len(_subscribed(pool)) == 1
+
+
+def test_a_membership_relay_is_followed_on_reroute():
+    directory = FakeRelayDirectory({PK: _own_list(write=["wss://w.example"])})
+    entitled: list = []
+    pool = MagicMock()
+    session_pool = MagicMock()
+    session_pool.get.side_effect = (
+        lambda profile, on_ready, on_error: on_ready(MagicMock()))
+    sync = DraftSync(read_draft_list=no_draft_list, relay_pool=pool, relay_directory=directory,
+                     session_pool=session_pool, store=DraftStore(),
+                     entitled_relays=lambda: list(entitled))
+    sync.start_for(_make_profile(PK))
+    settle()
+    entitled.append(MEMBER_RELAY)
+    sync.reroute()
+    settle()
+    assert MEMBER_RELAY in _subscribed(pool)[-1]
 
 
 # --------------------------------------------------------------------------- #
@@ -452,3 +527,59 @@ def test_on_wrap_event_drops_events_from_other_authors():
     }
     sync._on_wrap_event(event)
     assert "x" not in sync._store
+
+
+# --------------------------------------------------------------------------- #
+# One subscription at a time                                                  #
+# --------------------------------------------------------------------------- #
+
+class _ParkedSessionPool:
+    """A signer that answers only when the test says so."""
+
+    def __init__(self):
+        self.waiting = []
+
+    def get(self, profile, on_ready, on_error):
+        self.waiting.append((on_ready, on_error))
+
+
+def _sync_with(session_pool, directory):
+    pool = MagicMock()
+    pool.subscribe.side_effect = lambda relays, filters: MagicMock(name=f"sub{len(relays)}")
+    sync = DraftSync(read_draft_list=no_draft_list, relay_pool=pool, relay_directory=directory,
+                     session_pool=session_pool, store=DraftStore())
+    sync.start_for(_make_profile(PK))
+    settle()
+    return sync, pool
+
+
+def test_the_signer_coming_back_does_not_leave_a_second_subscription_open():
+    session_pool = _ParkedSessionPool()
+    sync, pool = _sync_with(session_pool, FakeRelayDirectory(
+        {PK: _own_list(write=["wss://w.example"])}))
+    _ready, failed = session_pool.waiting.pop()
+    failed("bunker relay refused the connection")        # drafts show as locked
+    first = sync._subscription
+    assert first is not None
+    sync.retry_signer()
+    settle()
+    ready, _failed = session_pool.waiting.pop()
+    ready(MagicMock())
+    assert pool.subscribe.call_count == 2
+    first.close.assert_called_once()
+    assert sync._subscription is not first
+
+
+def test_a_newer_list_while_the_signer_is_pending_is_where_drafts_are_read():
+    session_pool = _ParkedSessionPool()
+    directory = FakeRelayDirectory({PK: _own_list(write=["wss://old.example"])})
+    sync, pool = _sync_with(session_pool, directory)
+    assert pool.subscribe.call_count == 0                 # waiting for the signer
+    directory.set(PK, _own_list(write=["wss://new.example"]))
+    directory.changed.emit(PK)
+    settle()
+    assert pool.subscribe.call_count == 0                 # nothing to move yet
+    ready, _failed = session_pool.waiting.pop()
+    ready(MagicMock())
+    (relays, _filters), = [call.args for call in pool.subscribe.call_args_list]
+    assert relays[0] == "wss://new.example" and "wss://old.example" not in relays

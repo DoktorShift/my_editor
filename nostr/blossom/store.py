@@ -8,18 +8,18 @@ This is the layer the UI talks to. It owns:
     and the editor can all call ``fetch()`` on mount without fanning
     out N x M requests
   - the upload pipeline: hash, keep the bytes in the local cache, plan,
-    ask each server whether it already has the blob, sign auth and PUT
-    /upload only for the servers that do not, then replicate to the rest
-    one at a time and merge URLs back into the map
+    skip the servers the person's own listing says hold the blob, sign
+    auth and PUT /upload to the first of the rest, then replicate to the
+    others one at a time and merge URLs back into the map
   - the delete pipeline: sign auth, DELETE, remove from map
 
 Signing happens via the existing ``BunkerSessionPool``. The store keeps
 no key material of its own. Every signature costs the user a prompt in
 their signer app, which is what shapes the whole upload path: the paged
-/list walk reuses one token per server, the dedup probe is unsigned so
-asking a question is free, replication is sequential rather than a
-parallel prompt flood, and an upload failover is capped rather than
-exhaustive.
+/list walk reuses one token per server, a file the library already
+lists on a server is not sent there again, replication is sequential
+rather than a parallel prompt flood, and an upload failover is capped
+rather than exhaustive.
 
 State changes are surfaced through Qt signals so the dialogs can stay
 declarative.
@@ -28,7 +28,6 @@ declarative.
 from __future__ import annotations
 
 import hashlib
-import mimetypes
 import os
 import time
 from dataclasses import dataclass, field
@@ -37,7 +36,9 @@ from typing import Callable, Dict, List, Optional, Protocol, Sequence, Set
 
 from PySide6.QtCore import QObject, Signal
 
+import media_files
 import url_safety
+from i18n import _
 
 from ..bunker import BunkerClient, BunkerSessionPool
 from ..profiles import Profile
@@ -50,11 +51,14 @@ from .client import (
     extract_server_from_blob_url,
     looks_like_sha256,
     server_origin,
+    whole_number,
 )
 from .errors import ERROR_CODES, friendly_message
 from .hashes import blob_url, url_agrees_with_hash
-from .plan import get_effective_max_file, plan_upload, UploadPlan
+from .names import MediaNames
+from .plan import get_effective_max_file, lists_publicly, plan_upload, UploadPlan
 from .settings import BlossomSettings
+from ..imports.workers import run_for_size
 
 
 # How long a fetched library stays "fresh". A second call within this
@@ -82,6 +86,17 @@ _RETRYABLE_STATUSES = frozenset({0, 413, 429, 502, 503})
 # the clock is the problem, so the next server would demand auth too and
 # a failover buys a second prompt and a second failure.
 _RETRYABLE_CODES = frozenset({ERROR_CODES.REDIRECT_REFUSED})
+
+# A server that refuses a copy for one of these reasons would refuse the
+# same bytes uploaded directly: its limits, a payment, the signature, or a
+# copy that came back wrong. Any other refusal (no mirror support, the
+# source out of its reach) gets a direct upload.
+_NO_DIRECT_UPLOAD = frozenset({
+    ERROR_CODES.RATE_LIMITED, ERROR_CODES.PAYMENT_REQUIRED, ERROR_CODES.SERVER_TOO_LARGE,
+    ERROR_CODES.TOO_LARGE, ERROR_CODES.AUTH_REJECTED, ERROR_CODES.SIGNER_REJECTED,
+    ERROR_CODES.SIGNER_IDENTITY_MISMATCH, ERROR_CODES.HASH_MISMATCH,
+    ERROR_CODES.NETWORK_UNAVAILABLE,
+})
 
 
 # ---------------------------------------------------------------------------
@@ -132,6 +147,26 @@ class MediaFile:
 
 
 @dataclass
+class ServerListing:
+    """What one server said about this account's files in the last fetch.
+
+    ``ok`` False means the server could not be listed; its files from the
+    previous fetch are kept (``stale``) rather than vanishing, because a
+    server that is briefly down has not deleted anything. ``truncated``
+    is True when the walk stopped at the page limit, so ``count`` and
+    ``bytes`` are a lower bound and must not be shown as a total.
+    """
+
+    origin: str
+    ok: bool = True
+    count: int = 0
+    bytes: int = 0
+    truncated: bool = False
+    error_code: str = ""
+    fetched_at: float = 0.0
+
+
+@dataclass
 class UploadJobState:
     """Per-file state visible to the UI during an upload."""
 
@@ -140,6 +175,36 @@ class UploadJobState:
     status: str = "queued"     # queued | signing | uploading | mirroring | done | failed
     error: str = ""
     hash: str = ""
+    # The PUT in flight, while the bytes are on their way: what Cancel
+    # aborts. None before the signer answered and once a server has it.
+    sending: Optional[object] = None
+
+
+@dataclass(eq=False)
+class _Added:
+    """A file the person added to the Media Library: what a retry sends
+    again, and the name it is remembered by. Compared by identity, so a
+    late answer about an earlier attempt can tell it is stale."""
+
+    label: str
+    mime: str
+    path: Optional[Path] = None
+    body: Optional[bytes] = None
+    failed: bool = False
+    error: str = ""
+
+
+@dataclass(frozen=True)
+class AddedUpload:
+    """A file being added to the library, as a window opened later sees
+    it: ``state`` is "waiting", "sending", "finishing" or "failed"."""
+
+    name: str
+    mime: str
+    state: str
+    progress: int = -1
+    error: str = ""
+    path: str = ""
 
 
 # ---------------------------------------------------------------------------
@@ -156,21 +221,20 @@ class MediaStore(QObject):
     # Background fetch started (UI can show a spinner).
     fetch_started = Signal()
     # All servers responded (or all failed). ``fetch_error`` is also
-    # emitted alongside this when every server failed, so the UI can
-    # surface a clear message.
+    # emitted alongside this when every server failed, with the code of
+    # why (the signer, a refusal, or no connection), so the UI can say
+    # the real reason.
     fetch_finished = Signal()
-    fetch_error = Signal(str)
+    fetch_error = Signal(str)                          # code
 
     # Upload lifecycle.
     upload_started = Signal(str)                       # name
     upload_progress = Signal(str, int, int)            # name, sent, total
     upload_status = Signal(str, str)                   # name, status
     upload_finished = Signal(str, object)              # name, MediaFile
+    # Every failure is both: the plain sentence to show, then its stable
+    # code, so a subscriber branches on the code and never on the words.
     upload_failed = Signal(str, str)                   # name, reason
-    # Same failure, as a stable code. Emitted alongside ``upload_failed``
-    # so a subscriber can branch on the code instead of string-matching
-    # the reason. ``upload_failed`` stays: it is what the asset manager
-    # reads today.
     upload_failed_code = Signal(str, str)              # name, code
 
     # Reroute toast trigger. Fired once per upload, after a server has
@@ -178,9 +242,19 @@ class MediaStore(QObject):
     # primary.
     upload_rerouted = Signal(str, str, str)            # name, from_host, to_host
 
+    # The person cancelled an upload while its bytes were on their way.
+    # Nothing else is reported for it.
+    upload_cancelled = Signal(str)                     # name
+
     # A mirror did not take the copy. Non-fatal: the primary has the
     # file, so the upload still succeeds and the document is untouched.
     mirror_failed = Signal(str, str, str)              # name, host, code
+    # A server was left out of an upload before it started, because the
+    # file would not fit in the space left there. Non-fatal as well.
+    server_skipped = Signal(str, str, str)             # name, host, reason
+
+    # Per-server listing results changed (see ``server_listings``).
+    listings_changed = Signal()
 
     # Delete lifecycle.
     file_deleted = Signal(str)                         # file_hash
@@ -195,6 +269,8 @@ class MediaStore(QObject):
         client: Optional[BlossomClient] = None,
         blob_cache: Optional[BlobCache] = None,
         entitled_servers: Optional[Callable[[], Sequence[str]]] = None,
+        server_quota: Optional[Callable[[str], Optional[int]]] = None,
+        names: Optional[MediaNames] = None,
         parent: Optional[QObject] = None,
     ) -> None:
         super().__init__(parent)
@@ -211,21 +287,46 @@ class MediaStore(QObject):
         # each call because entitlement can change while the app is open.
         # This module knows nothing about what grants it.
         self._entitled_servers = entitled_servers
+        # Space this account has on a server (bytes) when one is known,
+        # such as the per-member allowance on an association's server.
+        # Used to show usage and to leave a full server out of an upload.
+        self._server_quota = server_quota
+        # The names files had when they were added here (servers keep
+        # none). Without a book, this session's names only.
+        self._names = names
+        self._session_names: Dict[str, str] = {}
 
         self._files: Dict[str, MediaFile] = {}
+        self._listings: Dict[str, ServerListing] = {}
+        # The servers the last fetch walked. A different set (membership
+        # resolved, a server added) makes the library stale at once.
+        self._last_targets: tuple = ()
         self._last_fetch_at: float = 0.0
         self._fetch_in_flight: bool = False
+        # Every fetch carries the generation it started under. ``clear``
+        # moves it on, so a walk still running for the account being left
+        # can never land its files in the next account's library.
+        self._fetch_generation: int = 0
+        # The servers the running walk covers, and whether somebody asked
+        # for a fetch while it ran. A server added mid-walk (a membership
+        # that resolved) is listed once the walk ends rather than dropped.
+        self._inflight_targets: tuple = ()
+        self._fetch_requested: bool = False
         self._mirror_by_default: bool = True
         # Hashes this process committed itself during this session. Their
         # library records were written from a server's own confirmation
         # rather than from a /list response of unknown age, which is what
-        # makes them safe to dedup against without a probe.
+        # makes them safe to dedup against without listing again.
         self._committed: Set[str] = set()
 
-        # Track active upload jobs by display name so the UI can render
-        # multiple parallel uploads. (Phase 1 we expect one at a time
-        # but the shape supports more.)
+        # Upload jobs by name, from upload_started until they end. The
+        # asset manager names its own (an asset key); a file added to the
+        # library gets a name of its own that no other job has.
         self._uploads: Dict[str, UploadJobState] = {}
+        # Files added to the library, by job name, from the moment they
+        # are added until they land, are cancelled, or a failure is
+        # dismissed: what Retry sends again.
+        self._added: Dict[str, _Added] = {}
 
     # ------------------------------------------------------------------
     # Read API
@@ -241,6 +342,72 @@ class MediaStore(QObject):
     def settings(self) -> BlossomSettings:
         return self._settings
 
+    def target_servers(self) -> List[str]:
+        """Every server the library reads and writes, configured ones first."""
+        return self._target_servers()
+
+    def server_listings(self) -> Dict[str, ServerListing]:
+        """What each server said in the last fetch, by origin."""
+        return dict(self._listings)
+
+    def bytes_on(self, origin: str) -> int:
+        """Bytes this account stores on ``origin``, from the library.
+
+        Counts every file the library knows to be there, including ones
+        uploaded during this session, so the number moves as files are
+        added or deleted without waiting for the next fetch.
+        """
+        target = url_safety.origin_of(origin)
+        return sum(f.size for f in self._files.values()
+                   if any(url_safety.origin_of(u.get("server", "")) == target
+                          for u in f.urls))
+
+    def name_of(self, sha256: str) -> str:
+        """The name the file had when it was added here, or ""."""
+        sha = (sha256 or "").lower()
+        if self._names is not None:
+            name = self._names.get(sha)
+            if name:
+                return name
+        return self._session_names.get(sha, "")
+
+    def upload_job(self, name: str) -> Optional[UploadJobState]:
+        """The running job of that name, or None."""
+        return self._uploads.get(name)
+
+    def added_uploads(self) -> List[AddedUpload]:
+        """The files added to the library that have not landed yet, in
+        the order they were added: still on their way, or failed."""
+        out = []
+        for name, added in self._added.items():
+            job = self._uploads.get(name)
+            if added.failed:
+                state = "failed"
+            elif job is None or job.status in ("queued", "signing"):
+                state = "waiting" if job is None else "sending"
+            else:
+                state = "finishing" if job.status == "mirroring" else "sending"
+            out.append(AddedUpload(name=name, mime=added.mime, state=state,
+                                   progress=job.progress if job is not None else -1,
+                                   error=added.error,
+                                   path=str(added.path) if added.path else ""))
+        return out
+
+    def can_retry(self, name: str) -> bool:
+        """Whether that added file failed and can be sent again."""
+        added = self._added.get(name)
+        return added is not None and added.failed
+
+    def quota_for(self, origin: str) -> Optional[int]:
+        """The space this account has on ``origin``, when one is known."""
+        if self._server_quota is None:
+            return None
+        try:
+            quota = self._server_quota(url_safety.origin_of(origin))
+        except Exception:  # noqa: BLE001, a quota lookup must never break uploads
+            return None
+        return quota if isinstance(quota, int) and quota > 0 else None
+
     def file_list(
         self,
         *,
@@ -249,14 +416,13 @@ class MediaStore(QObject):
     ) -> List[MediaFile]:
         """Filtered + sorted snapshot, matching STANDUP's options.
 
-        ``filter_type`` ∈ {'all','image','video','audio'}; everything
+        ``filter_type`` ∈ {'all','image','video','audio','file'}; everything
         else falls under 'all'.
         ``sort_by`` ∈ {'newest','oldest','largest','smallest'}.
         """
         result = list(self._files.values())
-        prefix = {"image": "image/", "video": "video/", "audio": "audio/"}.get(filter_type)
-        if prefix:
-            result = [f for f in result if (f.mime_type or "").startswith(prefix)]
+        if filter_type in ("image", "video", "audio", "file"):
+            result = [f for f in result if media_files.library_kind(f.mime_type) == filter_type]
         if sort_by == "oldest":
             result.sort(key=lambda f: f.uploaded_at_ms)
         elif sort_by == "largest":
@@ -274,12 +440,24 @@ class MediaStore(QObject):
     def fetch(self, *, force: bool = False) -> None:
         """Repopulate the library from every configured server, deduped
         by sha256. Concurrent calls are coalesced; calls within the 30 s
-        freshness window are no-ops unless ``force`` is set.
+        freshness window are no-ops unless ``force`` is set or the set of
+        servers changed since the last fetch (a membership that resolved
+        adds one, and its files belong in the library at once).
+
+        A call that arrives while a walk is running is remembered, not
+        dropped: when the walk ends and the servers it covered are no
+        longer the servers the library reads, it walks again.
 
         Each server is walked with BUD-12 cursor pagination, reusing one
         signed list token for all of its pages: BUD-11 scopes a list
         token to a server and gives it no ``x`` tag, so an N-page walk
-        still costs a single signer prompt.
+        still costs a single signer prompt. A server known to list
+        publicly is asked without a token first, which costs no prompt
+        at all; a 401 or 403 then falls back to signing, once.
+
+        A server that cannot be listed keeps the files the library last
+        saw there, marked by its ``ServerListing`` as not ok: a server
+        that is briefly down has not deleted anything.
 
         Quietly no-ops when no profile is active. The UI is expected to
         show its empty or connect-signer state in that case.
@@ -288,55 +466,126 @@ class MediaStore(QObject):
         if profile is None:
             return
         if self._fetch_in_flight:
+            self._fetch_requested = True
             return
-        if not force and (time.monotonic() - self._last_fetch_at) < _FETCH_FRESHNESS_SECONDS:
-            return
-
         servers = self._target_servers()
+        targets = tuple(url_safety.origin_of(s) for s in servers)
+        fresh = (time.monotonic() - self._last_fetch_at) < _FETCH_FRESHNESS_SECONDS
+        if not force and fresh and targets == self._last_targets:
+            return
         if not servers:
             return
 
+        self._fetch_generation += 1
+        generation = self._fetch_generation
+        pubkey = (profile.user_pubkey or "").lower()
         self._fetch_in_flight = True
+        self._fetch_requested = False
+        self._inflight_targets = targets
         self.fetch_started.emit()
 
         merged: Dict[str, MediaFile] = {}
         remaining = {"count": len(servers), "errors": 0}
+        listings: Dict[str, ServerListing] = {
+            url_safety.origin_of(s): ServerListing(origin=url_safety.origin_of(s))
+            for s in servers
+        }
         # What the library held when the walk began. Anything committed
         # into ``self._files`` after this point is an upload that
         # finished mid-fetch, and a /list response is silent about
         # those: it is authoritative about what the server had, not
         # about what this process did while the request was in flight.
         started_with: Set[str] = set(self._files)
+        previous: Dict[str, MediaFile] = dict(self._files)
+
+        def current() -> bool:
+            """This walk still speaks for the library: nothing cleared it,
+            and the account it lists is still the active one."""
+            if generation != self._fetch_generation:
+                return False
+            active = self._profile_provider()
+            return active is not None and (active.user_pubkey or "").lower() == pubkey
 
         def finish_one() -> None:
+            if not current():
+                return
             remaining["count"] -= 1
             if remaining["count"] > 0:
                 return
             self._fetch_in_flight = False
+            self._inflight_targets = ()
             self._last_fetch_at = time.monotonic()
+            self._last_targets = targets
+            now = time.time()
+            for listing in listings.values():
+                listing.fetched_at = now
+            self._listings = listings
             if remaining["errors"] >= len(servers):
-                self.fetch_error.emit(
-                    "Could not reach any Blossom server. Check your network or server list."
-                )
-            else:
+                self.fetch_error.emit(_listing_failure_code(listings.values()))
+            if remaining["errors"] < len(servers) or previous:
+                failed = {o for o, l in listings.items() if not l.ok}
+                carry_over(failed)
                 for sha, media in self._files.items():
                     if sha not in merged and sha not in started_with:
                         merged[sha] = media
+                order_urls(merged)
                 self._files = merged
                 self.library_changed.emit()
+            self.listings_changed.emit()
             self.fetch_finished.emit()
+            # Asked again while this walk ran: walk again only when the
+            # servers changed underneath it. Anything else was answered.
+            requested, self._fetch_requested = self._fetch_requested, False
+            if requested and self._current_targets() != targets:
+                self.fetch()
 
-        def attempt_server(server: str, *, retry_without_auth: bool = False) -> None:
+        def carry_over(failed_origins: Set[str]) -> None:
+            """Keep what unreachable servers held last time."""
+            if not failed_origins:
+                return
+            for sha, old in previous.items():
+                kept = [dict(u) for u in old.urls
+                        if url_safety.origin_of(u.get("server", "")) in failed_origins]
+                if not kept:
+                    continue
+                if sha in merged:
+                    have = {url_safety.origin_of(u.get("server", "")) for u in merged[sha].urls}
+                    merged[sha].urls.extend(u for u in kept
+                                            if url_safety.origin_of(u["server"]) not in have)
+                else:
+                    merged[sha] = MediaFile(
+                        hash=old.hash, url=kept[0]["url"], urls=kept,
+                        mime_type=old.mime_type, size=old.size, alt=old.alt,
+                        uploaded_at_ms=old.uploaded_at_ms, width=old.width,
+                        height=old.height, nip94=list(old.nip94))
+
+        def order_urls(files: Dict[str, MediaFile]) -> None:
+            """Copies in server order, the configured primary first, so the
+            URL the UI copies and inserts does not depend on which server
+            happened to answer first."""
+            rank = {origin: i for i, origin in enumerate(targets)}
+            for media in files.values():
+                media.urls.sort(key=lambda u: rank.get(
+                    url_safety.origin_of(u.get("server", "")), len(rank)))
+                if media.urls:
+                    media.url = str(media.urls[0].get("url") or media.url)
+
+        def attempt_server(server: str, *, signed: bool, retried: bool) -> None:
+            """List ``server`` one way. ``retried`` is True for the second
+            way of asking, after the first was refused; it is the only
+            retry a server gets in one fetch."""
             origin = server_origin(server)
 
             def do_list(auth_event: Optional[dict]) -> None:
+                if not current():
+                    return
                 seen: Set[str] = set()
                 request_page(origin, auth_event, cursor=None, page=1, seen=seen,
-                             retry_without_auth=retry_without_auth,
-                             server=server)
+                             largest=0, signed=signed, retried=retried, server=server)
 
-            if retry_without_auth:
-                # Fallback path: skip the bunker round-trip entirely.
+            if not signed:
+                # No bunker round-trip: a public listing, or the fallback
+                # after a signed request was refused.
                 do_list(None)
                 return
 
@@ -348,7 +597,9 @@ class MediaStore(QObject):
                 unsigned,
                 on_signed=do_list,
                 on_failure=lambda reason: handle_list_error(
-                    server, origin, BlossomError(reason), False
+                    server, origin,
+                    BlossomError(str(reason), code=ERROR_CODES.SIGNER_REJECTED),
+                    page=1, signed=True, retried=retried,
                 ),
             )
 
@@ -359,7 +610,9 @@ class MediaStore(QObject):
             cursor: Optional[str],
             page: int,
             seen: Set[str],
-            retry_without_auth: bool,
+            largest: int,
+            signed: bool,
+            retried: bool,
             server: str,
         ) -> None:
             self._client.list_for_pubkey(
@@ -367,12 +620,11 @@ class MediaStore(QObject):
                 profile.user_pubkey,
                 auth_event,
                 on_success=lambda items: handle_page(
-                    server, origin, auth_event, items,
-                    cursor=cursor, page=page, seen=seen,
-                    retry_without_auth=retry_without_auth,
+                    server, origin, auth_event, items, cursor=cursor, page=page,
+                    seen=seen, largest=largest, signed=signed, retried=retried,
                 ),
                 on_failure=lambda err: handle_list_error(
-                    server, origin, err, retry_without_auth
+                    server, origin, err, page=page, signed=signed, retried=retried,
                 ),
                 cursor=cursor,
                 limit=_LIST_PAGE_SIZE,
@@ -387,8 +639,13 @@ class MediaStore(QObject):
             cursor: Optional[str],
             page: int,
             seen: Set[str],
-            retry_without_auth: bool,
+            largest: int,
+            signed: bool,
+            retried: bool,
         ) -> None:
+            if not current():
+                return
+            listing = listings[url_safety.origin_of(origin)]
             novel = 0
             last_sha = ""
             echoed_cursor = False
@@ -404,30 +661,37 @@ class MediaStore(QObject):
                 if sha not in seen:
                     seen.add(sha)
                     novel += 1
+                    listing.count += 1
+                    listing.bytes += _entry_size(entry)
                 merge_entry(origin, sha, entry)
 
             # Stop conditions. Together they mean a server that ignores
             # the cursor and re-sends the same page forever is caught on
             # page two: it merges once and the walk ends, with no error
-            # and no loop.
-            if not items or len(items) < _LIST_PAGE_SIZE:
+            # and no loop. A page shorter than asked for is not the end
+            # by itself: BUD-12's ``limit`` is a maximum, and a server
+            # may page smaller. It is the end when the server has already
+            # sent a longer page; otherwise one more request (same token,
+            # no prompt) tells, and an empty answer ends the walk.
+            if not items or novel == 0 or echoed_cursor or not last_sha:
                 finish_one()
                 return
-            if novel == 0 or echoed_cursor or not last_sha:
+            if len(items) < largest:
                 finish_one()
                 return
             if page >= _MAX_LIST_PAGES:
+                listing.truncated = True
                 finish_one()
                 return
             request_page(origin, auth_event, cursor=last_sha, page=page + 1,
-                         seen=seen, retry_without_auth=retry_without_auth,
-                         server=server)
+                         seen=seen, largest=max(largest, len(items)),
+                         signed=signed, retried=retried, server=server)
 
         def merge_entry(origin: str, sha: str, entry: dict) -> None:
             url = entry.get("url") or f"{origin}/{sha}"
-            size = int(entry.get("size") or 0)
+            size = _entry_size(entry)
             mime = str(entry.get("type") or "application/octet-stream")
-            uploaded = int(entry.get("uploaded") or entry.get("created") or 0)
+            uploaded = whole_number(entry.get("uploaded") or entry.get("created"))
             uploaded_ms = uploaded * 1000 if uploaded else int(time.time() * 1000)
 
             if sha in merged:
@@ -444,57 +708,204 @@ class MediaStore(QObject):
                     uploaded_at_ms=uploaded_ms,
                 )
 
-        def handle_list_error(server: str, origin: str, err: BlossomError, already_retried: bool) -> None:
-            # Match STANDUP: on 401/403 the server is telling us auth was
-            # required but rejected; some operators reject mid-flight
-            # because of a clock skew between the signer and the server.
-            # Retry once without auth, since many servers serve /list
-            # publicly and BUD-11 marks the token optional there.
-            if not already_retried and err.status in (401, 403):
-                attempt_server(server, retry_without_auth=True)
+        def handle_list_error(server: str, origin: str, err: BlossomError, *,
+                              page: int, signed: bool, retried: bool) -> None:
+            if not current():
                 return
+            # A 401/403 on the first page means the other way of asking may
+            # work: a signed request some operators reject mid-flight (clock
+            # skew between signer and server) can succeed unsigned, since
+            # BUD-11 marks the token optional for /list; an unsigned request
+            # to a server that turned out to want one is retried signed.
+            # Once per server per fetch: a server that refuses both ways is
+            # a failed listing, not a loop.
+            if not retried and page == 1 and getattr(err, "status", None) in (401, 403):
+                if signed:
+                    attempt_server(server, signed=False, retried=True)
+                    return
+                if lists_publicly(server):
+                    attempt_server(server, signed=True, retried=True)
+                    return
+            listing = listings[url_safety.origin_of(origin)]
+            if page > 1:
+                # The first page was listed and is kept; the rest may be
+                # missing (a server refusing the cursor, or busy for the
+                # second request), which is not a failed listing.
+                listing.truncated = True
+                finish_one()
+                return
+            listing.ok = False
+            listing.error_code = _error_code(err)
             remaining["errors"] += 1
             finish_one()
 
         for server in servers:
-            attempt_server(server)
+            attempt_server(server, signed=not lists_publicly(server), retried=False)
+
+    def refetch_if_targets_changed(self) -> bool:
+        """Walk the library again only when the servers it reads changed.
+
+        For callers that hear about a possible change (a membership that
+        resolved or lapsed) without knowing whether it moved anything, so
+        a membership check that changed nothing costs no signer prompt.
+        A library that has not been fetched for this account stays that
+        way: listing costs prompts, and only opening the library asks for
+        them. While a walk runs the request is remembered, and the walk
+        repeats itself when it ends if the servers differ. Returns True
+        when a fetch started.
+        """
+        if self._fetch_in_flight:
+            if self._current_targets() != self._inflight_targets:
+                self._fetch_requested = True
+            return False
+        if not self._last_targets:
+            return False
+        if self._current_targets() == self._last_targets:
+            return False
+        self.fetch()
+        return self._fetch_in_flight
 
     def clear(self) -> None:
-        """Drop the library entirely. Used on profile switch / sign-out."""
+        """Drop the library entirely. Used on profile switch / sign-out.
+
+        A walk still running is abandoned: its answers are for the
+        account being left, and the next fetch starts a walk of its own
+        instead of being folded into that one.
+        """
+        self._fetch_generation += 1
+        self._fetch_in_flight = False
+        self._fetch_requested = False
+        self._inflight_targets = ()
         self._files = {}
+        self._listings = {}
         self._last_fetch_at = 0.0
+        self._last_targets = ()
         self._committed.clear()
         self.library_changed.emit()
+        self.listings_changed.emit()
 
     # ------------------------------------------------------------------
     # Upload
     # ------------------------------------------------------------------
 
-    def upload_file(self, file_path: str) -> None:
-        """Read the file from disk and dispatch through the upload
-        pipeline. Errors surface via ``upload_failed``.
-
-        Display name is the file's basename so multiple parallel uploads
-        of the same file would collide. Phase 1 we don't expect that;
-        if it becomes a real case we'll switch to a per-job UUID.
+    def upload_file(self, file_path: str) -> str:
+        """Add the file at ``file_path`` to the library: read it, then
+        upload it as :meth:`upload_bytes` does. Returns the job's name,
+        the file's name made unique among the jobs in flight ("photo
+        (2).png"), which every signal about it carries. Errors surface
+        via ``upload_failed``, and the job can then be retried.
         """
-        profile = self._profile_provider()
         path = Path(file_path)
-        name = path.name or "upload"
-        if profile is None:
-            self.upload_failed.emit(name, "Connect a Nostr signer first.")
+        for name, added in self._added.items():
+            if added.failed and added.path == path:
+                # The same file again after it failed: its job, retried.
+                self.retry_upload(name)
+                return name
+        mime = media_files.type_of(path.name) or "application/octet-stream"
+        added = _Added(label=path.name or "upload", mime=mime, path=path)
+        name = self._name_for(added.label)
+        self._added[name] = added
+        self._read_added(name, added)
+        return name
+
+    def add_bytes(self, body: bytes, *, label: str, mime_type: str) -> str:
+        """Add bytes that are no file yet (a pasted image) to the
+        library, under ``label``. Returns the job's name, as
+        :meth:`upload_file` does."""
+        added = _Added(label=label, mime=mime_type, body=bytes(body))
+        name = self._name_for(label)
+        self._added[name] = added
+        self._dispatch(added.body, name, mime_type, added)
+        return name
+
+    def retry_upload(self, name: str) -> None:
+        """Send an added file that failed again, under the same name."""
+        added = self._added.get(name)
+        if added is None or not added.failed:
             return
+        added.failed, added.error = False, ""
+        if added.path is not None:
+            self._read_added(name, added)
+        else:
+            self._dispatch(added.body or b"", name, added.mime, added)
+
+    def dismiss_upload(self, name: str) -> None:
+        """Forget an added file that failed; its name is free again."""
+        added = self._added.get(name)
+        if added is not None and added.failed:
+            del self._added[name]
+
+    def cancel_upload(self, name: str) -> bool:
+        """Stop an upload while its bytes are on their way: the request
+        is aborted, a signer that answers later is ignored, and
+        ``upload_cancelled`` is all that is reported. Refused (False)
+        once a server holds the file: the copies on the other servers
+        then finish in the background."""
+        job = self._uploads.get(name)
+        if job is not None and job.status not in ("queued", "signing", "uploading"):
+            return False
+        added = self._added.get(name)
+        if job is None and (added is None or added.failed):
+            return False
+        self._uploads.pop(name, None)
+        self._added.pop(name, None)
+        if job is not None and job.sending is not None:
+            job.sending.abort()
+        self.upload_cancelled.emit(name)
+        return True
+
+    def _name_for(self, label: str) -> str:
+        """``label``, or "label (2)" and so on when a job has it."""
+        stem, ext = os.path.splitext(label)
+        name, number = label, 2
+        while name in self._added or name in self._uploads:
+            name = f"{stem} ({number}){ext}"
+            number += 1
+        return name
+
+    def _read_added(self, name: str, added: _Added) -> None:
         try:
-            body = path.read_bytes()
-        except OSError as exc:
-            self.upload_failed.emit(name, f"Could not read file: {exc}")
-            return
-        if not body:
-            self.upload_failed.emit(name, "File is empty.")
+            size = added.path.stat().st_size
+        except OSError:
+            self._refuse(name, ERROR_CODES.FILE_UNREADABLE)
             return
 
-        mime, _ = mimetypes.guess_type(str(path))
-        self.upload_bytes(body, name=name, mime_type=mime or "application/octet-stream")
+        def read(read_back) -> None:
+            if self._added.get(name) is not added:
+                return                       # cancelled while it was read
+            body, _sha = read_back
+            if not body:
+                self._refuse(name, ERROR_CODES.FILE_UNREADABLE)
+                return
+            self._dispatch(body, name, added.mime, added)
+
+        # A large file is read (and kept in the cache) off the UI thread.
+        run_for_size(size, lambda: self._read_and_keep(added.path), read,
+                     lambda _exc: self._refuse(name, ERROR_CODES.FILE_UNREADABLE),
+                     parent=self)
+
+    def _read_and_keep(self, path: Path) -> tuple:
+        """``(bytes, sha256)`` of the file at ``path``, kept in the cache
+        too. Safe on a worker thread: files only."""
+        body = path.read_bytes()
+        return body, self._hash_and_keep(body) if body else ""
+
+    def _hash_and_keep(self, body: bytes) -> str:
+        """The sha256 of ``body``, kept in the local cache before it is sent
+        anywhere (the cache's own write hashes it, once). Safe on a worker
+        thread.
+
+        Without this the app downloads its own upload back from a server
+        the moment it wants to show it, and simply fails offline. It
+        happens before the network on purpose: a failed upload the user
+        retries still has something to show. A cache that cannot be
+        written is not an upload failure: the bytes still go to a server."""
+        if self._blob_cache is not None:
+            try:
+                return self._blob_cache.put_bytes(body)
+            except OSError:
+                pass
+        return hashlib.sha256(body).hexdigest()
 
     def upload_bytes(
         self,
@@ -509,69 +920,109 @@ class MediaStore(QObject):
         The bytes are put in the local cache first, so nothing that
         happens next decides whether they can still be displayed.
 
-        Nothing is signed until the store knows which servers actually
-        need the bytes. Every eligible server that the library cannot
-        vouch for is asked ``HEAD /<sha256>`` first, unsigned and in
-        parallel, and the ones that already hold the blob are dropped
-        from the plan. A file that is already everywhere finishes here:
-        no signature, no PUT, no prompt.
+        Servers the person's own, fresh listing says already hold the
+        blob are left out (see ``_servers_holding``). A file already on
+        every server finishes here: no signature, no PUT, no prompt.
 
         When the first eligible server fails in a way another server
         might not, the upload walks to the next one. It only ever walks
         the servers the planner accepted, so a server skipped for size
         can never be reached by a retry.
         """
+        self._dispatch(body, name, mime_type, None)
+
+    def _dispatch(self, body: bytes, name: str, mime_type: str,
+                  added: Optional[_Added]) -> None:
         profile = self._profile_provider()
         if profile is None:
-            self.upload_failed.emit(name, "Connect a Nostr signer first.")
+            self._refuse(name, ERROR_CODES.NO_SIGNER)
             return
         if not body:
-            self.upload_failed.emit(name, "Nothing to upload.")
+            self._refuse(name, ERROR_CODES.FILE_UNREADABLE)
             return
 
         servers = self._target_servers()
         if not servers:
-            self.upload_failed.emit(name, "No Blossom servers configured.")
+            self._refuse(name, ERROR_CODES.NO_SERVER)
             return
 
-        # The size plan runs before any dedup probe, so an oversized file
-        # is refused without a single request leaving the process.
+        # The size plan runs first, so an oversized file is refused
+        # without a single request leaving the process.
         plan: UploadPlan = plan_upload(len(body), servers)
         if plan.primary is None:
-            # The number the user needs is the largest cap any configured
-            # server publishes, not the size of their own file.
-            limit_mb = max(1, max(get_effective_max_file(s) for s in servers) // (1024 * 1024))
-            self.upload_failed.emit(
-                name,
-                f"File is too large for any configured server ({limit_mb} MiB). "
-                "Try a smaller file or add a server that accepts it.",
-            )
+            # The number the person needs is the largest file any of
+            # their servers takes, not the size of their own file.
+            limit = max(get_effective_max_file(s) for s in servers)
+            self._refuse(name, ERROR_CODES.FILE_TOO_LARGE, _(
+                "This file is larger than your media servers take ({size})."
+            ).format(size=media_files.format_size(limit)))
             return
 
-        sha = hashlib.sha256(body).hexdigest()
-        self._seed_cache(body)
+        # Hashing a large file, and keeping it in the cache, happens off
+        # the UI thread; the upload goes on from here once it is done.
+        run_for_size(len(body), lambda: self._hash_and_keep(body),
+                     lambda sha: self._upload_hashed(body, name, mime_type, profile, sha,
+                                                     servers, plan, added),
+                     parent=self)
+
+    def _upload_hashed(self, body: bytes, name: str, mime_type: str, profile, sha: str,
+                       servers, plan: UploadPlan, added: Optional[_Added] = None) -> None:
+        if added is not None and self._added.get(name) is not added:
+            return                           # cancelled while it was hashed
+        eligible = [server for server in plan.eligible
+                    if self._has_room(server, sha, len(body), name)]
+        if not eligible:
+            self._refuse(name, ERROR_CODES.QUOTA_FULL)
+            return
         state = UploadJobState(name=name, status="queued", hash=sha)
         self._uploads[name] = state
         self.upload_started.emit(name)
         self.upload_status.emit(name, state.status)
+        if self._uploads.get(name) is not state:
+            return                           # cancelled as it started
 
-        configured_primary = servers[0]
-        eligible = list(plan.eligible)
-
-        self._resolve_coverage(
-            sha,
-            eligible,
-            on_ready=lambda present: self._upload_missing(
-                name=name,
-                body=body,
-                mime_type=mime_type,
-                profile=profile,
-                sha=sha,
-                eligible=eligible,
-                present=present,
-                configured_primary=configured_primary,
-            ),
+        self._upload_missing(
+            name=name,
+            body=body,
+            mime_type=mime_type,
+            profile=profile,
+            sha=sha,
+            eligible=eligible,
+            present=self._servers_holding(sha, eligible),
+            configured_primary=servers[0],
         )
+
+    def _has_room(self, server: str, sha: str, size: int, name: str) -> bool:
+        """Whether a file of ``size`` bytes still fits on ``server``.
+
+        Only servers with a known allowance are checked, and only when
+        the last fetch listed that server successfully: usage counted
+        from a listing that failed (or never ran) is a guess, and a
+        server is never left out on a guess. It then decides for itself.
+        A file the library already knows to be there costs nothing more.
+        A server that is full is left out of this upload with a note,
+        never the reason the whole upload fails while another server has
+        room.
+        """
+        quota = self.quota_for(server)
+        if quota is None:
+            return True
+        origin = url_safety.origin_of(server)
+        listing = self._listings.get(origin)
+        if listing is None or not listing.ok:
+            return True
+        existing = self._files.get(sha)
+        if existing is not None and any(
+                url_safety.origin_of(u.get("server", "")) == origin for u in existing.urls):
+            return True
+        if self.bytes_on(origin) + size <= quota:
+            return True
+        self.server_skipped.emit(name, _hostname(server), "full")
+        return False
+
+    def _current_targets(self) -> tuple:
+        """The origins a fetch started now would walk, in order."""
+        return tuple(url_safety.origin_of(s) for s in self._target_servers())
 
     def _target_servers(self) -> List[str]:
         """Configured servers, followed by any this account is entitled to.
@@ -599,89 +1050,29 @@ class MediaStore(QObject):
                 servers.append(origin)
         return servers
 
-    def _seed_cache(self, body: bytes) -> None:
-        """Keep the bytes locally before they are sent anywhere.
-
-        Without this the app downloads its own upload back from a server
-        the moment it wants to show it, which is a round trip for bytes
-        that were in memory a second earlier and simply fails when the
-        machine is offline. The cache is content addressed, so seeding it
-        here is the same write the download would have made.
-
-        It happens before the network rather than after a successful
-        upload on purpose: a failed upload the user retries still has
-        something to show, and the local copy is what makes a Blossom
-        server a place a file is kept rather than the only place.
-
-        A cache that cannot be written is not an upload failure. The
-        bytes are still going to a server, so the upload carries on and
-        the display falls back to fetching them.
-        """
-        if self._blob_cache is None:
-            return
-        try:
-            self._blob_cache.put_bytes(body)
-        except OSError:
-            pass
-
     # ------------------------------------------------------------------
-    # Dedup: find out who already has the blob before signing anything
+    # Dedup: servers the person's own library says already hold the blob
     # ------------------------------------------------------------------
 
-    def _resolve_coverage(
-        self,
-        sha: str,
-        eligible: List[str],
-        *,
-        on_ready: Callable[[List[str]], None],
-    ) -> None:
-        """Report which of ``eligible`` already hold ``sha``.
+    def _servers_holding(self, sha: str, eligible: List[str]) -> List[str]:
+        """Which of ``eligible`` already hold ``sha`` for this person.
 
-        Two sources, in trust order. The library map answers for free,
-        but only when the record can be believed: one this process wrote
-        itself this session, or one from a ``/list`` inside the freshness
-        window. ``self._files`` is filled by ``/list`` alone, which only
-        runs when the media library is opened, so in a typical session it
-        is empty or arbitrarily old and a stale hit would be the reason
-        an upload silently did not happen.
+        Only the library map answers, and only when its record can be
+        believed: one this process wrote itself this session, or one from
+        a ``/list`` inside the freshness window. A listing is the person's
+        own files, so a hit there means the file is theirs on that server.
 
-        Everything the map cannot vouch for is asked directly. The probe
-        carries no authorization, so it costs no prompt, and an
-        inconclusive answer counts as absent: dedup may never be the
-        reason a blob failed to reach a server.
+        A server is never skipped because it merely has the bytes (an
+        unsigned ``HEAD``): someone else may have uploaded them, and then
+        the file is not the person's there, not in their listing, not
+        theirs to delete, and gone when the other owner deletes it. Such
+        a server gets the upload, which BUD-02 answers with a cheap 200.
         """
-        present: List[str] = []
-        if self._record_is_trustworthy(sha):
-            present = [s for s in eligible
-                       if s in servers_holding(self._files.get(sha), eligible)]
-        to_probe = [s for s in eligible if s not in present]
-        if not to_probe:
-            on_ready(present)
-            return
-
-        remaining = {"count": len(to_probe)}
-
-        def one_done() -> None:
-            remaining["count"] -= 1
-            if remaining["count"] > 0:
-                return
-            on_ready([s for s in eligible if s in present])
-
-        for server in to_probe:
-            def found(target=server) -> None:
-                present.append(target)
-                one_done()
-
-            self._client.head_blob(
-                server_origin(server), sha,
-                on_present=found,
-                on_absent=one_done,
-            )
-
-    def _record_is_trustworthy(self, sha: str) -> bool:
-        if sha in self._committed:
-            return True
-        return (time.monotonic() - self._last_fetch_at) < _FETCH_FRESHNESS_SECONDS
+        if sha not in self._committed and \
+                (time.monotonic() - self._last_fetch_at) >= _FETCH_FRESHNESS_SECONDS:
+            return []
+        held = servers_holding(self._files.get(sha), eligible)
+        return [s for s in eligible if s in held]
 
     def _upload_missing(
         self,
@@ -710,13 +1101,23 @@ class MediaStore(QObject):
                 media=media,
                 source_url=media.url,
                 mirror_servers=missing,
+                body=body,
             )
             return
 
         # Servers this upload already tried and lost. They are not
         # offered the blob a second time as a mirror target: the request
-        # would be new but the problem would be the same one.
+        # would be new but the problem would be the same one. Once the
+        # file lands elsewhere they are reported as copies not kept.
         exhausted: List[str] = []
+        missed: List[tuple] = []
+        # This upload's job. Every answer below asks whether it is still
+        # the job of that name: after a Cancel it is not, and a signer or
+        # a server answering late sends and reports nothing.
+        job = self._uploads.get(name)
+
+        def live() -> bool:
+            return self._uploads.get(name) is job
 
         def attempt(index: int) -> None:
             target = missing[index]
@@ -733,33 +1134,28 @@ class MediaStore(QObject):
                 pubkey_hex=profile.user_pubkey,
             )
 
-            job = self._uploads.get(name)
             if job is not None and job.status != "signing":
                 job.status = "signing"
                 self.upload_status.emit(name, job.status)
 
             def on_signed(auth_event: dict) -> None:
-                job = self._uploads.get(name)
+                if not live():
+                    return
                 if job is not None:
                     job.status = "uploading"
                     self.upload_status.emit(name, job.status)
-                self._client.upload(
+                sending = self._client.upload(
                     origin,
                     body,
                     mime_type,
                     auth_event,
-                    on_success=lambda result: self._on_primary_uploaded(
-                        name=name,
-                        body=body,
-                        profile=profile,
-                        primary_result=result,
-                        mirror_servers=mirrors,
-                        configured_primary=configured_primary,
-                    ),
+                    on_success=lambda result: on_sent(result, mirrors),
                     on_failure=lambda err: on_attempt_failed(index, err),
                     on_progress=lambda sent, total: self._on_progress(name, sent, total),
                     sha256=sha,
                 )
+                if job is not None and live():
+                    job.sending = sending
 
             self._sign_with_bunker(
                 profile,
@@ -768,13 +1164,32 @@ class MediaStore(QObject):
                 # A signer failure is not a server failure: the next
                 # server would ask the same signer, so failing over just
                 # buys a second prompt and a second refusal.
-                on_failure=lambda reason: self._fail_upload(
-                    name, _format_err(reason), code=ERROR_CODES.SIGNER_REJECTED
-                ),
+                on_failure=lambda _reason: live() and self._fail_upload(
+                    name, ERROR_CODES.SIGNER_REJECTED),
+            )
+
+        def on_sent(result: UploadResult, mirrors: List[str]) -> None:
+            if not live():
+                return
+            if job is not None:
+                job.sending = None
+            self._on_primary_uploaded(
+                name=name,
+                body=body,
+                profile=profile,
+                primary_result=result,
+                mirror_servers=mirrors,
+                configured_primary=configured_primary,
+                missed=missed,
             )
 
         def on_attempt_failed(index: int, err: BlossomError) -> None:
+            if not live():
+                return
+            if job is not None:
+                job.sending = None
             exhausted.append(missing[index])
+            missed.append((_hostname(missing[index]), _error_code(err)))
             next_index = index + 1
             if (
                 next_index < _MAX_UPLOAD_ATTEMPTS
@@ -783,7 +1198,7 @@ class MediaStore(QObject):
             ):
                 attempt(next_index)
                 return
-            self._fail_upload(name, _format_err(err), code=_error_code(err))
+            self._fail_upload(name, _error_code(err), _format_err(err))
 
         attempt(0)
 
@@ -868,6 +1283,7 @@ class MediaStore(QObject):
         primary_result: UploadResult,
         mirror_servers: List[str],
         configured_primary: str = "",
+        missed: Sequence[tuple] = (),
     ) -> None:
         sha = primary_result["hash"]
         primary_server = primary_result["server"]
@@ -892,6 +1308,8 @@ class MediaStore(QObject):
             source_url=primary_url,
             mirror_servers=mirror_servers,
             configured_primary=configured_primary,
+            body=body,
+            missed=missed,
         )
 
     def _replicate(
@@ -903,6 +1321,8 @@ class MediaStore(QObject):
         source_url: str,
         mirror_servers: List[str],
         configured_primary: str = "",
+        body: Optional[bytes] = None,
+        missed: Sequence[tuple] = (),
     ) -> None:
         """Copy a blob one server already holds onto the rest, in turn.
 
@@ -911,21 +1331,31 @@ class MediaStore(QObject):
         clear one by one anyway, which is the flood the importer's loop
         was written to avoid.
 
-        A mirror that refuses is reported and the walk carries on. The
+        A server that cannot copy it (no mirror support, or it cannot
+        reach the source) gets the bytes uploaded directly when they are
+        at hand. A server that refuses for its own reasons (a limit, a
+        payment, the signature) is reported and the walk carries on. The
         blob is already on a server, so failing the whole upload over a
         replication problem would take an image out of a document to
         punish a server the user does not control.
         """
+        # (host, code) of every server that ends up without a copy: the
+        # ones the upload itself could not reach, then refused mirrors.
+        failures: List[tuple] = list(missed)
         if not mirror_servers:
+            for host, code in failures:
+                self.mirror_failed.emit(name, host, code)
             self._commit_upload(name, media, configured_primary=configured_primary)
             return
 
+        # The first server has it: it is in the library from now on, so
+        # its name is remembered now, not after the copies (quitting
+        # stops those, and it would come back named by its day).
+        self._remember_name(name, media.hash)
         state = self._uploads.get(name)
         if state is not None:
             state.status = "mirroring"
             self.upload_status.emit(name, state.status)
-
-        failures: List[tuple] = []
 
         def step(index: int) -> None:
             if index >= len(mirror_servers):
@@ -945,6 +1375,22 @@ class MediaStore(QObject):
                 failures.append((_hostname(o), _error_code(err)))
                 step(i + 1)
 
+            def on_mirror_err(err: BlossomError, o=origin, i=index) -> None:
+                if body is None or _error_code(err) in _NO_DIRECT_UPLOAD:
+                    on_err(err, o, i)
+                    return
+                replicate.upload_to_server(
+                    session_pool=self._session_pool,
+                    profile=profile,
+                    client=self._client,
+                    server=o,
+                    body=body,
+                    mime=media.mime_type,
+                    sha256=media.hash,
+                    on_success=lambda result, o=o, i=i: on_ok(result, o, i),
+                    on_failure=lambda err2, o=o, i=i: on_err(err2, o, i),
+                )
+
             replicate.mirror_to_server(
                 session_pool=self._session_pool,
                 profile=profile,
@@ -953,10 +1399,19 @@ class MediaStore(QObject):
                 source_url=source_url,
                 sha256=media.hash,
                 on_success=on_ok,
-                on_failure=on_err,
+                on_failure=on_mirror_err,
             )
 
         step(0)
+
+    def _remember_name(self, name: str, sha: str) -> None:
+        """Remember the file added as job ``name`` by the name it was
+        added with (an editor upload's job is not a file name)."""
+        added = self._added.get(name)
+        if added is not None:
+            self._session_names[sha] = added.label
+            if self._names is not None:
+                self._names.remember(sha, added.label)
 
     def _commit_upload(
         self,
@@ -969,8 +1424,10 @@ class MediaStore(QObject):
         # was already there, prefer the new URL list, which is freshest.
         self._files[media.hash] = media
         # Written from confirmations this process collected, so the next
-        # upload of the same bytes can trust it without a probe.
+        # upload of the same bytes can trust it without listing again.
         self._committed.add(media.hash)
+        self._remember_name(name, media.hash)
+        self._added.pop(name, None)
         state = self._uploads.pop(name, None)
         if state is not None:
             state.status = "done"
@@ -989,73 +1446,111 @@ class MediaStore(QObject):
         self.upload_finished.emit(name, media)
         self.library_changed.emit()
 
-    def _fail_upload(self, name: str, reason: str, *, code: str = "") -> None:
+    def _fail_upload(self, name: str, code: str, reason: str = "") -> None:
         state = self._uploads.pop(name, None)
         if state is not None:
             state.status = "failed"
-            state.error = reason
+            state.error = reason or friendly_message(code)
         self.upload_status.emit(name, "failed")
-        self.upload_failed.emit(name, reason)
-        self.upload_failed_code.emit(name, code or ERROR_CODES.UPLOAD_FAILED)
+        self._refuse(name, code, reason)
+
+    def _refuse(self, name: str, code: str, reason: str = "") -> None:
+        """Report one upload's failure: the sentence, then its code. An
+        added file stays, to be retried or dismissed."""
+        added = self._added.get(name)
+        if added is not None:
+            added.failed = True
+            added.error = reason or friendly_message(code)
+        self.upload_failed.emit(name, reason or friendly_message(code))
+        self.upload_failed_code.emit(name, code)
 
     # ------------------------------------------------------------------
     # Delete
     # ------------------------------------------------------------------
 
-    def delete_file(self, file_hash: str) -> None:
+    def delete_file(self, file_hash: str, *, servers: Sequence[str] = (),
+                    best_effort: Sequence[str] = ()) -> None:
         """Delete a blob from every server it lives on.
 
         Files are deduped by sha256 across servers, so the same hash can
-        be on N hosts; we issue a parallel DELETE to each, then commit
-        the local removal once all of them have reported back. A delete
-        is "successful" if at least one server confirmed it (or the
-        whole list returned 404, meaning the blob is already gone). We only
-        surface an error to the UI when every server actively rejected.
+        be on N hosts; a DELETE goes to each in parallel. A server that
+        confirms (or answers 404, already gone) is dropped from the
+        file's record. Only when every server confirmed is the file gone
+        and ``file_deleted`` emitted; otherwise the file stays in the
+        library with the servers that still hold it, and
+        ``delete_failed`` carries the code of what stopped it. A file is
+        never reported gone while a server still serves it: it would come
+        back on the next listing, and the person would have believed it
+        deleted.
+
+        ``servers`` names where else the file was put (a public copy's
+        record): it is deleted there too, listed or not.
+
+        ``best_effort`` names servers that may hold it unrecorded (the ones
+        in use, for a public copy): asked too, but one that neither lists
+        it nor is named in ``servers`` never had it as far as anyone
+        knows, so its failure (unreachable today, or refusing to delete
+        what it doesn't have) doesn't keep the file.
         """
         profile = self._profile_provider()
         if profile is None:
-            self.delete_failed.emit(file_hash, "Connect a Nostr signer first.")
+            self.delete_failed.emit(file_hash, ERROR_CODES.NO_SIGNER)
             return
+        # The servers to ask: wherever the listing shows the file, and
+        # wherever ``servers`` says it was put (a public copy's record:
+        # a server since removed from the list, another device's upload).
         media = self._files.get(file_hash)
+        urls = [dict(u) for u in media.urls] if media is not None else []
+        listed = {extract_server_from_blob_url(u.get("url", "")) for u in urls}
+        for origin in dict.fromkeys(_origin_or_empty(s) for s in servers):
+            if origin and origin not in listed:
+                urls.append({"server": origin, "url": blob_url(origin, file_hash)})
+                listed.add(origin)
+        unknown: set = set()
+        for origin in dict.fromkeys(_origin_or_empty(s) for s in best_effort):
+            if origin and origin not in listed:
+                urls.append({"server": origin, "url": blob_url(origin, file_hash)})
+                listed.add(origin)
+                unknown.add(origin)
+        if not urls:
+            if media is None:
+                return
+            urls = [{"server": "", "url": media.url}]
         if media is None:
-            return
+            media = MediaFile(hash=file_hash, url=urls[0]["url"], urls=urls)
 
-        # Build the unique set of servers to target. Source of truth is
-        # the file's own ``urls`` (whatever ``/list`` told us), with the
-        # blob URL as a fallback for files we have only one record of.
         target_servers: list[str] = []
-        seen: set[str] = set()
-        for entry in media.urls:
+        for entry in urls:
             origin = extract_server_from_blob_url(entry.get("url", ""))
-            if origin and origin not in seen:
+            if origin and origin not in target_servers:
                 target_servers.append(origin)
-                seen.add(origin)
         if not target_servers:
-            fallback = extract_server_from_blob_url(media.url)
-            if fallback:
-                target_servers.append(fallback)
-            else:
-                target_servers.append(self._settings.primary)
+            target_servers.append(self._settings.primary)
 
-        # Track per-server outcomes so the UI gets a meaningful summary.
         remaining = {"count": len(target_servers)}
-        successes: list[str] = []
         failures: list[tuple[str, str]] = []
+
+        def failed_one(origin: str, code: str) -> None:
+            if origin not in unknown:
+                failures.append((origin, code))
+            finish_one()
 
         def finish_one() -> None:
             remaining["count"] -= 1
             if remaining["count"] > 0:
                 return
-            # Always drop the local record: the user said "remove this".
-            self._files.pop(file_hash, None)
-            if successes:
+            if not failures:
+                self._files.pop(file_hash, None)
                 self.file_deleted.emit(file_hash)
+            elif file_hash not in self._files:
+                self.delete_failed.emit(file_hash, _delete_failure_code(failures))
             else:
-                summary = "; ".join(f"{_hostname(host)}: {msg}" for host, msg in failures)
-                self.delete_failed.emit(
-                    file_hash,
-                    f"No server accepted the delete ({summary}). Removed locally.",
-                )
+                kept = {origin for origin, _code in failures}
+                media.urls = [u for u in urls
+                              if extract_server_from_blob_url(u.get("url", "")) in kept]
+                if media.urls:
+                    media.url = str(media.urls[0].get("url") or media.url)
+                self.delete_failed.emit(file_hash, _delete_failure_code(failures))
             self.library_changed.emit()
 
         for origin in target_servers:
@@ -1063,8 +1558,8 @@ class MediaStore(QObject):
                 profile=profile,
                 file_hash=file_hash,
                 origin=origin,
-                on_ok=lambda o=origin: (successes.append(o), finish_one()),
-                on_err=lambda msg, o=origin: (failures.append((o, msg)), finish_one()),
+                on_ok=finish_one,
+                on_err=lambda code, o=origin: failed_one(o, code),
             )
 
     def _delete_one_server(
@@ -1078,7 +1573,7 @@ class MediaStore(QObject):
     ) -> None:
         """Sign and send a single DELETE. 404 is treated as success
         (the file isn't on that server anymore, which is what the user
-        was asking for)."""
+        was asking for). ``on_err`` gets the failure's code."""
         unsigned = build_blossom_auth_event(
             "delete",
             file_hash=file_hash,
@@ -1091,7 +1586,7 @@ class MediaStore(QObject):
                 if err.status == 404:
                     on_ok()
                 else:
-                    on_err(_format_err(err))
+                    on_err(_error_code(err))
 
             self._client.delete(
                 origin,
@@ -1105,7 +1600,7 @@ class MediaStore(QObject):
             profile,
             unsigned,
             on_signed=after_sign,
-            on_failure=on_err,
+            on_failure=lambda _reason: on_err(ERROR_CODES.SIGNER_REJECTED),
         )
 
     # ------------------------------------------------------------------
@@ -1131,9 +1626,7 @@ class MediaStore(QObject):
             client.sign_event(
                 unsigned_event,
                 on_success=on_signed,
-                on_failure=lambda reason: on_failure(
-                    f"signer rejected the Blossom auth event: {reason}"
-                ),
+                on_failure=on_failure,
             )
 
         self._session_pool.get(profile, on_ready=on_ready, on_error=on_failure)
@@ -1168,6 +1661,11 @@ def servers_holding(media, planned: Sequence[str]) -> Set[str]:
     return {s for s in planned if _origin_or_empty(s) in held}
 
 
+def _entry_size(entry: dict) -> int:
+    """A /list entry's size in bytes; 0 when it is missing or nonsense."""
+    return whole_number(entry.get("size"))
+
+
 def _origin_or_empty(value: str) -> str:
     try:
         return server_origin(value)
@@ -1190,6 +1688,31 @@ def _error_code(err) -> str:
     return ERROR_CODES.SIGNER_REJECTED
 
 
+def _listing_failure_code(listings) -> str:
+    """Why no server could be listed, as one code: the signer, a server
+    refusing the account, a server out of reach, or a server that
+    answered but did not list (busy, or without /list, which BUD-12
+    makes optional): not the connection's fault, so not said to be."""
+    codes = {listing.error_code for listing in listings}
+    for wanted in (ERROR_CODES.SIGNER_REJECTED, ERROR_CODES.AUTH_REJECTED):
+        if wanted in codes:
+            return wanted
+    if codes <= {ERROR_CODES.NETWORK_UNAVAILABLE}:
+        return ERROR_CODES.NETWORK_UNAVAILABLE
+    return ERROR_CODES.LIST_FAILED
+
+
+def _delete_failure_code(failures) -> str:
+    """The one code a delete that some server did not take is reported
+    with: the signer first (nothing was asked of the servers), then an
+    unreachable server (try again later), then whatever a server said."""
+    codes = [code for _origin, code in failures]
+    for wanted in (ERROR_CODES.SIGNER_REJECTED, ERROR_CODES.NETWORK_UNAVAILABLE):
+        if wanted in codes:
+            return wanted
+    return codes[0] if codes else ERROR_CODES.UPLOAD_FAILED
+
+
 def _is_retryable(err) -> bool:
     """Whether another server is worth trying for this failure."""
     if not isinstance(err, BlossomError):
@@ -1206,17 +1729,8 @@ def _is_retryable(err) -> bool:
     return err.status in _RETRYABLE_STATUSES
 
 
-def _format_err(err) -> str:
-    """User-facing copy for a failure.
-
-    A :class:`BlossomError` becomes mapped copy plus the operator's own
-    ``X-Reason``, never a Qt transport string and never protocol jargon.
-    Anything else is a signer message and passes through byte-identical:
-    the asset manager still classifies those by prefix, so rewording
-    them here would silently reclassify every signer failure.
-    """
-    if isinstance(err, BlossomError):
-        return friendly_message(
-            err.code or ERROR_CODES.UPLOAD_FAILED, detail=err.detail
-        )
-    return str(err)
+def _format_err(err: BlossomError) -> str:
+    """The plain sentence for a server's or the transport's failure: the
+    code's copy plus the operator's own ``X-Reason``, never a Qt
+    transport string."""
+    return friendly_message(err.code or ERROR_CODES.UPLOAD_FAILED, detail=err.detail)

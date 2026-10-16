@@ -4,10 +4,12 @@
 
 Two pieces:
 
-  ProfileMetadataFetcher subscribes to the configured relays for a
-    user's ``kind:0`` event, parses the content JSON, writes the resolved
-    name/picture/nip05 back to the profile store, and emits the updated
-    Profile.
+  ProfileMetadataFetcher asks for a user's own ``kind:0`` event where
+    profiles are found (their write relays, then the indexers), keeps the
+    newest validly signed one, writes the resolved name/picture/nip05 back
+    to the profile store, and emits the updated Profile. Only a verified
+    event counts: a relay that hands out a forged, newer profile cannot
+    rename the user in their own editor.
 
   AvatarLoader downloads the ``picture`` URL via QtNetwork to a local
     cache directory, then emits the resulting QPixmap so the chip can
@@ -29,21 +31,22 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-import tempfile
 from pathlib import Path
-from typing import Optional
+from typing import Callable, Optional
 
-from PySide6.QtCore import QObject, QStandardPaths, QUrl, Signal
+from PySide6.QtCore import QObject, QStandardPaths, QTimer, QUrl, Signal
 from PySide6.QtGui import QPixmap
 from PySide6.QtNetwork import QNetworkAccessManager, QNetworkReply, QNetworkRequest
 
 import url_safety
+from atomic_file import write_bytes
 from image_safety import decode_image_bytes
 
-from . import DEFAULT_RELAYS
+from .outbox.directory import RelayDirectory
+from .outbox.lookup import Lookup, LookupState, fetch_replaceable
+from .outbox.policy import KIND_PROFILE, lookup_relays
 from .profiles import Profile, ProfileStore
-from .queries import fetch_latest_event
-from .relay import RelayPool
+from .relay import RECONNECT_FIRST_MS, RECONNECT_LONGEST_MS, RelayPool
 
 
 AVATAR_CACHE_DIR = Path.home() / ".cache" / "my_editor" / "nostr_avatars"
@@ -63,6 +66,48 @@ _MAX_AVATAR_REDIRECTS: int = 4
 # Metadata (kind 0) fetcher                                                   #
 # --------------------------------------------------------------------------- #
 
+def can_receive_zaps(pool: RelayPool, directory: RelayDirectory, pubkey: str, hint: str,
+                     answer, *, parent: Optional[QObject] = None,
+                     query=fetch_replaceable, timeout_ms: int = 8_000,
+                     first_wait_ms: int = RECONNECT_FIRST_MS,
+                     longest_wait_ms: int = RECONNECT_LONGEST_MS) -> None:
+    """``answer(True)`` when ``pubkey``'s profile names a lightning address
+    (lud16, or lud06: where a zap to them is paid, NIP-57), ``answer(False)``
+    when it names none or the relays have no profile of theirs. Read where
+    their profile is (the relay hint, their write relays, the indexers).
+
+    No relay answering is no answer: the lookup is asked again, waiting
+    longer each time as the relays' own reconnecting does (from
+    ``first_wait_ms``, twice as long each time, up to ``longest_wait_ms``),
+    and only after that ``answer(None)``: couldn't be found out."""
+    relays = lookup_relays(hints=[hint] if hint else [], known=directory.cached(pubkey))
+
+    def ask(wait: int) -> None:
+        query(pool, relays, kind=KIND_PROFILE, author=pubkey,
+              on_done=lambda result: done(result, wait), timeout_ms=timeout_ms, parent=parent)
+
+    def done(result: Lookup, wait: int) -> None:
+        event = result.event
+        if event is None and result.state is LookupState.UNKNOWN:
+            if wait > longest_wait_ms:
+                answer(None)
+            elif parent is not None:
+                QTimer.singleShot(wait, parent, lambda: ask(wait * 2))
+            else:
+                QTimer.singleShot(wait, lambda: ask(wait * 2))
+            return
+        try:
+            fields = json.loads((event or {}).get("content", "") or "{}")
+        except json.JSONDecodeError:
+            fields = {}
+        if not isinstance(fields, dict):
+            fields = {}
+        answer(any(isinstance(fields.get(key), str) and fields[key].strip()
+                   for key in ("lud16", "lud06")))
+
+    ask(first_wait_ms)
+
+
 class ProfileMetadataFetcher(QObject):
     """Background loader for a profile's kind 0 event.
 
@@ -81,19 +126,25 @@ class ProfileMetadataFetcher(QObject):
         pool: RelayPool,
         store: ProfileStore,
         parent: Optional[QObject] = None,
+        *,
+        relay_directory: RelayDirectory,
+        query=fetch_replaceable,
     ) -> None:
         super().__init__(parent)
         self._pool = pool
         self._store = store
+        # Knows the user's own relay list, which leads the lookup (while
+        # it is unknown, the indexers and the fallback relays are asked).
+        # Required: without it the user's own relays would silently go
+        # unasked.
+        self._relay_directory = relay_directory
+        self._query = query
 
     def fetch(self, profile: Profile, *, timeout_ms: int = 8_000) -> None:
-        # Try the curated set first; the bunker's own relays usually mirror
-        # the user's preferred set, so include them too.
-        relays = list(
-            dict.fromkeys(list(DEFAULT_RELAYS) + list(profile.bunker_relays))
-        )
+        known = self._relay_directory.cached(profile.user_pubkey)
 
-        def _on_done(event: Optional[dict]) -> None:
+        def _on_done(result: Lookup) -> None:
+            event = result.event
             if event is None:
                 self.failed.emit("no metadata event found")
                 return
@@ -123,14 +174,9 @@ class ProfileMetadataFetcher(QObject):
             self._store.upsert(current)
             self.updated.emit(current)
 
-        fetch_latest_event(
-            self._pool,
-            relays,
-            filters=[{"kinds": [0], "authors": [profile.user_pubkey], "limit": 1}],
-            on_done=_on_done,
-            timeout_ms=timeout_ms,
-            parent=self,
-        )
+        self._query(self._pool, lookup_relays(known=known, own=True), kind=KIND_PROFILE,
+                    author=profile.user_pubkey, on_done=_on_done,
+                    timeout_ms=timeout_ms, parent=self)
 
 
 # --------------------------------------------------------------------------- #
@@ -173,6 +219,29 @@ class AvatarLoader(QObject):
         self._nam = nam or QNetworkAccessManager(self)
         # pubkey -> reply, so a re-request for the same pubkey can be coalesced
         self._inflight: dict[str, QNetworkReply] = {}
+
+    def fetch(self, key: str, url: str,
+              on_done: Callable[[Optional[QPixmap]], None]) -> None:
+        """``on_done(pixmap)`` once ``url`` is at hand for ``key``, or
+        ``on_done(None)`` when it can't be had: one answer, for one picture
+        (Edit Profile's card), with the checks and the cache of ``load``.
+        A key per address keeps an older answer off a newer picture."""
+        def answer(got: str, pixmap: Optional[QPixmap]) -> None:
+            if got != key:
+                return
+            self.ready.disconnect(on_ready)
+            self.failed.disconnect(on_failed)
+            on_done(pixmap)
+
+        def on_ready(got: str, pixmap) -> None:
+            answer(got, pixmap)
+
+        def on_failed(got: str, _reason: str) -> None:
+            answer(got, None)
+
+        self.ready.connect(on_ready)
+        self.failed.connect(on_failed)
+        self.load(key, url)
 
     def load(self, pubkey_hex: str, picture_url: str) -> None:
         """Resolve an avatar for ``pubkey_hex`` from ``picture_url``.
@@ -302,18 +371,6 @@ def _write_private_file(path: Path, data: bytes) -> None:
     the caller already has the pixmap.
     """
     try:
-        fd, tmp_path = tempfile.mkstemp(
-            prefix=".avatar_", suffix=".tmp", dir=str(path.parent)
-        )
+        write_bytes(path, data)
     except OSError:
-        return
-    try:
-        with os.fdopen(fd, "wb") as f:
-            f.write(data)
-        _chmod(tmp_path, 0o600)
-        os.replace(tmp_path, path)
-    except OSError:
-        try:
-            os.unlink(tmp_path)
-        except OSError:
-            pass
+        pass
