@@ -45,7 +45,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 import shiboken6  # noqa: E402
 from PySide6.QtCore import QCoreApplication, QEvent, QObject, Qt, Signal  # noqa: E402
 from PySide6.QtGui import QKeyEvent  # noqa: E402
-from PySide6.QtWidgets import QApplication  # noqa: E402
+from PySide6.QtWidgets import QApplication, QMenu  # noqa: E402
 
 import alerts  # noqa: E402
 import nostr.ui.media_library_dialog as dialog_module  # noqa: E402
@@ -648,6 +648,44 @@ def test_return_inserts_the_chosen_file_with_its_alt_text(tmp_path, monkeypatch)
     world.dialog._alt_edit.setText("A garden")
     press(world.grid, Qt.Key.Key_Return)
     assert picked == [(one.hash, "A garden")]
+
+
+def test_a_pick_has_the_type_its_tile_shows(tmp_path, monkeypatch):
+    """A server that calls a video a byte stream does not make it one: the
+    file is handed on as what its name says it is."""
+    clip = media(1, mime="application/octet-stream")
+    world = build(tmp_path, monkeypatch, FakeStore([clip], names={clip.hash: "Talk.mp4"}),
+                  pick=True)
+    picked = []
+    world.dialog.file_picked.connect(lambda m, alt: picked.append(m.mime_type))
+    select(world, clip.hash)
+    assert not world.dialog._alt_edit.isEnabled()      # alt text describes pictures
+    press(world.grid, Qt.Key.Key_Return)
+    assert picked == ["video/mp4"]
+
+
+def test_the_picker_offers_every_kind_of_file(tmp_path, monkeypatch):
+    world = build(tmp_path, monkeypatch, FakeStore([media(1)]), pick=True)
+    assert world.dialog.windowTitle() == "Insert from Media Library"
+    assert world.dialog._filter_combo.currentData() == "all"
+
+
+def test_browsing_insert_in_document_puts_the_file_into_the_document(tmp_path, monkeypatch):
+    one = media(1)
+    world = build(tmp_path, monkeypatch, FakeStore([one]))
+    inserted, open_document = [], [True]
+    world.dialog.set_inserter(lambda m, alt: inserted.append(m.hash), lambda: open_document[0])
+    select(world, one.hash)
+    menu = QMenu()
+    world.dialog._add_file_commands(menu, world.grid.selected_tiles())
+    [insert] = [action for action in menu.actions() if action.text() == "Insert in Document"]
+    assert insert.isEnabled()
+    insert.trigger()
+    assert inserted == [one.hash] and world.dialog.isVisible()      # the library stays open
+    open_document[0] = False
+    menu = QMenu()
+    world.dialog._add_file_commands(menu, world.grid.selected_tiles())
+    assert not [a for a in menu.actions() if a.text() == "Insert in Document"][0].isEnabled()
 
 
 def test_a_file_nobody_could_check_is_not_inserted_and_it_says_why(tmp_path, monkeypatch):

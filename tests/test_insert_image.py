@@ -17,7 +17,7 @@ What must hold:
 
   The Insert menu never shows two items for a picture: the Nostr one,
   which inserts a file from the media library (already on the media
-  servers), says so ("Image from Media Library…").
+  servers), says so ("From Media Library…").
 """
 
 import os
@@ -127,7 +127,7 @@ def test_one_image_item_in_the_insert_menu(r):
     assert r["menu"].count("Image…") == 1
     assert not any("Image" in title and title != "Image…" for title in r["menu"])
     assert r["menu_account"].count("Image…") == 1
-    assert "Image from Media Library…" in r["menu_account"]
+    assert "From Media Library…" in r["menu_account"]
     assert "Insert Image…" not in r["menu_account"]
 
 

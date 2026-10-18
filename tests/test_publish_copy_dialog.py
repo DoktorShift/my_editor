@@ -591,6 +591,18 @@ class _Window:
     def _insert_url_as_text(self, editor, url) -> None:
         self.urls.append(url)
 
+    def _insert_file_link(self, editor, url, name) -> None:
+        self.urls.append(url)
+
+    def _library_name(self, media) -> str:
+        return ""
+
+    def _keeps_pictures(self, editor) -> bool:
+        return True
+
+    def _may_insert_audio_video(self, editor) -> bool:
+        return True
+
     def _insert_asset(self, editor, asset, *, alt) -> None:
         self.assets.append((asset, alt))
 

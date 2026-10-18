@@ -294,6 +294,23 @@ def test_adopt_library_file_enters_complete(tmp_path):
     assert ctx.uploader.calls == []
 
 
+def test_a_file_taken_from_an_address_is_not_known_to_be_public(tmp_path):
+    """Bytes made here, or a library pick past the privacy check, are
+    public by how they came; an address in a reopened article is not, and
+    that survives a restart."""
+    from nostr.media.assets import asset_from_record
+    ctx = make_manager(tmp_path)
+    made = ctx.manager.adopt_bytes(PNG_BYTES)
+    assert ctx.manager.known_public(made.sha256)
+    other = "e5" * 32
+    named = ctx.manager.adopt_library_file(
+        sha256=other, remote_url=f"https://cdn.example/{other}.mp4", mime="video/mp4",
+        from_address=True)
+    assert named.from_address and not ctx.manager.known_public(other)
+    assert asset_from_record(named.to_record()).from_address
+    assert not ctx.manager.known_public("f6" * 32)
+
+
 def test_adopt_library_file_promotes_a_local_asset(tmp_path):
     ctx = make_manager(tmp_path)
     local = ctx.manager.adopt_bytes(PNG_BYTES)

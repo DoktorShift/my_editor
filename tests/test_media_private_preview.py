@@ -230,6 +230,26 @@ def test_a_file_the_library_holds_is_private_even_mid_load():
     assert view.state_of(blob.sha256) == PRIVATE
 
 
+def test_a_file_this_computer_sent_as_it_is_is_public_before_the_library_is_read():
+    # A picture added to the library a moment ago, while the private
+    # library is still being read (or its signer never answers), went in
+    # nowhere: the Insert from the library said it couldn't check yet.
+    sent = "b" * 64
+    view = MediaVisibility(library=FakeLibrary([], vouches=False),
+                           known_public=lambda sha: sha == sent)
+
+    assert view.state_of(sent) == PUBLIC
+    assert view.state_of("a" * 64) == UNKNOWN
+
+
+def test_a_private_file_stays_private_whatever_was_sent():
+    blob = private()
+    view = MediaVisibility(library=FakeLibrary([blob], vouches=False),
+                           known_public=lambda sha: True)
+
+    assert view.state_of(blob.sha256) == PRIVATE
+
+
 def test_a_library_that_cannot_account_for_a_file_hides_nothing_else(tmp_path):
     # The unknown answer must not disturb the copy lookup or the key
     # path: both read the record, and there is no record to read.

@@ -6,7 +6,7 @@ What must hold:
 
   Every key MyEditor 3.3 had still does what it did, or what took its
   command's place (Reset Format is Clear Formatting, Insert image… is
-  Insert Image from Media Library…), on a Mac, on Windows and on Linux.
+  Insert from Media Library…), on a Mac, on Windows and on Linux.
   The one exception is logged in OPS map and the user guide: Shift-Command-P
   is Page Setup on a Mac (Apple's guidelines), so Publish as Note is
   Option-Command-P there.

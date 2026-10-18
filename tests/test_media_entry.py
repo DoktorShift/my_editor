@@ -700,6 +700,10 @@ def test_a_library_audio_file_becomes_the_same_card_insert_audio_makes(tmp_path,
     win._media_progress = {}
     win.is_dark_theme = False
     win._may_insert_audio_video = lambda ed: True
+    win._keeps_pictures = lambda ed: True
+    win._want_poster = lambda media, mime: None
+    win._poster_frames, win._media_lengths = {}, {}
+    win._media_file_of = MainWindow._media_file_of
     for name in ("_insert_media_at_cursor", "_insert_media_card", "_media_card",
                  "_library_name", "_insert_url_as_text"):
         setattr(win, name, getattr(MainWindow, name).__get__(win))
@@ -710,8 +714,83 @@ def test_a_library_audio_file_becomes_the_same_card_insert_audio_makes(tmp_path,
     assert asset.is_media and asset.is_uploaded and asset.alt == "Podcast intro.mp3"
     assert asset.servers == ["https://one.example"]
     fmt = next(f for f in _image_formats(win.editor) if f.name() == asset.key)
-    assert (fmt.width(), fmt.height()) == (media_card.WIDTH, media_card.HEIGHT)
+    assert (fmt.width(), fmt.height()) == media_card.size_for(asset.mime)
     assert win._uploader.calls == []
+
+
+
+def _library_window(tmp_path, monkeypatch, record, name, *, rich=True):
+    """An _EntryWindow that inserts library picks the way MainWindow does,
+    the pick resolving to ``record`` as the gate passes a public file."""
+    from nostr.media.media_visibility import MediaVisibility
+    from nostr.ui.publish_copy_dialog import PickResolution
+    monkeypatch.setattr(main_window_module, "resolve_pick", lambda media, **kw: PickResolution(
+        sha256=media.hash, url=media.url, mime=media.mime_type, size=media.size, ok=True))
+    win = _EntryWindow(tmp_path / "cache", profile=object())
+    win._uploader.files[record.hash] = record
+    win._media_store = types.SimpleNamespace(files={record.hash: record}, name_of=lambda s: name)
+    win._media_visibility = MediaVisibility()
+    win._copy_maker = None
+    win._media_progress = {}
+    win.is_dark_theme = False
+    win._may_insert_audio_video = lambda ed: rich
+    win._keeps_pictures = lambda ed: rich
+    win._editor_kind = lambda ed: "rich" if rich else "plain"
+    win._want_poster = lambda media, mime: None
+    win._poster_frames, win._media_lengths = {}, {}
+    win._media_file_of = MainWindow._media_file_of
+    for method in ("_insert_media_at_cursor", "_insert_media_card", "_media_card",
+                   "_library_name", "_insert_url_as_text", "_insert_file_link"):
+        setattr(win, method, getattr(MainWindow, method).__get__(win))
+    return win
+
+
+def test_a_video_its_server_calls_a_byte_stream_goes_in_as_a_video(tmp_path, monkeypatch):
+    """A server that cannot say what a file is (application/octet-stream)
+    put a video in as its bare address; its name says what it is."""
+    sha = "b2" * 32
+    url = f"https://one.example/{sha}"
+    record = types.SimpleNamespace(hash=sha, url=url, mime_type="application/octet-stream",
+                                   size=4096, urls=[{"server": "https://one.example", "url": url}],
+                                   uploaded_at_ms=0)
+    win = _library_window(tmp_path, monkeypatch, record, "Talk.mp4")
+
+    win._insert_media_at_cursor(record, win.editor)
+
+    [asset] = win.assets()
+    assert asset.mime == "video/mp4" and asset.is_media
+    assert any(f.name() == asset.key for f in _image_formats(win.editor))
+
+
+def test_a_file_from_the_library_goes_in_as_a_link_by_its_name(tmp_path, monkeypatch):
+    sha = "c3" * 32
+    url = f"https://one.example/{sha}.pdf"
+    record = types.SimpleNamespace(hash=sha, url=url, mime_type="application/pdf", size=4096,
+                                   urls=[{"server": "https://one.example", "url": url}],
+                                   uploaded_at_ms=0)
+    win = _library_window(tmp_path, monkeypatch, record, "Notes.pdf")
+
+    win._insert_media_at_cursor(record, win.editor)
+
+    block = win.editor.document().begin()
+    fragment = block.begin().fragment()
+    assert block.text() == "Notes.pdf"
+    assert fragment.charFormat().isAnchor() and fragment.charFormat().anchorHref() == url
+    assert win.assets() == []
+
+
+def test_a_library_file_goes_into_plain_text_as_its_address(tmp_path, monkeypatch):
+    """A plain-text file saves its text only: a picture would be lost."""
+    sha = "d4" * 32
+    url = f"https://one.example/{sha}.png"
+    record = types.SimpleNamespace(hash=sha, url=url, mime_type="image/png", size=4096,
+                                   urls=[{"server": "https://one.example", "url": url}],
+                                   uploaded_at_ms=0)
+    win = _library_window(tmp_path, monkeypatch, record, "Sunset.png", rich=False)
+
+    win._insert_media_at_cursor(record, win.editor)
+
+    assert win.editor.toPlainText() == url and _image_formats(win.editor) == []
 
 
 def _image_formats(editor):

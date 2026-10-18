@@ -448,9 +448,11 @@ class AssetManager(QObject):
         mime: str = "application/octet-stream",
         size: int = 0,
         alt: str = "",
+        from_address: bool = False,
     ) -> Optional[DocumentAsset]:
         """Adopt a blob that is already hosted, e.g. a library pick (an
-        image, or audio or video, which a document shows as its card).
+        image, or audio or video, which a document shows as its card), or
+        (``from_address``) one a document's text names by its address.
 
         Recorded as an upload of it would be: hash, address, type, size,
         name, and the servers that hold it (from the library's record, else
@@ -492,10 +494,19 @@ class AssetManager(QObject):
             servers=servers,
             created_at=now,
             updated_at=now,
+            from_address=from_address,
         )
         self._index.put(asset)
         self.asset_added.emit(sha)
         return asset
+
+    def known_public(self, sha256: str) -> bool:
+        """Whether this file is public by how it came here: from a file, a
+        paste or a recording on this computer (this app never encrypts what
+        it uploads), or picked from the library past its privacy check.
+        Not one taken from an address in a document's text."""
+        asset = self._index.get(sha256)
+        return asset is not None and not asset.from_address
 
     # ------------------------------------------------------------------
     # Resolution

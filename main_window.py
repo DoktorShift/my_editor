@@ -83,6 +83,7 @@ from preview_pane import (
     ARTICLE, DOCUMENT, NOTE, PREVIEW, SPLIT, SPLIT_MIN_WIDTH, WRITE, PreviewContent, PreviewPane,
     ViewSwitch,
 )
+from nostr import preview as preview_module
 from nostr.preview import Article as PreviewArticle
 from doc_walk import iter_blocks, iter_image_names, serialize_plain_with_images
 from markdown_writer import (
@@ -177,6 +178,8 @@ from nostr.bech32 import encode_nprofile, encode_npub
 from nostr.nip05_check import Nip05Check
 from nostr.ui.mention_picker import MentionPicker
 from nostr.ui import media_card
+from nostr.ui.media_thumbnails import MediaThumbnails
+from nostr.ui.media_viewer import MediaViewer
 from nostr.ui.reference_popover import ReferencePopover
 from nostr.ui.article_details_panel import ArticleDetailsPanel, DEFAULT_WIDTH as ARTICLE_DETAILS_WIDTH
 from nostr.ui.article_headers import ArticleHeaders
@@ -203,6 +206,8 @@ from nostr.draft_store import DraftState, DraftStore
 from nostr.draft_deletions import DraftDeletions
 from nostr.draft_sync import DraftSync
 from nostr.imports.favicons import FaviconCache
+from nostr.imports.fetch import BlobFetcher
+from nostr.imports.remote_images import RemoteImages
 from nostr.ui.imports_badge import COMMAND_TITLE as IMPORTS_BADGE_TITLE
 from nostr.ui.imports_badge import SETTINGS_KEY as IMPORTS_BADGE_KEY
 from nostr.ui.imports_badge import AppIconBadge
@@ -768,6 +773,12 @@ class MainWindow(QMainWindow):
         self._asset_manager.asset_changed.connect(self._refresh_asset_in_documents)
         self._asset_manager.asset_changed.connect(self._on_media_uploaded)
         self._asset_manager.asset_upload_failed.connect(self._on_asset_upload_failed)
+        # Pictures a document names by a web address (an article or draft
+        # reopened, a page pasted): fetched through the importer's network
+        # guard and size cap, kept within a memory budget, and put in place
+        # in the text and its preview when they arrive.
+        self._web_images = RemoteImages(fetcher=BlobFetcher(self), parent=self)
+        self._web_images.ready.connect(self._on_web_image_ready)
         # How far each audio or video file's upload has got (sha256 ->
         # percent), shown on its card in the text.
         self._media_progress: dict = {}
@@ -793,7 +804,22 @@ class MainWindow(QMainWindow):
         )
         self._media_visibility = MediaVisibility(
             library=self._private_library, ledger=self._public_ledger,
+            # Added to the library here, or a picture, audio or video put
+            # in a document here: public whatever the library says yet.
+            known_public=lambda sha: (self._asset_manager.known_public(sha)
+                                      or self._media_store.added_here(sha)),
         )
+        # Audio and video in the text and its preview show as a player
+        # does before it starts: a video's first frame, and how long each
+        # plays, found once per file (sha256 -> QImage, milliseconds).
+        self._media_posters = MediaThumbnails(self._media_image_loader,
+                                              self._media_visibility, parent=self)
+        self._media_posters.ready.connect(self._on_media_poster)
+        self._media_posters.duration_ready.connect(self._on_media_length)
+        self._poster_frames: dict = {}
+        self._media_lengths: dict = {}
+        self._posters_asked: set = set()
+        self._media_viewer = None
         # The one object in the app that turns a private file into a
         # public one. It fetches through the same guarded downloader as
         # every other blob and uploads through the same store, so a
@@ -1348,6 +1374,8 @@ class MainWindow(QMainWindow):
         ed.set_resource_resolver(self._resolve_asset_image, ASSET_SCHEME)
         ed.set_object_lookup(self._outside_of)
         ed.set_local_image_resolver(lambda name, e=ed: self._resolve_local_image(e, name))
+        ed.set_web_image_resolver(self._resolve_web_image)
+        ed.media_clicked.connect(self._on_media_clicked)
         ed.image_pasted.connect(lambda img, e=ed: self._handle_pasted_image(e, img))
         ed.notice.connect(lambda text: self.status.showMessage(text, 8000))
         ed.visible_area_changed.connect(lambda e=ed: self._on_visible_area_changed(e))
@@ -1360,6 +1388,7 @@ class MainWindow(QMainWindow):
         ed.mention_requested.connect(lambda at, e=ed: self._ask_mention(e, at))
         # Mentions read back from Markdown get their names (rich_text.link_references).
         ed._mention_label = self._mention_label
+        ed._media_from_addresses = lambda e=ed: self._media_from_addresses(e)
         ed.set_markdown_shortcuts_check(lambda: self.markdown_shortcuts)
         ed.set_caret_style(self.caret_style)
         ed.set_slash_items(self._slash_items)
@@ -2496,13 +2525,15 @@ class MainWindow(QMainWindow):
                     "Ctrl+Shift+M", nostr=True, listed_as=_("Media library"), keywords=("images", "upload")),
             triggered=self._on_nostr_media_library)
         # A file of the media library, already on the media servers: not
-        # Insert > Image..., which puts in a file from the computer.
+        # Insert > Image..., which puts in a file from the computer. A
+        # picture, audio or video, or a file (as a link to it).
         self.act_nostr_insert_image = add(
-            Command("nostr.insert_image", _("Insert Image from Media Library…"), NOSTR,
-                    "Ctrl+Shift+I", nostr=True, listed_as=_("Insert image from media library"),
-                    keywords=(_("picture"), _("photo"), _("image")),
+            Command("nostr.insert_image", _("Insert from Media Library…"), NOSTR,
+                    "Ctrl+Shift+I", nostr=True, listed_as=_("Insert from media library"),
+                    keywords=(_("picture"), _("photo"), _("image"), _("video"), _("audio"),
+                              _("file")),
                     slash_section=slash_menu.INSERT,
-                    insert_title=_("Image from Media Library…")),
+                    insert_title=_("From Media Library…")),
             triggered=self._on_nostr_insert_image)
         # Mention: "@" at the start of a word does the same while typing.
         self.act_insert_mention = add(
@@ -6581,6 +6612,7 @@ class MainWindow(QMainWindow):
                 lambda kind, e=ed: self._preview_content(e, kind),
                 images=lambda name, e=ed: self._preview_image(e, name),
                 media_names=self._media_name,
+                play=self._play_media_url,
                 dark=self.is_dark_theme,
                 note=binding is not None and binding.inner_kind == INNER_KIND_SHORT_NOTE)
             pane.setVisible(False)
@@ -6669,16 +6701,52 @@ class MainWindow(QMainWindow):
 
     def _preview_image(self, ed, name: str):
         """A picture the preview names: from this app's own media (also by
-        its published address), or beside the document's file. Never from
-        the network."""
+        its published address), beside the document's file, or from the
+        web (_resolve_web_image)."""
         if parse_asset_key(name) is not None:
             return self._asset_manager.resolve_image(name)
+        played = preview_module.player_card_address(name)
+        if played:
+            return self._player_card(played)
         if name.lower().startswith(("http://", "https://")):
-            asset = self._asset_manager.find_by_url(name)
-            if asset is not None:
-                return self._asset_manager.resolve_image(f"{ASSET_SCHEME}:{asset.sha256}")
-            return None
+            return self._resolve_web_image(name)
         return self._resolve_local_image(ed, name)
+
+    def _resolve_web_image(self, url: str):
+        """The picture at a web address, or None while it is on its way.
+
+        One this app uploaded and still holds comes from here, without a
+        download. Any other is fetched once, guarded (RemoteImages), and
+        _on_web_image_ready puts it in place.
+        """
+        asset = self._asset_manager.find_by_url(url)
+        if asset is not None and self._asset_manager.resolve_bytes(asset.key):
+            image = self._asset_manager.resolve_image(asset.key)
+            if image is not None:
+                return image
+        image = self._web_images.image(url)
+        if image is None:
+            self._web_images.request(url, urgent=True)
+        return image
+
+    def _on_web_image_ready(self, url: str) -> None:
+        """A picture named by its web address arrived: it takes the
+        placeholder's place in every open document that shows it, without
+        marking one edited, and in the preview on screen."""
+        image = self._web_images.image(url)
+        if image is None:
+            return
+        for i in range(self.tabs.count()):
+            ed = self._editor_from_widget(self.tabs.widget(i))
+            if ed is None:
+                continue
+            doc = ed.document()
+            if url in set(iter_image_names(doc)):
+                doc.addResource(QTextDocument.ImageResource, QUrl(url), image)
+                doc.markContentsDirty(0, doc.characterCount())
+            pane = getattr(ed, "_preview_pane", None)
+            if pane is not None and pane.isVisible():
+                pane.schedule()
 
     def _show_backup_status(self) -> None:
         """Say, for the current document only, that its backup is not kept,
@@ -7981,8 +8049,9 @@ class MainWindow(QMainWindow):
         image = QTextImageFormat()
         image.setName(asset.key)
         image.setProperty(QTextImageFormat.ImageAltText, asset.alt)
-        image.setWidth(media_card.WIDTH)
-        image.setHeight(media_card.HEIGHT)
+        width, height = media_card.size_for(asset.mime)
+        image.setWidth(width)
+        image.setHeight(height)
         ed.document().addResource(QTextDocument.ImageResource, QUrl(asset.key),
                                   self._media_card(asset))
         caret_there = ed.textCursor().position() == at.position()
@@ -8098,7 +8167,9 @@ class MainWindow(QMainWindow):
         app's."""
         sha = hash_from_url(url)
         asset = self._asset_manager.get(sha) if sha else None
-        return asset.alt if asset is not None and asset.is_media and asset.alt else None
+        if asset is not None and asset.is_media and asset.alt:
+            return asset.alt
+        return (self._media_store.name_of(sha) or None) if sha else None
 
     def _outside_of(self, name: str) -> Optional[paste.Outside]:
         """How one of this app's objects (an asset) goes to another app on
@@ -8134,11 +8205,10 @@ class MainWindow(QMainWindow):
             return self._media_card(asset)
         return self._asset_manager.resolve_image(name)
 
-    def _media_card(self, asset):
-        """The card of an audio or video file, saying how its upload is."""
-        kind = media_files.kind_of(asset.mime)
-        title = (_("Audio · {name}") if kind == media_files.AUDIO
-                 else _("Video · {name}")).format(name=asset.alt or asset.sha256[:12])
+    def _media_card(self, asset, width: int = 0):
+        """The card of an audio or video file (media_card.py): its first
+        frame and how long it plays once found, and how its upload is."""
+        title = asset.alt or asset.sha256[:12]
         state = asset.upload_state
         if asset.is_uploaded:
             words = ""
@@ -8150,7 +8220,143 @@ class MainWindow(QMainWindow):
                      if percent is not None else _("Uploading…"))
         else:
             words = _("Not uploaded yet. Publishing or saving as a draft uploads it.")
-        return media_card.render(title, words, dark=self.is_dark_theme, mime=asset.mime)
+        self._want_poster(self._media_file_of(asset), asset.mime)
+        return media_card.render(title, words, dark=self.is_dark_theme, mime=asset.mime,
+                                 poster=self._poster_frames.get(asset.sha256),
+                                 duration_ms=self._media_lengths.get(asset.sha256, 0),
+                                 width=width)
+
+    @staticmethod
+    def _media_file_of(asset) -> MediaFile:
+        """An asset as the library's record of a file: what the poster
+        queue and the player read it from (the local store first)."""
+        url = _published_address(asset) if asset.is_uploaded else ""
+        return MediaFile(hash=asset.sha256, url=url, mime_type=asset.mime, size=asset.size)
+
+    def _media_file_at(self, url: str):
+        """The audio or video file at ``url``, its type and its name, from
+        what this app knows of it (a document's file, the library's) or
+        from the address itself; None for an address naming no hash."""
+        sha = hash_from_url(url)
+        if sha is None:
+            return None
+        asset = self._asset_manager.find_by_url(url) or self._asset_manager.get(sha)
+        listed = self._media_store.files.get(sha)
+        mime = ((asset.mime if asset is not None else "")
+                or (listed.mime_type if listed is not None else ""))
+        if media_files.kind_of(mime) is None:
+            mime = media_files.type_of(url) or mime
+        size = (asset.size if asset is not None else 0) or (listed.size if listed is not None else 0)
+        name = self._media_name(url) or QUrl(url).fileName() or sha[:12]
+        return MediaFile(hash=sha, url=url, mime_type=mime, size=size), mime, name
+
+    def _media_from_addresses(self, ed) -> None:
+        """Audio and video a reopened article names by its address, alone
+        on a line (where readers show its player), back as the card it was
+        written from: it reads, plays and publishes as it did. Nothing of
+        the document counts as edited for it."""
+        if not self._may_insert_audio_video(ed):
+            return
+        doc = ed.document()
+        modified = doc.isModified()
+        found = []
+        for block in iter_blocks(doc):
+            address = block.text().strip()
+            if (address.lower().startswith(("https://", "http://"))
+                    and not any(c.isspace() for c in address)
+                    and block.textList() is None and not rich_text.is_code_block(block)
+                    and url_safety.is_safe_media_url(address)):
+                media = self._media_file_at(address)
+                if media is not None and media_files.kind_of(media[1]) is not None:
+                    found.append((block.blockNumber(), address, media))
+        # From the end, so each paragraph is still where it was found.
+        for number, address, (media, mime, name) in reversed(found):
+            asset = self._asset_manager.adopt_library_file(
+                sha256=media.hash, remote_url=address, mime=mime, size=media.size,
+                alt=name, from_address=True)
+            if asset is None or not asset.is_media:
+                continue
+            image = QTextImageFormat()
+            image.setName(asset.key)
+            image.setProperty(QTextImageFormat.ImageAltText, asset.alt)
+            width, height = media_card.size_for(asset.mime)
+            image.setWidth(width)
+            image.setHeight(height)
+            cursor = QTextCursor(doc.findBlockByNumber(number))
+            cursor.movePosition(QTextCursor.MoveOperation.EndOfBlock,
+                                QTextCursor.MoveMode.KeepAnchor)
+            cursor.insertImage(image)
+        doc.setModified(modified)
+
+    def _want_poster(self, media: MediaFile, mime: str) -> None:
+        """Find a file's first frame and length, once."""
+        if media.hash in self._posters_asked or media_files.kind_of(mime) is None:
+            return
+        self._posters_asked.add(media.hash)
+        self._media_posters.request(media, mime)
+
+    def _on_media_poster(self, sha: str, pixmap) -> None:
+        self._poster_frames[sha] = pixmap.toImage()
+        self._media_found_out(sha)
+
+    def _on_media_length(self, sha: str, milliseconds: int) -> None:
+        self._media_lengths[sha] = milliseconds
+        self._media_found_out(sha)
+
+    def _media_found_out(self, sha: str) -> None:
+        """A file's first frame or length arrived: its cards show it."""
+        if self._asset_manager.get(sha) is not None:
+            self._refresh_asset_in_documents(sha)
+        self._redraw_previews()
+
+    def _redraw_previews(self) -> None:
+        """Draw the previews on screen again, shortly."""
+        for i in range(self.tabs.count()):
+            ed = self._editor_from_widget(self.tabs.widget(i))
+            pane = getattr(ed, "_preview_pane", None) if ed is not None else None
+            if pane is not None and pane.isVisible():
+                pane.schedule()
+
+    def _player_card(self, url: str):
+        """The card the preview shows for the audio or video at ``url``,
+        as wide as its column."""
+        found = self._media_file_at(url)
+        mime = (found[1] if found else "") or media_files.type_of(url) or "video/mp4"
+        sha = found[0].hash if found else ""
+        if found:
+            self._want_poster(found[0], mime)
+        name = found[2] if found else (QUrl(url).fileName() or url)
+        return media_card.render(name, "", dark=self.is_dark_theme, mime=mime,
+                                 poster=self._poster_frames.get(sha),
+                                 duration_ms=self._media_lengths.get(sha, 0),
+                                 width=preview_module.COLUMN_WIDTH)
+
+    def _on_media_clicked(self, name: str, at, double: bool) -> None:
+        """Audio or video in the text clicked: its play button, or the card
+        double-clicked, plays it."""
+        asset = _media_asset(self._asset_manager, name)
+        if asset is None:
+            return
+        if double or media_card.play_button_rect(asset.mime).contains(at):
+            self._play_media(self._media_file_of(asset), asset.mime,
+                             asset.alt or asset.sha256[:12])
+
+    def _play_media_url(self, url: str) -> None:
+        """A player card in the preview clicked: it plays here; an address
+        that names no file this app can check opens in the browser."""
+        found = self._media_file_at(url)
+        if found is None:
+            if url_safety.is_safe_media_url(url):
+                QDesktopServices.openUrl(QUrl(url))
+            return
+        self._play_media(*found)
+
+    def _play_media(self, media: MediaFile, mime: str, name: str) -> None:
+        if self._media_viewer is None:
+            self._media_viewer = MediaViewer(loader=self._media_image_loader,
+                                             visibility=self._media_visibility,
+                                             is_dark=self.is_dark_theme, parent=self)
+        self._media_viewer.play(media, mime, name)
 
     def _redraw_media_cards(self) -> None:
         """Draw the cards of the audio and video in the open documents
@@ -8417,6 +8623,10 @@ class MainWindow(QMainWindow):
         )
         dialog.bind_private_library(self._private_library)
         dialog.servers_requested.connect(self._open_media_servers)
+        # Insert in Document: into the document in front, at its caret.
+        dialog.set_inserter(
+            lambda media, alt: self._insert_media_at_cursor(media, self.current_editor(), alt),
+            lambda: self.current_editor() is not None)
         self._clear_library_failures()
         # The dialog deletes itself on close; forget it then, so nothing
         # later asks a deleted object whether it is visible.
@@ -8427,9 +8637,8 @@ class MainWindow(QMainWindow):
         dialog.show()
 
     def _on_nostr_insert_image(self):
-        """Open the Media Library in picker mode, restricted to images.
-        On selection, materialize the blob to the local cache and insert
-        it at the current cursor in the active editor."""
+        """Insert from Media Library: the library as a picker, and the
+        file chosen put in at the caret (_insert_media_at_cursor)."""
         active = self._profile_store.default()
         if active is None:
             self._offer_media_account()
@@ -8450,9 +8659,6 @@ class MainWindow(QMainWindow):
             parent=self,
         )
         dialog.bind_private_library(self._private_library)
-        # Pre-select images in the picker - videos / audio can't be
-        # inserted as inline document objects.
-        dialog._filter_combo.setCurrentIndex(1)
         dialog.file_picked.connect(
             lambda media, alt, e=ed: self._insert_media_at_cursor(media, e, alt)
         )
@@ -8488,30 +8694,46 @@ class MainWindow(QMainWindow):
             if picked.reason:
                 self.status.showMessage(picked.reason, 8000)
             return
+        if editor is None:
+            return
+        name = self._library_name(media)
+        mime = (picked.mime or "").lower().split(";", 1)[0].strip()
+        if mime in ("", "application/octet-stream"):
+            # The server could not say what it is: its name or address can.
+            mime = media_files.type_of(name) or media_files.type_of(picked.url) or mime
+        if not self._keeps_pictures(editor):
+            # A plain-text or code file saves its text only: the address,
+            # as a picture dropped there goes in as its path.
+            with editor.undo_step(N_("Paste")):
+                self._insert_url_as_text(editor, picked.url)
+            return
 
-        if media_files.kind_of(picked.mime) is not None \
+        if media_files.kind_of(mime) is not None \
                 and self._may_insert_audio_video(editor):
             # Audio or video already on the servers: the same card as
             # Insert Audio or Video makes, through the same record, with
             # nothing downloaded or sent again. Its card names its own
             # step of Undo (_insert_media_card).
             asset = self._asset_manager.adopt_library_file(
-                sha256=picked.sha256, remote_url=picked.url, mime=picked.mime,
-                size=picked.size, alt=alt_text or self._library_name(media))
+                sha256=picked.sha256, remote_url=picked.url, mime=mime,
+                size=picked.size, alt=alt_text or name)
             if asset is not None:
                 self._insert_media_card(editor, QTextCursor(editor.textCursor()), asset)
                 return
 
+        if not mime.startswith("image/"):
+            # Any other file: a link to it, called by its name, as Mail and
+            # Notes put a file that is not shown in place.
+            with editor.undo_step(N_("Link")):
+                self._insert_file_link(editor, picked.url, name)
+            return
+
         # One step of Undo, called what was asked for.
         with editor.undo_step(N_("Image")):
-            if not (picked.mime or "").startswith("image/"):
-                self._insert_url_as_text(editor, picked.url)
-                return
-
             asset = self._asset_manager.adopt_library_file(
                 sha256=picked.sha256,
                 remote_url=picked.url,
-                mime=picked.mime,
+                mime=mime,
                 size=picked.size,
                 alt=alt_text,
             )
@@ -8523,11 +8745,29 @@ class MainWindow(QMainWindow):
     def _library_name(self, media) -> str:
         """The name a library file goes by: the one it was added with, a
         private file's own, else the day it was added."""
-        name = self._media_store.name_of(media.hash) or self._media_visibility.name_of(media.hash)
+        sha = getattr(media, "hash", "") or ""
+        if not sha:
+            return ""
+        name = self._media_store.name_of(sha) or self._media_visibility.name_of(sha)
         uploaded = int(getattr(media, "uploaded_at_ms", 0) or 0)
         if name or not uploaded:
             return name
         return i18n.format_day(QDateTime.fromMSecsSinceEpoch(uploaded), short_month=True)
+
+    def _insert_file_link(self, editor, url: str, name: str) -> None:
+        """A link to the file at ``url``, its words the file's name (else the
+        address), in a rich document; the address as text in any other."""
+        if not url_safety.is_safe_media_url(url):
+            self.status.showMessage(_("That link cannot be inserted."), 5000)
+            return
+        if self._editor_kind(editor) != "rich":
+            self._insert_url_as_text(editor, url)
+            return
+        cursor = editor.textCursor()
+        rich_text.set_link(cursor, name or url, url)
+        cursor.setPosition(cursor.selectionEnd())
+        editor.setTextCursor(cursor)
+        editor.setCurrentCharFormat(rich_text.without_link(editor.currentCharFormat()))
 
     def _insert_url_as_text(self, editor, url: str) -> None:
         """Fallback for media that cannot be an inline image."""
@@ -8591,6 +8831,10 @@ class MainWindow(QMainWindow):
                 continue
             doc.addResource(QTextDocument.ImageResource, QUrl(key), payload)
             doc.markContentsDirty(0, doc.characterCount())
+            # Its preview drew a frame where the picture was not here yet.
+            pane = getattr(ed, "_preview_pane", None)
+            if pane is not None and pane.isVisible():
+                pane.schedule()
 
     def _on_asset_upload_failed(self, sha: str, code: str) -> None:
         waiting = len(self._asset_manager.failed_assets())
@@ -9927,6 +10171,10 @@ class MainWindow(QMainWindow):
             if ed.nostr_in_use():
                 rich_text.link_references(
                     ed.document(), getattr(ed, "_mention_label", None) or refs.person_name)
+                # Audio and video, kept as addresses, read back as their cards.
+                media = getattr(ed, "_media_from_addresses", None)
+                if media is not None:
+                    media()
             ed._loaded_as_markdown = True
             ed._markdown_source = False
         else:

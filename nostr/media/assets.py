@@ -142,6 +142,10 @@ class DocumentAsset:
     attempts: int = 0
     failure_code: str = ""
     failure_reason: str = ""          # diagnostic, never shown to the user
+    # Taken from an address in a document's text (an article reopened), not
+    # from a file, a paste or the library's picker: nothing has checked
+    # whether it is one of the account's private files.
+    from_address: bool = False
     # Derived from the blob store on demand, never persisted: a machine
     # local path must not travel between installs or into a document.
     local_path: str = ""
@@ -185,6 +189,7 @@ class DocumentAsset:
             "attempts": self.attempts,
             "failure_code": self.failure_code,
             "failure_reason": self.failure_reason,
+            "from_address": self.from_address,
         }
 
 
@@ -289,6 +294,7 @@ def asset_from_record(data: object) -> Optional[DocumentAsset]:
         attempts=_clean_int(data.get("attempts")),
         failure_code=_clean_str(data.get("failure_code")),
         failure_reason=_clean_str(data.get("failure_reason")),
+        from_address=data.get("from_address") is True,
     )
 
 

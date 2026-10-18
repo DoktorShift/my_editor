@@ -545,3 +545,17 @@ def test_plain_document_warns_about_nothing(tmp_path):
 
     for path in ("/tmp/note.txt", "/tmp/note.rtf", "/tmp/note.md"):
         assert win._loses_content_on_save(ed, path) is False
+
+
+def test_a_picture_named_by_a_web_address_is_asked_for_not_left_blank():
+    """Qt's own resolution never fetches: a reopened article's pictures were
+    blank. The editor asks the window, and shows a stand-in meanwhile."""
+    from PySide6.QtCore import QUrl
+    from PySide6.QtGui import QTextDocument
+    from editor import HtmlEditor
+    asked = []
+    ed = HtmlEditor()
+    ed.set_web_image_resolver(lambda url: asked.append(url) or None)
+    image = ed.loadResource(QTextDocument.ImageResource, QUrl("https://cdn.example/a.png"))
+    assert asked == ["https://cdn.example/a.png"]
+    assert image is not None and not image.isNull()

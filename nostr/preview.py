@@ -25,7 +25,9 @@ In both, a ``nostr:`` reference to a person shows as "@Name" (their
 name when it is known, a shortened key otherwise); one to a note or an
 article shows as a labelled link, since cards differ between apps.
 The address of audio or video (by file extension) shows where readers
-put their player: "▶ Audio: name" or "▶ Video: name", a link to it.
+put their player, as a card: a video's first frame with a play button,
+or a strip for audio, its name and how long it plays. Clicking it plays
+the file in the app.
 
 Footnotes in an article show as most long-form readers draw them: raised
 numbers by first use, and the notes numbered at the end (the preview
@@ -38,6 +40,8 @@ images from an injected loader (no loader, no network).
 
 from __future__ import annotations
 
+import base64
+import binascii
 import html
 import re
 from dataclasses import dataclass, field
@@ -45,6 +49,7 @@ from typing import Callable, List, Optional, Sequence
 
 import shiboken6
 from PySide6.QtCore import QDate, QUrl
+from PySide6.QtGui import QDesktopServices
 from PySide6.QtGui import (
     QColor,
     QFont,
@@ -144,6 +149,34 @@ def player_label(url: str, media_names: Optional[MediaNames] = None) -> Optional
     return media_files.link_words(mime, name)
 
 
+# The picture of a player card names the address it plays, in a name of
+# its own (the address in it, base64url), so the card is asked for through
+# the preview's image lookup like any picture, and never fetched.
+PLAYER_SCHEME = "myeditor-player"
+
+
+def player_card_name(url: str) -> str:
+    """The picture name of the player card for the audio or video at ``url``."""
+    return f"{PLAYER_SCHEME}:" + base64.urlsafe_b64encode(url.encode("utf-8")).decode("ascii")
+
+
+def player_card_address(name: str) -> str:
+    """The address a player card's picture name plays, "" for any other name."""
+    prefix = f"{PLAYER_SCHEME}:"
+    if not name.startswith(prefix):
+        return ""
+    try:
+        return base64.urlsafe_b64decode(name[len(prefix):].encode("ascii")).decode("utf-8")
+    except (binascii.Error, UnicodeError, ValueError):
+        return ""
+
+
+def _player_markdown(url: str, label: str) -> str:
+    """The player card, a picture linked to the file, in Markdown."""
+    alt = label.replace("\\", "\\\\").replace("]", "\\]").replace("[", "\\[")
+    return f"[![{alt}]({player_card_name(url)})]({url})"
+
+
 _OWN_LINE_URL = re.compile(r"^(https?://\S+)$", re.MULTILINE)
 
 
@@ -151,10 +184,11 @@ def markdown_for_preview(markdown: str, names: Optional[NameLookup] = None,
                          media_names: Optional[MediaNames] = None) -> str:
     """The article's Markdown with every ``nostr:`` reference turned into
     a link that reads like the apps show it, and audio or video standing
-    on a line of its own shown where readers put its player."""
+    on a line of its own shown as the player readers put there (a card
+    that plays it when clicked)."""
     def player(match) -> str:
         label = player_label(match.group(1), media_names)
-        return f"[{label}]({match.group(1)})" if label else match.group(0)
+        return _player_markdown(match.group(1), label) if label else match.group(0)
 
     def replace(text: str) -> str:
         text = _OWN_LINE_URL.sub(player, text)
@@ -229,7 +263,11 @@ def _style_body(first_block, colors: Palette) -> None:
             fmt.setBottomMargin(0)
             char = _char(size=12.5, color=colors.text, family=SERIF)
         else:
-            fmt.setLineHeight(160, QTextBlockFormat.LineHeightTypes.ProportionalHeight.value)
+            # Text gets room between its lines; a picture or a player alone
+            # in its paragraph does not (160 % of a picture's height would
+            # leave a gap below it larger than half the picture).
+            height = 100 if block.text() == "\ufffc" else 160
+            fmt.setLineHeight(height, QTextBlockFormat.LineHeightTypes.ProportionalHeight.value)
             # List items sit closer together than paragraphs.
             if block.textList() is not None:
                 fmt.setTopMargin(0)
@@ -510,9 +548,18 @@ def note_html(text: str, *, author: str = "", names: Optional[NameLookup] = None
         elif token.startswith("#"):
             pieces.append(f'<span style="color:{colors.link};">{html.escape(token)}</span>')
         else:
-            words = player_label(token, media_names) or token
-            pieces.append(f'<a href="{html.escape(token, quote=True)}" '
-                          f'style="color:{colors.link};">{html.escape(words)}</a>')
+            href = html.escape(token, quote=True)
+            words = player_label(token, media_names)
+            if words:
+                # Where the apps show its player: the card, on a line of its own.
+                pieces.append(f'</p><p><a href="{href}"><img src="'
+                              f'{html.escape(player_card_name(token), quote=True)}" '
+                              f'alt="{html.escape(words, quote=True)}" '
+                              f'width="{COLUMN_WIDTH}"></a></p>'
+                              f'<p style="white-space:pre-wrap; line-height:140%;">')
+            else:
+                pieces.append(f'<a href="{href}" '
+                              f'style="color:{colors.link};">{html.escape(token)}</a>')
         last = match.end()
     pieces.append(html.escape(body[last:]))
     images = "".join(
@@ -576,18 +623,29 @@ class NostrPreview(QTextBrowser):
 
     def __init__(self, *, images: Optional[ImageLookup] = None,
                  media_names: Optional[MediaNames] = None, dark: bool = False,
-                 parent=None) -> None:
+                 play: Optional[Callable[[str], None]] = None, parent=None) -> None:
         super().__init__(parent)
         self._images = images
         self._media_names = media_names
         self._dark = dark
+        self._play = play
         # The text size the shown document is at (scale_text).
         self._scale = 1.0
         text_size().changed.connect(self._follow_text_size)
-        self.setOpenExternalLinks(True)
-        self.setOpenLinks(True)
+        # Links are followed here: audio or video plays in the app (``play``),
+        # any other link opens where the system opens it.
+        self.setOpenExternalLinks(False)
+        self.setOpenLinks(False)
+        self.anchorClicked.connect(self._follow_link)
         self.setAccessibleName(_("Preview"))
         self._apply_colors()
+
+    def _follow_link(self, url: QUrl) -> None:
+        address = url.toString()
+        if self._play is not None and player_label(address, None):
+            self._play(address)
+        else:
+            QDesktopServices.openUrl(url)
 
     def _apply_colors(self) -> None:
         colors = palette(self._dark)
