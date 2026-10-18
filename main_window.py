@@ -779,10 +779,15 @@ class MainWindow(QMainWindow):
         # in the text and its preview when they arrive.
         self._web_images = RemoteImages(fetcher=BlobFetcher(self), parent=self)
         self._web_images.ready.connect(self._on_web_image_ready)
-        # How far each audio or video file's upload has got (sha256 ->
-        # percent), shown on its card in the text.
-        self._media_progress: dict = {}
-        self._media_store.upload_progress.connect(self._on_media_upload_progress)
+        # Audio and video uploading from a document show how far they have
+        # got on their cards (the upload's own indicator), redrawn while
+        # any is on its way so the bar keeps moving.
+        self._card_ticker = QTimer(self)
+        self._card_ticker.setInterval(50)
+        self._card_ticker.timeout.connect(self._redraw_uploading_cards)
+        self._media_store.upload_started.connect(self._on_media_upload_moved)
+        self._media_store.upload_status.connect(self._on_media_upload_moved)
+        self._media_store.upload_progress.connect(self._on_media_upload_moved)
         # A file added in the Media Library is the store's job, not the
         # window's: a failure after that window closed is said here.
         self._media_store.upload_failed.connect(self._on_library_upload_failed)
@@ -3037,6 +3042,7 @@ class MainWindow(QMainWindow):
         # already owns, so there is one cache, one URL policy and one
         # place where an image request can be made.
         self._drafts_panel.set_preview_image_loader(self._media_image_loader)
+        self._drafts_panel.set_preview_pictures(self._text_picture, self._web_images.ready)
         self._drafts_panel.set_active_profile(self._profile_store.default())
         # The panel's outbound actions all route back through the host.
         self._drafts_panel.open_draft.connect(self._on_panel_open_draft)
@@ -3066,6 +3072,7 @@ class MainWindow(QMainWindow):
             is_dark=self.is_dark_theme, page_check=self._page_check.first_found,
             reader_choice=lambda: self.web_reader)
         self._published_view.set_preview_image_loader(self._media_image_loader)
+        self._published_view.set_preview_pictures(self._text_picture, self._web_images.ready)
         add_published_view(self._drafts_panel, self._published_view)
         self._drafts_panel.view_changed.connect(self._follow_account_in_published)
         self._drafts_panel.view_changed.connect(self._update_refresh_command)
@@ -6712,6 +6719,11 @@ class MainWindow(QMainWindow):
             return self._resolve_web_image(name)
         return self._resolve_local_image(ed, name)
 
+    def _text_picture(self, name: str):
+        """A picture in a draft's or a post's text, shown in its preview:
+        as the editor's Preview finds it, with no file beside it."""
+        return self._preview_image(None, name)
+
     def _resolve_web_image(self, url: str):
         """The picture at a web address, or None while it is on its way.
 
@@ -8066,8 +8078,7 @@ class MainWindow(QMainWindow):
         """The audio and video in ``editors`` still on its way to the media
         servers."""
         return [asset for ed in editors for asset in self._media_not_uploaded(ed.document())
-                if asset.upload_state in (AssetState.QUEUED, AssetState.SIGNING,
-                                          AssetState.UPLOADING)]
+                if asset.upload_state in _UPLOADING]
 
     def _library_uploads(self) -> list:
         """Files added in the Media Library still on their way, as the
@@ -8210,21 +8221,45 @@ class MainWindow(QMainWindow):
         frame and how long it plays once found, and how its upload is."""
         title = asset.alt or asset.sha256[:12]
         state = asset.upload_state
+        uploading = state in _UPLOADING
+        fraction = None
         if asset.is_uploaded:
             words = ""
         elif state is AssetState.FAILED:
             words = _("Couldn’t upload. Publishing or saving as a draft tries again.")
-        elif state in (AssetState.QUEUED, AssetState.SIGNING, AssetState.UPLOADING):
-            percent = self._media_progress.get(asset.sha256)
-            words = (_("Uploading… {percent} %").format(percent=_number(percent))
-                     if percent is not None else _("Uploading…"))
+        elif uploading:
+            meter = self._upload_meter(asset)
+            words = meter.words() if meter is not None else _("Preparing…")
+            fraction = meter.fraction() if meter is not None else None
         else:
             words = _("Not uploaded yet. Publishing or saving as a draft uploads it.")
         self._want_poster(self._media_file_of(asset), asset.mime)
         return media_card.render(title, words, dark=self.is_dark_theme, mime=asset.mime,
                                  poster=self._poster_frames.get(asset.sha256),
                                  duration_ms=self._media_lengths.get(asset.sha256, 0),
-                                 width=width)
+                                 width=width, uploading=uploading, fraction=fraction)
+
+    def _upload_meter(self, asset):
+        """The indicator of ``asset``'s upload while it runs, or None."""
+        job = self._media_store.upload_job(asset.key)
+        return job.meter if job is not None else None
+
+    def _on_media_upload_moved(self, name: str, *_args) -> None:
+        """An upload started or moved on: if it is audio or video of a
+        document, its card shows it, and keeps moving until it lands."""
+        asset = _media_asset(self._asset_manager, name)
+        if asset is None:
+            return
+        self._refresh_asset_in_documents(asset.sha256)
+        if not self._card_ticker.isActive():
+            self._card_ticker.start()
+
+    def _redraw_uploading_cards(self) -> None:
+        uploading = {asset.sha256 for asset in self._uploading(*self._all_editors())}
+        if not uploading:
+            self._card_ticker.stop()
+        for sha in uploading:
+            self._refresh_asset_in_documents(sha)
 
     @staticmethod
     def _media_file_of(asset) -> MediaFile:
@@ -8443,16 +8478,6 @@ class MainWindow(QMainWindow):
                 fits = 0
                 self._library_open.setMaximumWidth(0)
             label.setMaximumWidth(fits)
-
-    def _on_media_upload_progress(self, name: str, sent: int, total: int) -> None:
-        sha = parse_asset_key(name)
-        asset = self._asset_manager.get(sha) if sha else None
-        if asset is None or not asset.is_media or total <= 0:
-            return
-        percent = min(100, sent * 100 // total)
-        if self._media_progress.get(sha) != percent:
-            self._media_progress[sha] = percent
-            self._refresh_asset_in_documents(sha)
 
     # -- secret keys: never pasted where Nostr is written ---------------------
     # (nor published: nostr/ui/secret_key_check.py, at the publish sheets)
@@ -10264,6 +10289,10 @@ def _details_saved_as(details: Optional[ArticleDetails], choice: StashChoice) ->
         base = base.with_changes(published_at=None)
     return base.with_changes(identifier=choice.identifier, title=choice.title,
                              summary=choice.summary)
+
+
+# The states of an asset on its way to the media servers.
+_UPLOADING = (AssetState.QUEUED, AssetState.SIGNING, AssetState.UPLOADING)
 
 
 def _media_asset(assets, name: str):

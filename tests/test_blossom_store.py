@@ -173,6 +173,22 @@ def test_a_signer_refusal_is_said_plainly(tmp_path):
     assert ctx.failure_codes == [("a.png", ERROR_CODES.SIGNER_REJECTED)]
 
 
+@pytest.mark.parametrize("reason", [
+    "timed out waiting for signer",
+    "could not deliver request to any relay (wss://relay.example: rate-limited)",
+    "not connected",
+])
+def test_a_signer_that_never_answered_is_not_said_to_have_refused(tmp_path, reason):
+    """A signer app asleep, or a relay that would not carry the request,
+    refused nothing: the person is sent to open the app, not to look for a
+    refusal that never happened."""
+    ctx = make_store(tmp_path, signer=FakeSigner(failure=reason))
+    ctx.store.upload_bytes(BODY, name="a.png")
+    assert ctx.verbs() == []
+    assert ctx.failure_codes == [("a.png", ERROR_CODES.SIGNER_SILENT)]
+    assert ctx.failures[0][1] == friendly_message(ERROR_CODES.SIGNER_SILENT)
+
+
 def test_delete_targets_every_server_the_blob_lives_on(tmp_path):
     ctx = make_store(tmp_path, responder=FakeBlossomServer(SERVER))
     ctx.store.upload_bytes(BODY, name="a.png")
@@ -374,6 +390,32 @@ def test_a_413_does_fail_over(tmp_path):
     assert ctx.verbs() == ["put", "put"]
     ctx.nam.settle_one()
     assert ctx.failures == []
+
+
+def test_a_server_that_keeps_a_look_alike_hands_the_file_to_the_next(tmp_path):
+    """nostr.download answers 409 with X-Identical-Media when it holds a
+    picture that looks the same: not a wrong file, a refusal that another
+    server does not share."""
+    ctx = make_store(
+        tmp_path, servers=(SERVER, MIRROR),
+        replies=[error_reply(409, reason="An identical image already exists on this server.",
+                             headers={b"X-Identical-Media": b"f" * 64}),
+                 json_reply(descriptor(server=MIRROR), status=201)],
+    )
+    ctx.store.upload_bytes(BODY, name="a.png")
+    ctx.nam.settle_one()
+    assert ctx.verbs() == ["put", "put"]
+    ctx.nam.settle_one()
+    assert ctx.failures == []
+    assert ctx.mirror_failures == [("a.png", "good.example", ERROR_CODES.LOOKALIKE_REFUSED)]
+
+
+def test_a_409_without_a_look_alike_is_still_a_wrong_file(tmp_path):
+    ctx = make_store(tmp_path, servers=(SERVER, MIRROR), replies=[error_reply(409)])
+    ctx.store.upload_bytes(BODY, name="a.png")
+    ctx.nam.settle_one()
+    assert ctx.verbs() == ["put"]
+    assert ctx.failure_codes == [("a.png", ERROR_CODES.HASH_MISMATCH)]
 
 
 def test_failover_stops_at_the_attempt_cap(tmp_path):

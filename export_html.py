@@ -15,7 +15,11 @@ semantic, fully self-contained HTML:
 - colors stay inline styles (Qt ignores <style> blocks on setHtml, so
   inline is the only representation that survives reopening the file),
 - images are embedded as base64 data URIs so a shared file carries its
-  media with it; the original upload URL rides along in data-source-url.
+  media with it; the original upload URL rides along in data-source-url,
+- audio and video become the browser's own players (<audio>, <video>),
+  their bytes embedded the same way up to MEDIA_EMBED_LIMIT and played
+  from the media server beyond it; inside each, a link to the file, which
+  is also what the editor reads back when the page is opened.
 
 A document can name any path on the machine, so image bytes are read
 only through an ImageRootPolicy built from the caller's image_roots.
@@ -72,6 +76,11 @@ _OBJ = "\ufffc"
 # Qt uses U+2028 for Shift+Enter line breaks inside a block.
 _LINE_SEP = "\u2028"
 
+# Audio and video up to this size travel inside the page, as its pictures
+# do; a larger file plays from its media server (a page of hundreds of
+# megabytes opens slowly in every browser and fills every mailbox).
+MEDIA_EMBED_LIMIT = 64 * 1024 * 1024
+
 
 def image_data_uri(data: bytes) -> str | None:
     """Base64 data URI for image bytes, or None when unrecognized."""
@@ -118,7 +127,9 @@ def _head_css() -> str:
     ul {{ margin: 0; padding-left: 1.5em; }}
     ul ul {{ list-style-type: circle; }}
     ul ul ul {{ list-style-type: square; }}
-    img {{ max-width: 100%; height: auto; }}
+    img, video {{ max-width: 100%; height: auto; }}
+    audio, video {{ display: block; margin: 0.5rem 0; }}
+    audio {{ width: 100%; }}
     li.checked, li.unchecked {{ list-style: none; }}
     li.checked::before {{ content: "\\2611\\00a0"; }}
     li.unchecked::before {{ content: "\\2610\\00a0"; }}
@@ -143,18 +154,8 @@ def _render_image(img_fmt, source_url_for, policy, asset_resolver) -> str:
     source_url = source_url_for(name) if source_url_for else None
     data = None
     resolved = asset_resolver(name) if asset_resolver else None
-    kind = media_files.kind_of(str(getattr(resolved, "mime", "") or ""))
-    if kind is not None:
-        # Audio or video: a link to it once it is on a media server, where a
-        # reader of the page finds it; nothing while it is not (never a
-        # picture of it, never a placeholder).
-        mime = str(getattr(resolved, "mime", "") or "")
-        remote = str(getattr(resolved, "remote_url", "") or "")
-        if not remote:
-            return ""
-        remote = media_files.address_with_extension(remote, mime)
-        words = media_files.link_words(mime, alt or remote.rsplit("/", 1)[-1])
-        return f'<a href="{html.escape(remote, quote=True)}">{html.escape(words)}</a>'
+    if media_files.kind_of(str(getattr(resolved, "mime", "") or "")) is not None:
+        return _render_media(alt, resolved)
 
     if resolved is not None and getattr(resolved, "data", b""):
         data = resolved.data
@@ -181,6 +182,32 @@ def _render_image(img_fmt, source_url_for, policy, asset_resolver) -> str:
         # nothing even though it breaks strict self-containment.
         return f'<img src="{html.escape(source_url, quote=True)}"{attrs}>'
     return f"<em>{html.escape(_('[image unavailable]'))}</em>"
+
+
+def _render_media(alt: str, resolved) -> str:
+    """Audio or video as the browser's player: its bytes inside the page
+    when they are here and not too large, else its media server's address;
+    nothing when neither is known (never a picture of it, never a
+    placeholder). The link inside is for a reader without a player, and
+    for the editor reopening the page."""
+    mime = str(getattr(resolved, "mime", "") or "")
+    data = bytes(getattr(resolved, "data", b"") or b"")
+    remote = str(getattr(resolved, "remote_url", "") or "")
+    if remote:
+        remote = media_files.address_with_extension(remote, mime)
+    if data and len(data) <= MEDIA_EMBED_LIMIT:
+        src = f"data:{mime};base64,{base64.b64encode(data).decode('ascii')}"
+    else:
+        src = remote
+    if not src:
+        return ""
+    tag = "video" if media_files.kind_of(mime) == media_files.VIDEO else "audio"
+    name = alt or (remote.rsplit("/", 1)[-1] if remote else "")
+    words = html.escape(media_files.link_words(mime, name))
+    fallback = f'<a href="{html.escape(remote, quote=True)}">{words}</a>' if remote else words
+    source = f' data-source-url="{html.escape(remote, quote=True)}"' if remote else ""
+    return (f'<{tag} controls preload="metadata" src="{html.escape(src, quote=True)}"'
+            f' title="{html.escape(name, quote=True)}"{source}>{fallback}</{tag}>')
 
 
 def _render_text_run(text: str, fmt: QTextCharFormat, heading: bool = False) -> str:

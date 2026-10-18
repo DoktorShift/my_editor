@@ -157,7 +157,7 @@ def test_the_header_is_nostr_plus_standard_base64_of_compact_json():
 
 
 def test_the_header_is_standard_base64_not_base64url():
-    # Blossom uses base64url without padding; this server decodes the
+    # Blossom uses base64url (with its padding); this server decodes the
     # standard alphabet. Content chosen so the two encodings differ.
     event = {"content": "ÿþý?>>", "kind": 27235, "tags": []}
     value = authorization_header_value(event)[len(b"Nostr "):]

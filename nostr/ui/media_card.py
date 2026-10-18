@@ -17,10 +17,15 @@ its name, how long it plays and a waveform. The play button plays it in
 the app's player (``play_button_rect`` says where the button is, for a
 click on it). Both keep a little room above and below them, as a
 picture's paragraph does.
+
+While it uploads, a thin bar along its bottom edge shows how far
+(upload_progress.py): moving to and fro while nothing can be measured,
+then filling, the one shape throughout.
 """
 
 from __future__ import annotations
 
+import time
 from typing import Optional, Tuple
 
 from PySide6.QtCore import QPointF, QRectF, Qt
@@ -42,6 +47,11 @@ _PLAY = 56          # the play button on a video, across
 _AUDIO_PLAY = 34    # the play button on audio, across
 # A waveform's bars, as parts of the glyph's height.
 _WAVE = (0.35, 0.7, 1.0, 0.55, 0.85, 0.4)
+# The upload's bar: its height, and while indeterminate, the share of the
+# track its moving part takes and how long it takes to cross and back.
+_BAR = 3
+_BAR_SEGMENT = 0.3
+_BAR_SWEEP_SECONDS = 1.6
 
 
 def size_for(mime: str, width: int = 0) -> Tuple[int, int]:
@@ -72,11 +82,13 @@ def duration_text(milliseconds: int) -> str:
 
 
 def render(title: str, state: str, *, dark: bool, mime: str,
-           poster: Optional[QImage] = None, duration_ms: int = 0, width: int = 0) -> QImage:
+           poster: Optional[QImage] = None, duration_ms: int = 0, width: int = 0,
+           uploading: bool = False, fraction: Optional[float] = None) -> QImage:
     """The card ``width`` wide (its own width in the text when 0): what
     ``mime`` is, ``title`` ("interview.mp3"), how long it plays and, when
     there is one, ``state`` ("Uploading… 42 %"). A video shows ``poster``,
-    its first frame, when it has been found."""
+    its first frame, when it has been found. ``uploading``: the upload's
+    bar, filled to ``fraction``, or moving while that is None."""
     w, h = size_for(mime, width)
     image = QImage(w * _SCALE, h * _SCALE, QImage.Format.Format_ARGB32_Premultiplied)
     image.setDevicePixelRatio(_SCALE)
@@ -86,10 +98,35 @@ def render(title: str, state: str, *, dark: bool, mime: str,
     painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
     if media_files.kind_of(mime) == media_files.VIDEO:
         _video(painter, w, h, title, state, poster, duration_ms, dark)
+        track, ink = QColor(255, 255, 255, 60), QColor(255, 255, 255, 235)
     else:
         _audio(painter, w, h, title, state, duration_ms, dark)
+        track = QColor(DARK_BORDER if dark else LIGHT_BORDER)
+        ink = QColor(DARK_FG if dark else LIGHT_FG)
+    if uploading:
+        bar = QRectF(14, h - MARGIN - _BAR - 5, w - 28, _BAR)
+        _upload_bar(painter, bar, fraction, track, ink)
     painter.end()
     return image
+
+
+def _upload_bar(painter: QPainter, bar: QRectF, fraction: Optional[float],
+                track: QColor, ink: QColor) -> None:
+    painter.setPen(Qt.PenStyle.NoPen)
+    painter.setBrush(track)
+    painter.drawRoundedRect(bar, _BAR / 2, _BAR / 2)
+    if fraction is None:
+        # To and fro across the track, as an indeterminate bar does.
+        phase = (time.monotonic() % _BAR_SWEEP_SECONDS) / _BAR_SWEEP_SECONDS
+        travel = 1 - abs(2 * phase - 1)
+        width = bar.width() * _BAR_SEGMENT
+        filled = QRectF(bar.left() + (bar.width() - width) * travel, bar.top(), width,
+                        bar.height())
+    else:
+        filled = QRectF(bar.left(), bar.top(), bar.width() * max(0.0, min(1.0, fraction)),
+                        bar.height())
+    painter.setBrush(ink)
+    painter.drawRoundedRect(filled, _BAR / 2, _BAR / 2)
 
 
 def _video(painter: QPainter, w: int, h: int, title: str, state: str,
@@ -113,7 +150,7 @@ def _video(painter: QPainter, w: int, h: int, title: str, state: str,
         painter.fillRect(frame, glow)
 
     # A scrim along the bottom, so the name reads on any frame.
-    scrim_height = 56 if state else 44
+    scrim_height = 62 if state else 44
     scrim = QRectF(frame.left(), frame.bottom() - scrim_height, frame.width(), scrim_height)
     shade = QLinearGradient(scrim.topLeft(), scrim.bottomLeft())
     shade.setColorAt(0, QColor(0, 0, 0, 0))
@@ -131,7 +168,7 @@ def _video(painter: QPainter, w: int, h: int, title: str, state: str,
     left, right = frame.left() + 14, frame.right() - 14
     length = duration_text(duration_ms)
     length_width = QFontMetrics(plain).horizontalAdvance(length) + 12 if length else 0
-    baseline = frame.bottom() - (30 if state else 14)
+    baseline = frame.bottom() - (36 if state else 14)
     painter.setFont(bold)
     painter.setPen(white)
     painter.drawText(QPointF(left, baseline), QFontMetrics(bold).elidedText(
@@ -143,7 +180,7 @@ def _video(painter: QPainter, w: int, h: int, title: str, state: str,
     if state:
         painter.setFont(plain)
         painter.setPen(soft)
-        painter.drawText(QPointF(left, frame.bottom() - 12), QFontMetrics(plain).elidedText(
+        painter.drawText(QPointF(left, frame.bottom() - 18), QFontMetrics(plain).elidedText(
             state, Qt.TextElideMode.ElideRight, int(right - left)))
     painter.setClipping(False)
 

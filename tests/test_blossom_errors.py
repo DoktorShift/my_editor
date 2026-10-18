@@ -33,7 +33,7 @@ def test_every_code_is_its_own_name():
 
 
 def test_every_code_has_friendly_copy():
-    assert len(ALL_CODES) == 21
+    assert len(ALL_CODES) == 23
     for code in ALL_CODES:
         message = friendly_message(code)
         assert message

@@ -1707,6 +1707,12 @@ class DraftsPanel(QFrame):
         """
         self._preview.set_image_loader(loader)
 
+    def set_preview_pictures(self, lookup, arrived=None) -> None:
+        """Where the full preview finds the pictures in a draft's text, and
+        the signal naming one that arrived (PreviewController.set_pictures);
+        None, the default, shows frames and fetches nothing."""
+        self._preview.set_pictures(lookup, arrived)
+
     # -- preview host: the four questions the controller asks --------------
 
     def preview_record(self, identifier: str) -> Optional[DraftRecord]:

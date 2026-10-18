@@ -70,20 +70,22 @@ SIGNED_AUTH_EVENT = auth_event()
 def decode_auth_header(value) -> dict:
     """Decode an ``Authorization: Nostr <base64url>`` header value.
 
-    Strict about the alphabet on purpose: this is the assertion that
-    BUD-11's "Base64 URL-safe without padding" is what actually went out
-    on the wire, not merely what a lenient decoder would accept.
+    Strict the way the servers people use are: base64url with its
+    padding. nostr.download and blossom.primal.net refuse a token without
+    it (400 "Invalid auth string"), which is how every upload there once
+    failed while a decoder that forgave it passed.
     """
     if isinstance(value, (bytes, bytearray)):
         value = bytes(value).decode("ascii")
     if not value.startswith("Nostr "):
         raise ValueError("authorization scheme is not Nostr")
     payload = value[len("Nostr "):]
-    for banned in ("=", "+", "/"):
+    for banned in ("+", "/"):
         if banned in payload:
-            raise ValueError(f"token is not base64url without padding: {banned!r}")
-    padded = payload + "=" * (-len(payload) % 4)
-    return json.loads(base64.urlsafe_b64decode(padded).decode("utf-8"))
+            raise ValueError(f"token is not base64url: {banned!r}")
+    if len(payload) % 4:
+        raise ValueError("token has lost its padding")
+    return json.loads(base64.urlsafe_b64decode(payload).decode("utf-8"))
 
 
 def _header_name(name) -> str:
@@ -453,8 +455,8 @@ class FakeBlossomServer:
     strict, because the point of the protocol work is that a spec-
     compliant counterparty accepts what this app sends:
 
-    - the Authorization header MUST be base64url without padding
-      (BUD-11), decoded by :func:`decode_auth_header`;
+    - the Authorization header MUST be base64url with its padding, as
+      the deployed servers read it, decoded by :func:`decode_auth_header`;
     - ``created_at`` MUST be in the past and ``expiration`` in the
       future (BUD-11 validation rules 2 and 3);
     - a ``server`` tag, when present, MUST name this server's bare

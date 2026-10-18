@@ -185,7 +185,6 @@ r["sent"] = sent
 w._upload_into(ed, path)                 # the same file again: one upload
 r["sent_twice"] = len(sent)
 ed.undo()
-w._media_progress[sha] = 42
 w._refresh_asset_in_documents(sha)
 r["card_words"] = w._media_card(w._asset_manager.get(sha)).isNull() is False
 # Typing in the media paragraph goes into a new one after it.
@@ -416,19 +415,45 @@ def test_a_document_saved_while_its_audio_uploads_is_edited_again_when_it_is_don
     assert r["modified after second save"] is False
 
 
-def test_an_html_file_links_to_the_uploaded_file_with_its_extension():
-    import types
+def _exported(asset, alt="song.mp3"):
     from PySide6.QtGui import QTextDocument, QTextImageFormat
     from export_html import document_to_html
     doc = QTextDocument()
-    cursor = doc.rootFrame().firstCursorPosition()
     image = QTextImageFormat()
     image.setName(f"myeditor-asset:{SHA}")
-    image.setProperty(QTextImageFormat.ImageAltText, "song.mp3")
-    cursor.insertImage(image)
-    uploaded = types.SimpleNamespace(mime="audio/mpeg", remote_url=URL, data=b"")
-    out = document_to_html(doc, asset_resolver=lambda name: uploaded)
-    assert f'<a href="{URL}.mp3">▶ Audio: song.mp3</a>' in out
+    image.setProperty(QTextImageFormat.ImageAltText, alt)
+    doc.rootFrame().firstCursorPosition().insertImage(image)
+    return document_to_html(doc, asset_resolver=lambda name: asset)
+
+
+def test_an_html_file_plays_the_audio_it_carries():
+    """Self-contained, as its pictures are: the page plays the file from
+    its own bytes, and links to the uploaded file for a reader without a
+    player (and for the editor reopening the page)."""
+    import base64
+    import types
+    out = _exported(types.SimpleNamespace(mime="audio/mpeg", remote_url=URL, data=BODY))
+    assert '<audio controls preload="metadata"' in out
+    assert f'src="data:audio/mpeg;base64,{base64.b64encode(BODY).decode()}"' in out
+    assert f'<a href="{URL}.mp3">▶ Audio: song.mp3</a></audio>' in out
+
+
+def test_a_video_too_large_to_carry_plays_from_its_media_server(monkeypatch):
+    import types
+    import export_html
+    monkeypatch.setattr(export_html, "MEDIA_EMBED_LIMIT", len(BODY) - 1)
+    out = _exported(types.SimpleNamespace(mime="video/mp4", remote_url=URL, data=BODY),
+                    alt="clip.mp4")
+    assert f'<video controls preload="metadata" src="{URL}.mp4"' in out
+    assert "base64" not in out
+
+
+def test_audio_not_uploaded_yet_still_plays_from_the_page_and_none_at_all_is_left_out():
+    import types
+    pending = _exported(types.SimpleNamespace(mime="audio/mpeg", remote_url="", data=BODY))
+    assert "<audio" in pending and "data:audio/mpeg;base64," in pending and "<a " not in pending
+    gone = _exported(types.SimpleNamespace(mime="audio/mpeg", remote_url="", data=b""))
+    assert "<audio" not in gone and "song.mp3" not in gone
 
 
 @pytest.mark.parametrize("uploaded", [True, False])

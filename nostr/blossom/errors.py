@@ -24,6 +24,8 @@ import re
 
 from i18n import N_, _
 
+from ..bunker import is_signer_answer
+
 _log = logging.getLogger(__name__)
 
 
@@ -39,6 +41,9 @@ class ERROR_CODES:
 
     # Upload lifecycle.
     SIGNER_REJECTED = "SIGNER_REJECTED"
+    # The signer app was never reached or never answered (asleep, closed,
+    # a relay that would not carry the request): it refused nothing.
+    SIGNER_SILENT = "SIGNER_SILENT"
     UPLOAD_FAILED = "UPLOAD_FAILED"
     NETWORK_UNAVAILABLE = "NETWORK_UNAVAILABLE"
     SIGNER_IDENTITY_MISMATCH = "SIGNER_IDENTITY_MISMATCH"
@@ -59,6 +64,10 @@ class ERROR_CODES:
     RATE_LIMITED = "RATE_LIMITED"
     AUTH_REJECTED = "AUTH_REJECTED"
     UNSUPPORTED_TYPE = "UNSUPPORTED_TYPE"
+    # A 409 that names a file the server already holds (X-Identical-Media):
+    # it keeps one copy of a picture that looks the same, other bytes or
+    # not (nostr.download). Another server takes it.
+    LOOKALIKE_REFUSED = "LOOKALIKE_REFUSED"
     # No server could list the person's files, for a reason of its own
     # (not the connection, not the signer, not a refusal of the account).
     LIST_FAILED = "LIST_FAILED"
@@ -83,6 +92,9 @@ _FRIENDLY = {
     ERROR_CODES.HOST_MISMATCH: _(_TRY_AGAIN),
     ERROR_CODES.SIGNER_REJECTED: _(
         "Your signer app didn’t approve the request. Check it and try again."
+    ),
+    ERROR_CODES.SIGNER_SILENT: _(
+        "Your signer app didn’t answer. Open it, make sure it’s running, and try again."
     ),
     ERROR_CODES.UPLOAD_FAILED: _(_TRY_AGAIN),
     ERROR_CODES.NETWORK_UNAVAILABLE: _(
@@ -113,6 +125,10 @@ _FRIENDLY = {
     ERROR_CODES.UNSUPPORTED_TYPE: _(
         "This media server doesn’t take this kind of file. Choose another one in Media Servers."
     ),
+    ERROR_CODES.LOOKALIKE_REFUSED: _(
+        "Your media server keeps one copy of a picture like this. Add another server "
+        "in Media Servers."
+    ),
     ERROR_CODES.LIST_FAILED: _(
         "Your media servers didn’t list your files. Try again later."
     ),
@@ -123,6 +139,14 @@ _FALLBACK = _("Something went wrong with that media request. Nothing was lost.")
 # The signer's own words, for the importer's record of what it copied.
 # The person reads the code's sentence above instead.
 _SIGNER_REJECTED = N_("Your signer app declined the request to the media server: {reason}")
+
+
+def signing_failure_code(reason) -> str:
+    """The code for a signature that did not come: SIGNER_REJECTED when the
+    signer app itself said no, SIGNER_SILENT when it was never reached or
+    never answered, so the sentence sends the person where the problem is."""
+    return ERROR_CODES.SIGNER_REJECTED if is_signer_answer(str(reason or "")) \
+        else ERROR_CODES.SIGNER_SILENT
 
 
 def signer_rejected(reason) -> str:

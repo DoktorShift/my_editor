@@ -34,6 +34,7 @@ from __future__ import annotations
 import os
 import re
 import sys
+import types
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -50,6 +51,7 @@ from PySide6.QtWidgets import QApplication, QMenu  # noqa: E402
 import alerts  # noqa: E402
 import nostr.ui.media_library_dialog as dialog_module  # noqa: E402
 from nostr.blossom.store import MediaFile, ServerListing  # noqa: E402
+from nostr.blossom.upload_progress import UploadProgress  # noqa: E402
 from nostr.media.filecrypto import encrypt_file  # noqa: E402
 from nostr.media.media_visibility import MediaVisibility  # noqa: E402
 from nostr.media.visibility import PrivateBlob, PublicBlob, PublicLedger  # noqa: E402
@@ -107,6 +109,7 @@ class FakeStore(QObject):
         super().__init__()
         self.files = {m.hash: m for m in records}
         self.names = dict(names or {})
+        self.jobs = {}
         self.quota, self.used, self.listing_ok = quota, used, listing_ok
         self.calls = []
         self.refuse_on_add = ""
@@ -149,7 +152,7 @@ class FakeStore(QObject):
         return label
 
     def upload_job(self, name):
-        return None
+        return getattr(self, "jobs", {}).get(name)
 
     def added_uploads(self):
         return list(getattr(self, "added", []))
@@ -449,9 +452,15 @@ def test_an_added_file_is_a_tile_with_its_own_progress(tmp_path, monkeypatch):
     world.dialog._add_paths([str(path)])
     tile = world.model.tile("Beach day.png")
     assert (tile.state, tile.name) == (WAITING, "Beach day.png")
+    assert tile.meter is None and tile.detail == "Preparing…"     # nothing measured yet
+    meter = UploadProgress()
+    world.store.jobs["Beach day.png"] = types.SimpleNamespace(meter=meter)
     world.store.upload_started.emit("Beach day.png")
+    meter.sending(420, 1000)
     world.store.upload_progress.emit("Beach day.png", 420, 1000)
-    assert (tile.state, tile.progress) == (SENDING, 42)
+    assert (tile.state, tile.meter) == (SENDING, meter)            # the upload's own indicator
+    assert tile.detail.startswith("Uploading…")
+    assert world.dialog._ticker.isActive()                         # it keeps moving
     assert tile.accessible_text() == "Beach day.png, image, uploading"
 
     landed = media(9)
@@ -1010,12 +1019,15 @@ def test_a_library_opened_later_shows_the_files_still_being_added(tmp_path, monk
     reason = "Couldn’t reach your media server. Check your internet connection."
     store.added = [AddedUpload(name="Holiday.png", mime="image/png", state="failed",
                                error=reason, path=str(path)),
-                   AddedUpload(name="Clip.mp4", mime="video/mp4", state="sending", progress=40)]
+                   AddedUpload(name="Clip.mp4", mime="video/mp4", state="sending")]
+    meter = UploadProgress()
+    meter.sending(400, 1000)
+    store.jobs["Clip.mp4"] = types.SimpleNamespace(meter=meter)
     world = build(tmp_path, monkeypatch, store)
     failed, sending = world.model.tile("Holiday.png"), world.model.tile("Clip.mp4")
     assert (failed.state, failed.detail) == (FAILED, reason)
     assert failed.pixmap is not None
-    assert (sending.state, sending.progress) == (SENDING, 40)
+    assert (sending.state, sending.meter) == (SENDING, meter)      # its live indicator
     world.grid.retry_requested.emit("Holiday.png")
     assert ("retry", "Holiday.png") in store.calls
 
