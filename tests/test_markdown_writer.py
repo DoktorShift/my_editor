@@ -459,6 +459,10 @@ from markdown_writer import holds_faithfully  # noqa: E402
     "Setext heading\n==============\n\nText.\n",
     # Footnotes, kept as their text (D5).
     "Footnote[^1] and[^source].\n\n[^1]: The note.\n\n[^source]: https://x.example\n",
+    # Pictures with alt text: an article or draft with one opens formatted,
+    # the picture in its place, not as its Markdown text.
+    "Before\n\n![Sunset](https://blossom.example/" + "a" * 64 + ".png)\n\nAfter\n",
+    "A picture ![Map](pictures/map.png) in a line.\n",
 ])
 def test_markdown_the_editor_can_hold(source):
     assert holds_faithfully(source)

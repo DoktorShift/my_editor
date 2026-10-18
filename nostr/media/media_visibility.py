@@ -33,7 +33,7 @@ it: the grid marks it, and the publish gate refuses it.
 
 from __future__ import annotations
 
-from typing import Final, Iterable, List, Optional, Protocol, Sequence
+from typing import Callable, Final, Iterable, List, Optional, Protocol, Sequence
 
 
 from .filecrypto import FileCryptoError, decrypt_file
@@ -90,9 +90,15 @@ class MediaVisibility:
         *,
         library: Optional[PrivateFiles] = None,
         ledger: Optional[PublicRecord] = None,
+        known_public: Optional[Callable[[str], bool]] = None,
     ) -> None:
         self._library = library
         self._ledger = ledger
+        # Whether the app knows a file is public by how it came: its bytes
+        # sent from this computer as they are (MyEditor never encrypts what
+        # it uploads), or picked past the privacy check. Nobody then has to
+        # look for it in the private library to know.
+        self._known_public = known_public
 
     # -- what a blob is ----------------------------------------------------
 
@@ -111,7 +117,9 @@ class MediaVisibility:
             return (
                 PUBLISHED_COPY if self.public_copy_of(sha256) is not None else PRIVATE
             )
-        return PUBLIC if self._vouched(sha256) else UNKNOWN
+        if self._vouched(sha256) or self._known(sha256):
+            return PUBLIC
+        return UNKNOWN
 
     def is_private(self, sha256: str) -> bool:
         """Whether this app holds a key for this blob.
@@ -258,6 +266,18 @@ class MediaVisibility:
         if self._library is None or not sha256:
             return None
         return self._library.get(sha256)
+
+    def _known(self, sha256: str) -> bool:
+        """Whether the app knows this file to be public by how it came.
+
+        A private file's address is the hash of its ciphertext, which this
+        app never makes, so the hash of bytes it sent as they were can
+        only name a public file. That is what lets a picture added a
+        moment ago go into a document while the private library is still
+        being read, or behind a signer that does not answer.
+        """
+        return bool(sha256) and self._known_public is not None \
+            and bool(self._known_public(sha256))
 
     def _vouched(self, sha256: str) -> bool:
         """Whether the library stands behind "this one is not mine".

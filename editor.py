@@ -15,7 +15,7 @@ from dataclasses import dataclass
 from typing import List, Optional
 
 from PySide6.QtCore import (
-    Qt, QTimer, QRect, QPoint, QMetaMethod, QEvent, QUrl, Signal,
+    Qt, QTimer, QRect, QPoint, QPointF, QMetaMethod, QEvent, QUrl, Signal,
 )
 from PySide6.QtGui import (
     QPainter, QTextBlockFormat, QTextCursor, QTextCharFormat, QColor, QClipboard, QPen,
@@ -175,6 +175,10 @@ class HtmlEditor(QTextEdit):
     mention_requested = Signal(int)
     # What Undo and Redo are called may have changed (undo_name).
     undo_named = Signal()
+    # A click on audio or video (its name, where in it the click was,
+    # whether it was a double-click): whoever plays it decides whether the
+    # click was on its play button.
+    media_clicked = Signal(str, QPointF, bool)
 
     # Kinds of highlights shown over the text, bottom to top: each kind
     # keeps its own (set_highlights), the editor shows them together.
@@ -244,6 +248,7 @@ class HtmlEditor(QTextEdit):
         self._asset_scheme = None
         self._asset_placeholder = None
         self._local_image_resolver = None
+        self._web_image_resolver = None
 
         # Always wrap to the visible viewport width, breaking long unbroken
         # tokens instead of forcing a horizontal scrollbar. This keeps
@@ -479,6 +484,16 @@ class HtmlEditor(QTextEdit):
         """
         self._local_image_resolver = resolver
 
+    def set_web_image_resolver(self, resolver) -> None:
+        """Install the callback that finds an image named by a web address
+        (an article or draft reopened, a picture pasted from a page).
+
+        ``resolver`` takes the address and returns a QImage, or None while
+        it is on its way: the placeholder shows, and the window puts the
+        picture in its place when it arrives.
+        """
+        self._web_image_resolver = resolver
+
     def _placeholder_image(self) -> QImage:
         """One shared stand-in image, built on first use."""
         if self._asset_placeholder is None:
@@ -511,6 +526,13 @@ class HtmlEditor(QTextEdit):
                 and self._local_image_resolver is not None
                 and _is_document_relative(url)):
             image = self._local_image_resolver(url.toString())
+            return image if image is not None else self._placeholder_image()
+        if (type_ == QTextDocument.ImageResource
+                and self._web_image_resolver is not None
+                and url.scheme().lower() in ("http", "https")):
+            # Qt's own resolution never fetches an address: the picture
+            # would stay blank, and be asked for again on every repaint.
+            image = self._web_image_resolver(url.toString())
             return image if image is not None else self._placeholder_image()
         return super().loadResource(type_, url)
 
@@ -1579,7 +1601,38 @@ class HtmlEditor(QTextEdit):
                 return              # inside the link
         self.setCurrentCharFormat(rich_text.without_link(fmt))
 
+    def _media_hit(self, point):
+        """The audio or video object at ``point`` (in the viewport) and the
+        point within it, or None. Such an object is a paragraph of its own
+        (is_media_block), so it is the first thing on its line."""
+        block = self.cursorForPosition(point).block()
+        if not self.is_media_block(block):
+            return None
+        fmt = block.begin().fragment().charFormat().toImageFormat()
+        layout = block.layout()
+        line = layout.lineAt(0)
+        if not line.isValid():
+            return None
+        left = layout.position().x() + line.x() - self.horizontalScrollBar().value()
+        top = (layout.position().y() + line.y() + line.ascent() - fmt.height()
+               - self.verticalScrollBar().value())
+        inside = QPointF(point) - QPointF(left, top)
+        if not (0 <= inside.x() <= fmt.width() and 0 <= inside.y() <= fmt.height()):
+            return None
+        return fmt.name(), inside
+
+    def mouseDoubleClickEvent(self, event):
+        # Audio or video double-clicked plays, as a file does in the Finder.
+        hit = (self._media_hit(event.position().toPoint())
+               if event.button() == Qt.MouseButton.LeftButton else None)
+        if hit is not None:
+            self.media_clicked.emit(hit[0], hit[1], True)
+            event.accept()
+            return
+        super().mouseDoubleClickEvent(event)
+
     def mousePressEvent(self, event):
+        self._pressed_at = event.position().toPoint()
         # Command-click (Ctrl-click on Windows and Linux) opens a link, and
         # goes from a footnote's mark to its note and back.
         if (event.button() == Qt.MouseButton.LeftButton
@@ -1603,6 +1656,14 @@ class HtmlEditor(QTextEdit):
         if self.document().availableUndoSteps() != before and rich_text.is_task(
                 self.cursorForPosition(event.position().toPoint()).block()):
             self._name_step(before, N_("Checklist"))
+        # A click (not the end of a drag) on audio or video.
+        point = event.position().toPoint()
+        pressed = getattr(self, "_pressed_at", None)
+        if (event.button() == Qt.MouseButton.LeftButton and pressed is not None
+                and (point - pressed).manhattanLength() < QApplication.startDragDistance()):
+            hit = self._media_hit(point)
+            if hit is not None:
+                self.media_clicked.emit(hit[0], hit[1], False)
 
     def jump_to_footnote(self, at: QTextCursor) -> bool:
         """From a footnote's mark to the words of its note, or from a

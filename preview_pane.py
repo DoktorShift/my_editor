@@ -70,13 +70,15 @@ class PreviewPane(QWidget):
 
     ``content(kind)`` gives what to draw, ``kind`` being ARTICLE or NOTE as
     chosen in Preview As (the window answers DOCUMENT while no Nostr
-    account is in use); ``images`` finds the pictures it names, and
-    ``media_names`` the names of the audio and video files."""
+    account is in use); ``images`` finds the pictures it names,
+    ``media_names`` the names of the audio and video files, and ``play``
+    plays one whose card is clicked."""
 
     def __init__(self, content: Callable[[str], PreviewContent], *,
                  images: Optional[ImageLookup] = None,
                  media_names: Optional[MediaNames] = None, dark: bool = False,
-                 note: bool = False, parent: Optional[QWidget] = None) -> None:
+                 note: bool = False, play: Optional[Callable[[str], None]] = None,
+                 parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
         self.setObjectName("PreviewPane")
         self._content = content
@@ -114,7 +116,7 @@ class PreviewPane(QWidget):
         self._checks.setVisible(False)
         layout.addWidget(self._checks)
 
-        self.view = NostrPreview(images=images, media_names=media_names, dark=dark)
+        self.view = NostrPreview(images=images, media_names=media_names, dark=dark, play=play)
         layout.addWidget(self.view, 1)
 
         self._timer = QTimer(self)

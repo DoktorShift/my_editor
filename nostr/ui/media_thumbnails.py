@@ -22,6 +22,9 @@ from .media_picture import frame_pixmap
 
 class MediaThumbnails(QObject):
     ready = Signal(str, object)
+    # How long a video or audio file plays (its hash, milliseconds), found
+    # on the way to its first frame. Audio has no frame: it ends there.
+    duration_ready = Signal(str, int)
 
     def __init__(self, loader, visibility, parent=None):
         super().__init__(parent)
@@ -84,6 +87,7 @@ class MediaThumbnails(QObject):
         self._sink = QVideoSink(self)
         self._player.setVideoOutput(self._sink)
         self._sink.videoFrameChanged.connect(lambda frame: self._frame(frame, generation))
+        self._player.durationChanged.connect(lambda ms: self._duration(ms, generation))
         self._player.errorOccurred.connect(lambda *_args: self._decoder_failed(generation))
         if source.data is not None:
             self._buffer = QBuffer(self)
@@ -100,6 +104,14 @@ class MediaThumbnails(QObject):
         pixmap = frame_pixmap(frame)
         if pixmap is not None:
             self._finish(pixmap)
+
+    def _duration(self, milliseconds, generation):
+        if generation != self._generation or self._active is None or milliseconds <= 0:
+            return
+        media, mime = self._active
+        self.duration_ready.emit(media.hash, int(milliseconds))
+        if media_files.kind_of(mime) == media_files.AUDIO:
+            self._skip()
 
     def _decoder_failed(self, generation):
         if generation == self._generation:

@@ -45,6 +45,7 @@ from PySide6.QtCore import QMimeData, QUrl  # noqa: E402
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
 import media_files  # noqa: E402
+from doc_walk import iter_blocks  # noqa: E402
 from editor import HtmlEditor  # noqa: E402
 from nostr import preview  # noqa: E402
 from tests.app_process import run_window_script  # noqa: E402
@@ -72,18 +73,52 @@ def test_types_come_from_one_table_whatever_the_computer_says():
 def test_the_preview_names_the_file_by_its_own_name():
     url = f"{URL}.mp3"
     named = {url: "Interview with Bob.mp3"}.get
-    assert f"[▶ Audio: Interview with Bob.mp3]({url})" in preview.markdown_for_preview(
+    card = preview.player_card_name(url)
+    assert f"[![▶ Audio: Interview with Bob.mp3]({card})]({url})" in preview.markdown_for_preview(
         f"Listen:\n\n{url}\n", media_names=named)
-    assert "▶ Audio: Interview with Bob.mp3" in preview.note_html(
+    assert 'alt="▶ Audio: Interview with Bob.mp3"' in preview.note_html(
         f"Listen {url}", media_names=named)
 
 
-def test_the_preview_shows_where_readers_put_the_player():
+def test_the_preview_shows_the_player_where_readers_put_it():
     url = f"{URL}.mp3"
     markdown = preview.markdown_for_preview(f"Listen:\n\n{url}\n\nInline {url} stays.")
-    assert f"[▶ Audio: {SHA}.mp3]({url})" in markdown
+    assert f"[![▶ Audio: {SHA}.mp3]({preview.player_card_name(url)})]({url})" in markdown
     assert f"Inline {url} stays." in markdown
-    assert "▶ Video: clip.mp4" in preview.note_html("See https://cdn.example/clip.mp4")
+    clip = "https://cdn.example/clip.mp4"
+    note = preview.note_html(f"See {clip}")
+    assert f'<a href="{clip}"><img src="{preview.player_card_name(clip)}"' in note
+
+
+def test_a_player_card_names_the_address_it_plays():
+    url = "https://cdn.example/a b/clip.mp4?x=1&y=(2)"
+    assert preview.player_card_address(preview.player_card_name(url)) == url
+    assert preview.player_card_address("https://cdn.example/a.png") == ""
+    assert preview.player_card_address(f"{preview.PLAYER_SCHEME}:%%%") == ""
+
+
+def test_a_player_card_clicked_plays_in_the_app_and_other_links_open(monkeypatch):
+    from PySide6.QtGui import QDesktopServices
+    opened, played = [], []
+    monkeypatch.setattr(QDesktopServices, "openUrl", lambda url: opened.append(url.toString()))
+    view = preview.NostrPreview(play=played.append)
+    view.anchorClicked.emit(QUrl(f"{URL}.mp4"))
+    view.anchorClicked.emit(QUrl("https://x.example/page"))
+    assert played == [f"{URL}.mp4"] and opened == ["https://x.example/page"]
+    view.close()
+
+
+def test_the_preview_asks_for_a_player_card_and_leaves_no_gap_below_it():
+    asked = []
+    view = preview.NostrPreview(images=lambda name: asked.append(name) or None)
+    view.show_markdown(f"Before\n\n{URL}.mp4\n\nAfter")
+    view.resize(900, 700)
+    view.show()
+    QApplication.processEvents()
+    assert preview.player_card_name(f"{URL}.mp4") in asked
+    card = next(block for block in iter_blocks(view.document()) if block.text() == "\ufffc")
+    assert card.blockFormat().lineHeight() == 100
+    view.close()
 
 
 def test_a_pasted_audio_file_goes_in_as_a_dropped_one_only_with_an_account(tmp_path):
@@ -560,27 +595,44 @@ def test_the_card_follows_the_appearance(tmp_path):
     assert r["light"] > 200 and r["dark"] < 80
 
 
-def test_the_card_shows_what_the_file_is_never_a_control_that_does_nothing():
-    """The card plays nothing (Qt Multimedia is not in the app), so it
-    shows no play button: a glyph for audio or for video, the name and how
-    the upload goes. It keeps a little room above and below, as a
-    picture's paragraph does."""
+def test_the_card_shows_what_the_file_is_and_a_play_button_that_plays_it():
+    """Audio is a strip, video a 16:9 frame, as players are before they
+    start; each has its play button (the app plays it, media_viewer.py), and
+    keeps a little room above and below, as a picture's paragraph does."""
     from nostr.ui import media_card
-    audio = media_card.render("Audio · a.mp3", "", dark=False, mime="audio/mpeg")
-    video = media_card.render("Audio · a.mp3", "", dark=False, mime="video/mp4")
+    audio = media_card.render("a.mp3", "", dark=False, mime="audio/mpeg")
+    video = media_card.render("a.mp4", "", dark=False, mime="video/mp4")
     ratio = audio.devicePixelRatio()
+    assert (audio.width() / ratio, audio.height() / ratio) == media_card.size_for("audio/mpeg")
+    width, height = media_card.size_for("video/mp4")
+    assert (video.width() / ratio, video.height() / ratio) == (width, height)
+    assert round((height - 2 * media_card.MARGIN) / width * 16) == 9
 
-    def glyph(image):
-        return [image.pixelColor(int(x * ratio), int(y * ratio)).name()
-                for x in range(16, 43, 2)
-                for y in range(int(media_card.HEIGHT / 2) - 11, int(media_card.HEIGHT / 2) + 11, 2)]
-
-    assert glyph(audio) != glyph(video)                       # what the file is
-    middle = int(media_card.WIDTH / 2 * ratio)
-    for image in (audio, video):
+    for image, mime in ((audio, "audio/mpeg"), (video, "video/mp4")):
+        button = media_card.play_button_rect(mime)
+        # The triangle: light on the video's dark disc, the card's own
+        # fill on the audio's dark one.
+        mark = image.pixelColor(int(button.center().x() * ratio), int(button.center().y() * ratio))
+        rim = image.pixelColor(int((button.left() + 3) * ratio), int(button.center().y() * ratio))
+        assert mark.lightness() != rim.lightness()
+        middle = int(image.width() / 2)
         assert image.pixelColor(middle, int(media_card.MARGIN / 2 * ratio)).alpha() == 0
-        assert image.pixelColor(
-            middle, int((media_card.HEIGHT - media_card.MARGIN / 2) * ratio)).alpha() == 0
+        assert image.pixelColor(middle, image.height() - int(media_card.MARGIN / 2 * ratio)).alpha() == 0
+
+
+def test_a_video_card_shows_its_first_frame_and_how_long_it_plays():
+    from PySide6.QtGui import QColor, QImage
+    from nostr.ui import media_card
+    frame = QImage(160, 90, QImage.Format.Format_RGB32)
+    frame.fill(QColor("#22CC44"))
+    card = media_card.render("a.mp4", "", dark=True, mime="video/mp4", poster=frame,
+                             duration_ms=65_000)
+    ratio = card.devicePixelRatio()
+    corner = card.pixelColor(int(40 * ratio), int(40 * ratio))
+    assert corner.green() > 150 and corner.red() < 80          # the frame, not a glyph
+    assert media_card.duration_text(65_000) == "1:05"
+    assert media_card.duration_text(3_725_000) == "1:02:05"
+    assert media_card.duration_text(0) == ""
 
 
 BEFORE_SCRIPT = r"""
@@ -1386,3 +1438,38 @@ def test_a_copy_whose_write_failed_gives_its_count_back(tmp_path):
     assert (cache / sha).exists()
     manager.release_stored(sha)                                          # the first lets it go
     assert manager._kept_for == {} and not (cache / sha).exists()
+
+
+REOPEN_SCRIPT = r"""
+import json, os, sys
+sys.path.insert(0, sys.argv[1])
+os.environ["QT_QPA_PLATFORM"] = "offscreen"
+from PySide6.QtWidgets import QApplication
+app = QApplication(sys.argv[:1])
+import main_window
+from doc_walk import iter_image_names
+
+text = sys.argv[2]
+w = main_window.MainWindow()
+w.nostr_state._active = True
+w._update_nostr_commands()
+ed = w.new_tab()
+w._load_markdown(ed, text)
+names = list(iter_image_names(ed.document()))
+asset = w._asset_manager.get(names[0].split(":", 1)[1]) if names else None
+r = {"names": names, "media": bool(asset and asset.is_media),
+     "from_address": bool(asset and asset.from_address),
+     "published": w._publish_payload(ed, "markdown")[0]}
+ed.document().setModified(False)
+w.close()
+print("RESULT " + json.dumps(r))
+"""
+
+
+def test_a_reopened_article_shows_its_audio_and_video_as_cards_again(tmp_path):
+    """An article or draft reopened held its video as a bare address: it
+    reads back as the card it was written from, and publishes the same."""
+    text = f"Before\n\n{URL}.mp4\n\nAfter"
+    r = run_window_script(REOPEN_SCRIPT, tmp_path, text)
+    assert len(r["names"]) == 1 and r["media"] and r["from_address"]
+    assert r["published"] == text

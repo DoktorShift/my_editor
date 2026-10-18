@@ -371,6 +371,11 @@ class MediaStore(QObject):
                 return name
         return self._session_names.get(sha, "")
 
+    def added_here(self, sha256: str) -> bool:
+        """Whether this file was added to the library on this computer
+        (it then has the name it was added with)."""
+        return bool(self.name_of(sha256))
+
     def upload_job(self, name: str) -> Optional[UploadJobState]:
         """The running job of that name, or None."""
         return self._uploads.get(name)

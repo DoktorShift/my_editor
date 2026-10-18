@@ -208,12 +208,12 @@ def test_the_insert_menu_says_what_it_inserts_without_insert(tmp_path):
     menus hold the same commands, with one key and one state."""
     r = run_window_script(WORDING_SCRIPT, tmp_path)
     assert r["insert"] == ["Link…", "Image…", "Table…", "Divider", "Code Block", "Footnote",
-                           "Mention…", "Note or Article…", "Image from Media Library…",
+                           "Mention…", "Note or Article…", "From Media Library…",
                            "Audio or Video…"]
     assert r["link_key"] == "Ctrl+K" and r["same_actions"]
-    assert r["after"] == ["Add Link…", "Insert Mention…", "Insert Image from Media Library…"]
-    assert r["nostr"] == ["Insert Image from Media Library…", "Insert Mention…",
+    assert r["after"] == ["Add Link…", "Insert Mention…", "Insert from Media Library…"]
+    assert r["nostr"] == ["Insert from Media Library…", "Insert Mention…",
                           "Insert Note or Article…", "Insert Audio or Video…"]
-    assert r["slash"] == ["Link…", "Footnote", "Image…", "Image from Media Library…",
+    assert r["slash"] == ["Link…", "Footnote", "Image…", "From Media Library…",
                           "Mention…", "Note or Article…", "Audio or Video…"]
     assert not any(title.startswith("Insert") for title in r["context"])

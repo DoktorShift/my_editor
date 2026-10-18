@@ -40,10 +40,11 @@ to the shared blob cache, because that cache is what an export walks.
 
 from __future__ import annotations
 
+import dataclasses
 import os
 import re
 import unicodedata
-from typing import Dict, List, Optional
+from typing import Callable, Dict, List, Optional
 
 from PySide6.QtCore import (
     QBuffer, QDateTime, QEvent, QIODevice, QSize, Qt, QTimer, QUrl, Signal,
@@ -156,7 +157,7 @@ class MediaLibraryDialog(QDialog):
         parent: Optional[QWidget] = None,
     ) -> None:
         super().__init__(parent)
-        self.setWindowTitle(_("Insert Image") if pick_mode else _("Media Library"))
+        self.setWindowTitle(_("Insert from Media Library") if pick_mode else _("Media Library"))
         self.setModal(pick_mode)
         self.resize(860, 560)
         # Deleted on close, so its connections to the store and the
@@ -167,6 +168,10 @@ class MediaLibraryDialog(QDialog):
         self._store = store
         self._is_dark = is_dark
         self._pick_mode = pick_mode
+        # Browsing, a file goes into the document being written with Insert
+        # (set_inserter): whether one can take it now, and how.
+        self._inserter: Optional[Callable[[MediaFile, str], None]] = None
+        self._can_take: Callable[[], bool] = lambda: False
         # Empty by default: with no private library wired there is
         # nothing to be private of, and every file is public.
         self._visibility = visibility or MediaVisibility()
@@ -646,6 +651,11 @@ class MediaLibraryDialog(QDialog):
 
     def _selection_changed(self, *_args) -> None:
         self._refresh_pick_notice()
+        if self._alt_edit is not None:
+            # Alternative text describes a picture; audio, video and files
+            # go in by their names.
+            files = self._selected_files()
+            self._alt_edit.setEnabled(not files or files[0].kind == "image")
         if self._quick_look is not None and self._quick_look.isVisible():
             self._show_in_quick_look()
 
@@ -688,6 +698,10 @@ class MediaLibraryDialog(QDialog):
             menu.addSeparator()
         if self._pick_mode:
             menu.addAction(_("Insert"), self._insert).setEnabled(self._can_insert())
+        elif self._inserter is not None:
+            menu.addAction(_("Insert in Document"), self._insert).setEnabled(
+                self._can_insert() and self._can_take())
+            menu.addSeparator()
         menu.addAction(_("Quick Look"), self._toggle_quick_look)
         menu.addSeparator()
         linked = [tile for tile in files if self._link_of(tile)]
@@ -715,11 +729,31 @@ class MediaLibraryDialog(QDialog):
         files = self._selected_files()
         return len(files) == 1 and not self._visibility.is_unknown(files[0].key)
 
+    def set_inserter(self, insert: Callable[[MediaFile, str], None],
+                     can_take: Callable[[], bool]) -> None:
+        """Browsing, offer Insert in Document: ``insert(file, alt)`` puts a
+        file into the document being written, while ``can_take()``."""
+        self._inserter = insert
+        self._can_take = can_take
+
+    def _picked(self) -> MediaFile:
+        """The chosen file, of the type its tile shows: a server that calls
+        a video or a picture a byte stream does not make it one."""
+        tile = self._selected_files()[0]
+        media = tile.media
+        if tile.mime and tile.mime != (media.mime_type or "").lower():
+            media = dataclasses.replace(media, mime_type=tile.mime)
+        return media
+
     def _insert(self) -> None:
-        if not self._pick_mode or not self._can_insert():
+        if not self._can_insert():
+            return
+        if not self._pick_mode:
+            if self._inserter is not None and self._can_take():
+                self._inserter(self._picked(), "")
             return
         alt = self._alt_edit.text().strip() if self._alt_edit is not None else ""
-        self.file_picked.emit(self._selected_files()[0].media, alt)
+        self.file_picked.emit(self._picked(), alt)
         self.accept()
 
     def _refresh_pick_notice(self) -> None:

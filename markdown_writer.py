@@ -57,8 +57,8 @@ from functools import lru_cache
 from typing import Callable, List, Optional, Tuple
 
 from PySide6.QtGui import (
-    QFont, QTextBlockFormat, QTextCharFormat, QTextDocument, QTextFormat, QTextListFormat,
-    QTextTable,
+    QFont, QTextBlockFormat, QTextCharFormat, QTextDocument, QTextFormat, QTextImageFormat,
+    QTextListFormat, QTextTable,
 )
 
 from doc_walk import (
@@ -913,8 +913,14 @@ def holds_faithfully(markdown: str) -> bool:
     first = QTextDocument()
     read_markdown(first, markdown)
     second = QTextDocument()
-    read_markdown(second, document_to_markdown(first))
+    read_markdown(second, document_to_markdown(first, _image_as_read))
     return _fingerprint(first) == _fingerprint(second)
+
+
+def _image_as_read(fmt) -> str:
+    """An image written back where it was read from: what a save does with
+    a picture this app did not make (a web or relative address)."""
+    return image_markdown(str(fmt.property(QTextImageFormat.ImageAltText) or ""), fmt.name())
 
 
 def image_markdown(alt: str, url: str) -> str:
