@@ -9,10 +9,13 @@ colour they are drawn in.
 
 from __future__ import annotations
 
-from typing import List, NamedTuple, Optional, Tuple
+from typing import Callable, List, NamedTuple, Optional, Tuple
 
-from PySide6.QtCore import QSize, Qt, Signal
-from PySide6.QtGui import QColor, QFont, QPainter, QPainterPath, QPen, QPixmap, QTextLayout, QTextOption
+from PySide6.QtCore import QSize, Qt, QUrl, Signal
+from PySide6.QtGui import (
+    QColor, QFont, QImage, QPainter, QPainterPath, QPen, QPixmap, QTextDocument, QTextLayout,
+    QTextOption,
+)
 from PySide6.QtWidgets import (
     QApplication, QHBoxLayout, QLabel, QMenu, QPushButton, QSizePolicy, QToolButton,
     QVBoxLayout, QWidget,
@@ -21,6 +24,7 @@ from PySide6.QtWidgets import (
 import theme
 from i18n import _
 
+from doc_walk import iter_image_names
 from ..preview import NostrPreview
 from .drafts_common import (
     BASE_POINT_SIZE, THEME_TOKENS, app_point_size, scaled, secondary_font,
@@ -363,11 +367,13 @@ class PreviewAction(NamedTuple):
 class PreviewReader(NostrPreview):
     """The text of a full preview, as Nostr shows it (the editor's
     Preview renderer), on the popover's own ground with a line above it.
-    Pictures come from no lookup: they show as frames, and nothing is
-    fetched for them."""
+    Its pictures, and its audio and video cards, come from the lookup the
+    window gives it (set_pictures), as the editor's Preview finds them;
+    without one they show as frames, and nothing is fetched for them."""
 
     def __init__(self, *, dark: bool, parent: Optional[QWidget] = None) -> None:
         super().__init__(dark=dark, parent=parent)
+        self._arrived = None
         self.setObjectName("drafts_preview_reader")
         self.setAccessibleName(_("Text"))
         self.setFocusPolicy(Qt.FocusPolicy.ClickFocus)
@@ -380,6 +386,29 @@ class PreviewReader(NostrPreview):
         self.setStyleSheet(
             f"QTextBrowser {{ background: {tokens['chrome_bg']}; color: {tokens['field_fg']};"
             f" border: none; border-top: 1px solid {tokens['border']}; }}")
+
+    def set_pictures(self, lookup: Optional[Callable[[str], Optional[QImage]]],
+                     arrived=None) -> None:
+        """Find the text's pictures with ``lookup`` (a picture by its name,
+        None while it is on its way); ``arrived``, a signal naming a picture
+        that came, puts it in its frame. None: frames only."""
+        if self._arrived is not None:
+            try:
+                self._arrived.disconnect(self._picture_arrived)
+            except (RuntimeError, TypeError):
+                pass
+        self._images, self._arrived = lookup, arrived
+        if arrived is not None:
+            arrived.connect(self._picture_arrived)
+
+    def _picture_arrived(self, name: str) -> None:
+        doc = self.document()
+        if self._images is None or name not in set(iter_image_names(doc)):
+            return
+        image = self._images(name)
+        if image is not None:
+            doc.addResource(QTextDocument.ResourceType.ImageResource, QUrl(name), image)
+            doc.markContentsDirty(0, doc.characterCount())
 
     def text_height(self, width: int) -> int:
         """How tall the text is laid out at ``width``, margins included:

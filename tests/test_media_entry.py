@@ -697,7 +697,6 @@ def test_a_library_audio_file_becomes_the_same_card_insert_audio_makes(tmp_path,
                                              name_of=lambda s: "Podcast intro.mp3")
     win._media_visibility = MediaVisibility()
     win._copy_maker = None
-    win._media_progress = {}
     win.is_dark_theme = False
     win._may_insert_audio_video = lambda ed: True
     win._keeps_pictures = lambda ed: True
@@ -731,7 +730,6 @@ def _library_window(tmp_path, monkeypatch, record, name, *, rich=True):
     win._media_store = types.SimpleNamespace(files={record.hash: record}, name_of=lambda s: name)
     win._media_visibility = MediaVisibility()
     win._copy_maker = None
-    win._media_progress = {}
     win.is_dark_theme = False
     win._may_insert_audio_video = lambda ed: rich
     win._keeps_pictures = lambda ed: rich

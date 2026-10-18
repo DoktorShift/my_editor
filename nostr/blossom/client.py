@@ -451,20 +451,26 @@ def _read_reason(reply) -> str:
         return ""
 
 
+def _has_header(reply, name: str) -> bool:
+    has = getattr(reply, "hasRawHeader", None)
+    try:
+        return bool(has(name)) if has is not None else False
+    except (TypeError, ValueError):
+        return False
+
+
 def _payment_methods(reply) -> Tuple[str, ...]:
     """BUD-07 payment method names a 402 offered. Names only."""
-    has = getattr(reply, "hasRawHeader", None)
-    if has is None:
-        return ()
-    methods: List[str] = []
-    for header, name in _PAYMENT_HEADERS:
-        try:
-            present = bool(has(header))
-        except (TypeError, ValueError):
-            present = False
-        if present:
-            methods.append(name)
-    return tuple(methods)
+    return tuple(name for header, name in _PAYMENT_HEADERS if _has_header(reply, header))
+
+
+def _status_code(reply, status: int) -> str:
+    """The app's code for a refusal: BUD-02's meaning of the status, or
+    the one a server's own header gives it."""
+    if status == 409 and _has_header(reply, "X-Identical-Media"):
+        # Not a wrong file: the server holds a look-alike and keeps one.
+        return ERROR_CODES.LOOKALIKE_REFUSED
+    return _STATUS_CODES.get(status) or (ERROR_CODES.NETWORK_UNAVAILABLE if status == 0 else "")
 
 
 def _http_error(reply, status: int, body_text: str) -> BlossomError:
@@ -473,8 +479,7 @@ def _http_error(reply, status: int, body_text: str) -> BlossomError:
         reply.errorString() or f"HTTP {status}",
         status=status,
         body=body_text,
-        code=_STATUS_CODES.get(status)
-        or (ERROR_CODES.NETWORK_UNAVAILABLE if status == 0 else ""),
+        code=_status_code(reply, status),
         detail=_read_reason(reply),
         payment_methods=_payment_methods(reply) if status == 402 else (),
     )

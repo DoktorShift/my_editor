@@ -184,6 +184,11 @@ class MediaLibraryDialog(QDialog):
         self._asked: set = set()
         # Files added from this window, by job name, until they land.
         self._jobs: Dict[str, Tile] = {}
+        # Redraws their indicators while any is in flight (about 30 times a
+        # second, so a spinning or creeping ring moves smoothly).
+        self._ticker = QTimer(self)
+        self._ticker.setInterval(33)
+        self._ticker.timeout.connect(self._tick)
         # What a finished upload has to say (a copy a server did not
         # keep), said once it is added.
         self._job_notes: Dict[str, str] = {}
@@ -1069,12 +1074,12 @@ class MediaLibraryDialog(QDialog):
         self._add_job(name, "image/png", _local_preview(mime="image/png", data=body))
 
     def _add_job(self, name: str, mime: str, preview: Optional[QPixmap]) -> None:
-        state, detail = self._early.pop(name, (WAITING, _("Waiting…")))
+        state, detail = self._early.pop(name, (WAITING, _("Preparing…")))
         if state == "cancelled":
             return
         self._jobs[name] = Tile(key=name, name=name, detail=detail, kind=kind_of_mime(mime),
-                                state=state, progress=0 if state == SENDING else -1,
-                                pixmap=preview)
+                                state=state, pixmap=preview)
+        self._follow(name)
         self._rebuild()
         if state == FAILED:
             self._say(_("“{name}” wasn’t added. {reason}").format(name=name, reason=detail),
@@ -1088,11 +1093,12 @@ class MediaLibraryDialog(QDialog):
                   "failed": FAILED}
         for added in self._store.added_uploads():
             state = states.get(added.state, WAITING)
-            detail = {FAILED: added.error, WAITING: _("Waiting…")}.get(state, _("Uploading…"))
+            detail = added.error if state == FAILED else _("Preparing…")
             preview = _local_preview(mime=added.mime, path=added.path) if added.path else None
             self._jobs[added.name] = Tile(key=added.name, name=added.name, detail=detail,
                                           kind=kind_of_mime(added.mime), state=state,
-                                          progress=added.progress, pixmap=preview)
+                                          pixmap=preview)
+            self._follow(added.name)
 
     def _cancel_upload(self, name: str) -> None:
         self._store.cancel_upload(name)
@@ -1101,7 +1107,7 @@ class MediaLibraryDialog(QDialog):
         tile = self._jobs.get(name)
         if tile is None or tile.state != FAILED:
             return
-        tile.state, tile.detail, tile.progress = WAITING, _("Waiting…"), -1
+        tile.state, tile.detail, tile.meter = WAITING, _("Preparing…"), None
         self._model.changed(name)
         self._store.retry_upload(name)
 
@@ -1115,22 +1121,42 @@ class MediaLibraryDialog(QDialog):
     def _on_upload_started(self, name: str) -> None:
         tile = self._jobs.get(name)
         if tile is not None:
-            tile.state, tile.detail, tile.progress = SENDING, _("Uploading…"), 0
-            self._model.changed(name)
+            tile.state = SENDING
+            self._follow(name)
         elif self._adding:
-            self._early[name] = (SENDING, _("Uploading…"))
+            self._early[name] = (SENDING, _("Preparing…"))
 
-    def _on_upload_progress(self, name: str, sent: int, total: int) -> None:
-        tile = self._jobs.get(name)
-        if tile is not None and total > 0:
-            tile.progress = min(100, sent * 100 // total)
-            self._model.changed(name)
+    def _on_upload_progress(self, name: str, _sent: int, _total: int) -> None:
+        self._follow(name)
 
     def _on_upload_status(self, name: str, status: str) -> None:
         tile = self._jobs.get(name)
         if tile is not None and status == "mirroring":
             tile.state = FINISHING
-            self._model.changed(name)
+        self._follow(name)
+
+    # -- their indicators ----------------------------------------------------
+
+    def _follow(self, name: str) -> None:
+        """Show how far the file being added as ``name`` has got, from its
+        upload's own indicator, and keep it moving while it is in flight."""
+        tile = self._jobs.get(name)
+        if tile is None or not tile.in_flight:
+            return
+        job = self._store.upload_job(name)
+        if job is not None:
+            tile.meter = job.meter
+        tile.detail = tile.meter.words() if tile.meter is not None else _("Preparing…")
+        self._model.changed(name)
+        if not self._ticker.isActive():
+            self._ticker.start()
+
+    def _tick(self) -> None:
+        moving = [name for name, tile in self._jobs.items() if tile.in_flight]
+        if not moving:
+            self._ticker.stop()
+        for name in moving:
+            self._follow(name)
 
     def _on_upload_finished(self, name: str, media: object) -> None:
         tile = self._jobs.pop(name, None)

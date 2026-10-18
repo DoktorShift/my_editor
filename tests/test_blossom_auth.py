@@ -54,9 +54,8 @@ def test_explicit_expiration_passes_through():
 
 
 def _decode_token(header: str) -> dict:
-    """Decode a header body that carries no padding of its own."""
     body = header[len("Nostr "):]
-    return json.loads(base64.urlsafe_b64decode(body + "=" * (-len(body) % 4)))
+    return json.loads(base64.urlsafe_b64decode(body))
 
 
 def test_to_auth_header_round_trip():
@@ -74,13 +73,15 @@ def test_to_auth_header_round_trip():
     assert _decode_token(header) == signed
 
 
-def test_auth_header_is_base64url_without_padding():
-    """BUD-11: "MUST be encoded as Base64 URL-safe without padding".
+def test_auth_header_is_base64url_with_its_padding():
+    """The default servers (nostr.download, blossom.primal.net) refuse an
+    unpadded token with 400 "Invalid auth string", so every upload failed
+    there; with its padding every server reads it.
 
     The content is chosen so the two alphabets genuinely differ: this
     payload yields both a ``+`` and a ``/`` under the standard alphabet,
-    plus two characters of padding, so a revert to ``b64encode`` cannot
-    pass this test by coincidence.
+    plus two characters of padding, so neither a revert to ``b64encode``
+    nor to stripping the padding can pass this test by coincidence.
     """
     signed = {"kind": 24242, "content": "~?>~~?>", "tags": [["t", "upload"]]}
     header = auth.to_auth_header(signed)
@@ -90,7 +91,7 @@ def test_auth_header_is_base64url_without_padding():
     ).decode("ascii")
     assert "+" in standard and "/" in standard and standard.endswith("=")
 
-    assert "=" not in body
+    assert body.endswith("=") and len(body) % 4 == 0
     assert "+" not in body
     assert "/" not in body
     assert "-" in body

@@ -1440,6 +1440,9 @@ class PreviewController(QObject):
         self._panel_ref = weakref.ref(panel)
         self._popover: Optional[PreviewPopover] = None
         self._loader = None
+        # The text's pictures (set_pictures): a lookup and the signal that
+        # names one that arrived, or nothing, and frames.
+        self._pictures: tuple = (None, None)
         self._is_dark = True
 
         self._pending_id = ""
@@ -1500,6 +1503,14 @@ class PreviewController(QObject):
         if loader is not None:
             loader.url_ready.connect(self._on_image_ready)
             loader.url_failed.connect(self._on_image_failed)
+
+    def set_pictures(self, lookup, arrived=None) -> None:
+        """Where the full preview finds the pictures in the text
+        (PreviewReader.set_pictures), or ``None`` for frames only: the
+        default, so a panel built in a test fetches nothing."""
+        self._pictures = (lookup, arrived)
+        if self._popover is not None:
+            self._popover.reader().set_pictures(lookup, arrived)
 
     def _disconnect_loader(self) -> None:
         if self._loader is None:
@@ -1955,6 +1966,7 @@ class PreviewController(QObject):
             content=record.content or "",
             actions=tuple(self._panel.preview_actions(identifier)),
             size=popover.card_size(), is_dark=self._is_dark, parent=self._panel.window())
+        window.reader.set_pictures(*self._pictures)
         # Its commands go to the same host, held weakly: the window may
         # outlive the list it came from.
 
@@ -2052,6 +2064,7 @@ class PreviewController(QObject):
             self._popover.action_chosen.connect(self._on_action)
             self._popover.detach_requested.connect(self._on_drag_detach)
             self._popover.installEventFilter(self)
+            self._popover.reader().set_pictures(*self._pictures)
         self._watch_window()
         return self._popover
 

@@ -50,7 +50,7 @@ from ..bunker import BunkerSessionPool
 from ..profiles import Profile
 from .auth import build_blossom_auth_event
 from .client import BlossomClient, BlossomError, UploadResult, server_origin
-from .errors import ERROR_CODES, signer_rejected
+from .errors import ERROR_CODES, signer_rejected, signing_failure_code
 
 
 _UNSAFE_SOURCE = "mirror source URL was not allowed"
@@ -186,8 +186,10 @@ def _sign_upload_token(
 
 
 def _signer_error(reason, *, prefixed: bool = False) -> BlossomError:
-    text = signer_rejected(reason) if prefixed else str(reason)
-    return BlossomError(text, code=ERROR_CODES.SIGNER_REJECTED)
+    code = signing_failure_code(reason)
+    text = signer_rejected(reason) if prefixed and code == ERROR_CODES.SIGNER_REJECTED \
+        else str(reason)
+    return BlossomError(text, code=code)
 
 
 def _verify(

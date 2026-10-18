@@ -23,6 +23,7 @@ window, so they are the same in light and dark (as Photos draws them).
 
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass
 from typing import Dict, List, Optional
 
@@ -58,6 +59,7 @@ import theme
 from i18n import _
 
 from ..blossom.store import MediaFile
+from ..blossom.upload_progress import UploadProgress
 from .file_icons import FileIcons
 
 # The thumbnail's side, and the cell around it.
@@ -78,6 +80,9 @@ _SCRIM = QColor(0, 0, 0, 120)
 _BADGE = QColor(0, 0, 0, 150)
 _ON_SCRIM = QColor(255, 255, 255)
 _ON_SCRIM_FAINT = QColor(255, 255, 255, 90)
+# The indeterminate ring: an arc this long, round once in this many seconds.
+_SPINNER_DEGREES = 90
+_SPIN_SECONDS = 1.0
 _PILL = QColor(255, 255, 255, 235)
 _ON_PILL = QColor(0, 0, 0, 220)
 
@@ -100,7 +105,9 @@ class Tile:
     kind: str = "file"
     state: str = FILE
     private: bool = False
-    progress: int = -1
+    # How far a file being added has got (its upload's own indicator);
+    # None while there is nothing to measure yet.
+    meter: Optional[UploadProgress] = None
     media: Optional[MediaFile] = None
     pixmap: Optional[QPixmap] = None
     # A picture that cannot be drawn here (HEIC on most systems).
@@ -111,11 +118,16 @@ class Tile:
     def is_file(self) -> bool:
         return self.state == FILE
 
+    @property
+    def in_flight(self) -> bool:
+        """Whether it is being added (its indicator moves)."""
+        return self.state in (WAITING, SENDING, FINISHING)
+
     def accessible_text(self) -> str:
         parts = [self.name, kind_word(self.kind)]
         if self.private:
             parts.append(_("private"))
-        if self.state in (WAITING, SENDING, FINISHING):
+        if self.in_flight:
             parts.append(_("uploading"))
         elif self.state == FAILED:
             parts.append(_("couldn’t upload: {reason}").format(reason=self.detail))
@@ -318,7 +330,7 @@ class TileDelegate(QStyledItemDelegate):
             painter.fillRect(thumb, _SCRIM)
         painter.restore()
 
-        if tile.state in (WAITING, SENDING, FINISHING):
+        if tile.in_flight:
             self._paint_ring(painter, thumb, tile)
         elif tile.state == FAILED:
             side = 30
@@ -340,16 +352,22 @@ class TileDelegate(QStyledItemDelegate):
             format_icons.paint("lock", painter, badge.adjusted(4, 4, -4, -4), _ON_SCRIM)
 
     def _paint_ring(self, painter: QPainter, thumb: QRect, tile: Tile) -> None:
+        """The upload's indicator: a ring that fills clockwise as it goes,
+        or, while nothing can be measured, a spinning arc (one shape for
+        both, as Apple asks of an indicator that turns determinate)."""
         ring = QRectF(thumb.center().x() - 16, thumb.center().y() - 16, 32, 32)
         painter.setBrush(Qt.BrushStyle.NoBrush)
         painter.setPen(QPen(_ON_SCRIM_FAINT, 3))
         painter.drawEllipse(ring)
-        progress = 100 if tile.state == FINISHING else max(0, tile.progress)
-        if progress:
-            pen = QPen(_ON_SCRIM, 3)
-            pen.setCapStyle(Qt.PenCapStyle.RoundCap)
-            painter.setPen(pen)
-            painter.drawArc(ring, 90 * 16, -int(progress * 360 * 16 / 100))
+        fraction = tile.meter.fraction() if tile.meter is not None else None
+        pen = QPen(_ON_SCRIM, 3)
+        pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+        painter.setPen(pen)
+        if fraction is None:
+            start = 90 - (time.monotonic() % _SPIN_SECONDS) / _SPIN_SECONDS * 360
+            painter.drawArc(ring, int(start * 16), -_SPINNER_DEGREES * 16)
+        elif fraction > 0:
+            painter.drawArc(ring, 90 * 16, -int(fraction * 360 * 16))
         if tile.state != FINISHING:
             pen = QPen(_ON_SCRIM, 2)
             pen.setCapStyle(Qt.PenCapStyle.RoundCap)

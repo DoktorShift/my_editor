@@ -53,11 +53,12 @@ from .client import (
     server_origin,
     whole_number,
 )
-from .errors import ERROR_CODES, friendly_message
+from .errors import ERROR_CODES, friendly_message, signing_failure_code
 from .hashes import blob_url, url_agrees_with_hash
 from .names import MediaNames
 from .plan import get_effective_max_file, lists_publicly, plan_upload, UploadPlan
 from .settings import BlossomSettings
+from .upload_progress import UploadProgress
 from ..imports.workers import run_for_size
 
 
@@ -85,7 +86,7 @@ _RETRYABLE_STATUSES = frozenset({0, 413, 429, 502, 503})
 # 401 and 403 are deliberately absent: they usually mean the signer or
 # the clock is the problem, so the next server would demand auth too and
 # a failover buys a second prompt and a second failure.
-_RETRYABLE_CODES = frozenset({ERROR_CODES.REDIRECT_REFUSED})
+_RETRYABLE_CODES = frozenset({ERROR_CODES.REDIRECT_REFUSED, ERROR_CODES.LOOKALIKE_REFUSED})
 
 # A server that refuses a copy for one of these reasons would refuse the
 # same bytes uploaded directly: its limits, a payment, the signature, or a
@@ -94,8 +95,9 @@ _RETRYABLE_CODES = frozenset({ERROR_CODES.REDIRECT_REFUSED})
 _NO_DIRECT_UPLOAD = frozenset({
     ERROR_CODES.RATE_LIMITED, ERROR_CODES.PAYMENT_REQUIRED, ERROR_CODES.SERVER_TOO_LARGE,
     ERROR_CODES.TOO_LARGE, ERROR_CODES.AUTH_REJECTED, ERROR_CODES.SIGNER_REJECTED,
+    ERROR_CODES.SIGNER_SILENT,
     ERROR_CODES.SIGNER_IDENTITY_MISMATCH, ERROR_CODES.HASH_MISMATCH,
-    ERROR_CODES.NETWORK_UNAVAILABLE,
+    ERROR_CODES.NETWORK_UNAVAILABLE, ERROR_CODES.LOOKALIKE_REFUSED,
 })
 
 
@@ -171,13 +173,14 @@ class UploadJobState:
     """Per-file state visible to the UI during an upload."""
 
     name: str
-    progress: int = 0          # 0..100
     status: str = "queued"     # queued | signing | uploading | mirroring | done | failed
     error: str = ""
     hash: str = ""
     # The PUT in flight, while the bytes are on their way: what Cancel
     # aborts. None before the signer answered and once a server has it.
     sending: Optional[object] = None
+    # How far it has got, as its progress indicator shows it.
+    meter: UploadProgress = field(default_factory=UploadProgress)
 
 
 @dataclass(eq=False)
@@ -202,7 +205,6 @@ class AddedUpload:
     name: str
     mime: str
     state: str
-    progress: int = -1
     error: str = ""
     path: str = ""
 
@@ -393,7 +395,6 @@ class MediaStore(QObject):
             else:
                 state = "finishing" if job.status == "mirroring" else "sending"
             out.append(AddedUpload(name=name, mime=added.mime, state=state,
-                                   progress=job.progress if job is not None else -1,
                                    error=added.error,
                                    path=str(added.path) if added.path else ""))
         return out
@@ -603,7 +604,7 @@ class MediaStore(QObject):
                 on_signed=do_list,
                 on_failure=lambda reason: handle_list_error(
                     server, origin,
-                    BlossomError(str(reason), code=ERROR_CODES.SIGNER_REJECTED),
+                    BlossomError(str(reason), code=signing_failure_code(reason)),
                     page=1, signed=True, retried=retried,
                 ),
             )
@@ -980,6 +981,7 @@ class MediaStore(QObject):
             self._refuse(name, ERROR_CODES.QUOTA_FULL)
             return
         state = UploadJobState(name=name, status="queued", hash=sha)
+        state.meter.expect(len(eligible) - 1)
         self._uploads[name] = state
         self.upload_started.emit(name)
         self.upload_status.emit(name, state.status)
@@ -1141,6 +1143,7 @@ class MediaStore(QObject):
 
             if job is not None and job.status != "signing":
                 job.status = "signing"
+                job.meter.signing(remote=_signs_remotely(profile))
                 self.upload_status.emit(name, job.status)
 
             def on_signed(auth_event: dict) -> None:
@@ -1169,8 +1172,8 @@ class MediaStore(QObject):
                 # A signer failure is not a server failure: the next
                 # server would ask the same signer, so failing over just
                 # buys a second prompt and a second refusal.
-                on_failure=lambda _reason: live() and self._fail_upload(
-                    name, ERROR_CODES.SIGNER_REJECTED),
+                on_failure=lambda reason: live() and self._fail_upload(
+                    name, signing_failure_code(reason)),
             )
 
         def on_sent(result: UploadResult, mirrors: List[str]) -> None:
@@ -1201,6 +1204,8 @@ class MediaStore(QObject):
                 and next_index < len(missing)
                 and _is_retryable(err)
             ):
+                if job is not None:
+                    job.meter.retrying()
                 attempt(next_index)
                 return
             self._fail_upload(name, _error_code(err), _format_err(err))
@@ -1276,7 +1281,7 @@ class MediaStore(QObject):
         state = self._uploads.get(name)
         if state is None:
             return
-        state.progress = int(sent * 100 / total) if total > 0 else 0
+        state.meter.sending(sent, total)
         self.upload_progress.emit(name, int(sent), int(total))
 
     def _on_primary_uploaded(
@@ -1360,9 +1365,12 @@ class MediaStore(QObject):
         state = self._uploads.get(name)
         if state is not None:
             state.status = "mirroring"
+            state.meter.copying(len(mirror_servers))
             self.upload_status.emit(name, state.status)
 
         def step(index: int) -> None:
+            if state is not None and index > 0:
+                state.meter.copied()
             if index >= len(mirror_servers):
                 for host, code in failures:
                     self.mirror_failed.emit(name, host, code)
@@ -1436,7 +1444,7 @@ class MediaStore(QObject):
         state = self._uploads.pop(name, None)
         if state is not None:
             state.status = "done"
-            state.progress = 100
+            state.meter.done()
 
         # Reroute is reported only now, against the server that actually
         # confirmed the blob. Announcing it at plan time claimed a
@@ -1605,7 +1613,7 @@ class MediaStore(QObject):
             profile,
             unsigned,
             on_signed=after_sign,
-            on_failure=lambda _reason: on_err(ERROR_CODES.SIGNER_REJECTED),
+            on_failure=lambda reason: on_err(signing_failure_code(reason)),
         )
 
     # ------------------------------------------------------------------
@@ -1678,6 +1686,12 @@ def _origin_or_empty(value: str) -> str:
         return ""
 
 
+def _signs_remotely(profile) -> bool:
+    """Whether ``profile`` signs in a signer app (NIP-46), so a signature
+    is something to wait for."""
+    return getattr(profile, "signer", "local") != "local"
+
+
 def _hostname(url: str) -> str:
     try:
         return server_origin(url).split("://", 1)[1]
@@ -1690,7 +1704,7 @@ def _error_code(err) -> str:
     if isinstance(err, BlossomError):
         return err.code or ERROR_CODES.UPLOAD_FAILED
     # Everything else reaching here came from the signing step.
-    return ERROR_CODES.SIGNER_REJECTED
+    return signing_failure_code(err)
 
 
 def _listing_failure_code(listings) -> str:
@@ -1699,7 +1713,8 @@ def _listing_failure_code(listings) -> str:
     answered but did not list (busy, or without /list, which BUD-12
     makes optional): not the connection's fault, so not said to be."""
     codes = {listing.error_code for listing in listings}
-    for wanted in (ERROR_CODES.SIGNER_REJECTED, ERROR_CODES.AUTH_REJECTED):
+    for wanted in (ERROR_CODES.SIGNER_REJECTED, ERROR_CODES.SIGNER_SILENT,
+                   ERROR_CODES.AUTH_REJECTED):
         if wanted in codes:
             return wanted
     if codes <= {ERROR_CODES.NETWORK_UNAVAILABLE}:
@@ -1712,7 +1727,8 @@ def _delete_failure_code(failures) -> str:
     with: the signer first (nothing was asked of the servers), then an
     unreachable server (try again later), then whatever a server said."""
     codes = [code for _origin, code in failures]
-    for wanted in (ERROR_CODES.SIGNER_REJECTED, ERROR_CODES.NETWORK_UNAVAILABLE):
+    for wanted in (ERROR_CODES.SIGNER_REJECTED, ERROR_CODES.SIGNER_SILENT,
+                   ERROR_CODES.NETWORK_UNAVAILABLE):
         if wanted in codes:
             return wanted
     return codes[0] if codes else ERROR_CODES.UPLOAD_FAILED

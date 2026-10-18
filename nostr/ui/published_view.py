@@ -769,6 +769,10 @@ class PublishedView(QWidget):
         """The app's image loader for a preview's cover (None: no covers)."""
         self._preview.set_image_loader(loader)
 
+    def set_preview_pictures(self, lookup, arrived=None) -> None:
+        """Where a preview finds the pictures in a post's text (None: frames)."""
+        self._preview.set_pictures(lookup, arrived)
+
     def preview_record(self, key: str) -> Optional[PublishedRecord]:
         item = self._model.item(key) if key else None
         return preview_record_of(item) if item is not None else None

@@ -1868,3 +1868,51 @@ def test_the_full_previews_text_and_buttons_take_the_pointer(panel):
     QTest.mouseClick(window, Qt.LeftButton, Qt.NoModifier, QPoint(at))
     QApplication.processEvents()
     assert opened == [identifier_at(panel, 0)]
+
+
+class _Pictures(QObject):
+    """The window's picture lookup, as the full preview is given it."""
+
+    from PySide6.QtCore import Signal
+    arrived = Signal(str)
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.asked: list = []
+        self.held: dict = {}
+
+    def __call__(self, name: str):
+        self.asked.append(name)
+        return self.held.get(name)
+
+
+def test_the_full_preview_shows_the_pictures_in_the_text_when_they_come():
+    """The text's pictures were frames, always: nothing ever looked them up."""
+    from PySide6.QtCore import QUrl
+    from PySide6.QtGui import QTextDocument
+    from nostr.ui.preview_parts import PreviewReader
+    url = "https://cdn.example/" + "a" * 64 + ".png"
+    pictures = _Pictures()
+    reader = PreviewReader(dark=False)
+    reader.set_pictures(pictures, pictures.arrived)
+    reader.show_markdown(f"Before\n\n![Sunset]({url})\n\nAfter")
+    reader.resize(600, 400)
+    reader.show()
+    QApplication.processEvents()
+    assert url in pictures.asked
+    picture = QImage(40, 20, QImage.Format.Format_RGB32)
+    picture.fill(QColor("#e07a3a"))
+    pictures.held[url] = picture
+    pictures.arrived.emit(url)
+    shown = reader.document().resource(QTextDocument.ResourceType.ImageResource, QUrl(url))
+    assert shown is not None and shown.pixelColor(1, 1) == QColor("#e07a3a")
+    reader.set_pictures(None)
+    pictures.arrived.emit(url)                     # no longer listened to
+    reader.close()
+
+
+def test_a_panel_built_in_a_test_looks_up_no_pictures():
+    panel = DraftsPanel()
+    controller = panel._preview
+    assert controller._pictures == (None, None)
+    panel.deleteLater()

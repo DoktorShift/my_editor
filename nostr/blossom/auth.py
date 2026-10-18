@@ -137,10 +137,13 @@ def build_blossom_auth_event(
 def to_auth_header(signed_event: dict) -> str:
     """Encode a signed kind 24242 event into an Authorization header value.
 
-    Wire format: ``Nostr <base64url-nopad(json(signed_event))>``. BUD-11:
-    "the authorization token MUST be encoded as Base64 URL-safe without
-    padding (Base64url, as used by JWTs) and use the Authorization
-    scheme Nostr".
+    Wire format: ``Nostr <base64url(json(signed_event))>``, padding kept.
+    BUD-11 asks for Base64url *without* padding, but the servers people
+    use do not read it: nostr.download and blossom.primal.net (the default
+    servers) answer 400 "Invalid auth string" to an unpadded token and
+    accept a padded one, as blossom.nostr.build and blossom.band accept
+    both (checked October 2026). Padding is the one difference that
+    matters: every server decodes base64url with its "=".
 
     The JSON is the most compact form (no whitespace,
     ensure_ascii=False) because that's what every Blossom server we
@@ -149,5 +152,4 @@ def to_auth_header(signed_event: dict) -> str:
     encoded before base64.
     """
     payload = json.dumps(signed_event, separators=(",", ":"), ensure_ascii=False)
-    encoded = base64.urlsafe_b64encode(payload.encode("utf-8")).decode("ascii")
-    return f"Nostr {encoded.rstrip('=')}"
+    return "Nostr " + base64.urlsafe_b64encode(payload.encode("utf-8")).decode("ascii")
