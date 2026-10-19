@@ -377,127 +377,17 @@ class FindBar(QFrame):
         self.edit.selectAll()
 
 
-class FileChangedBar(QWidget):
-    """Notification bar shown at the top of a tab when the file was changed externally."""
+class UpdateButton(QToolButton):
+    """The app's version, said at the end of the toolbar, as a Mac app
+    outside the App Store shows a reminder inside its window (Sparkle's
+    gentle reminders; Apple: no alert at startup):
 
-    reload_requested = Signal()
-    dismissed = Signal()
+    - "Update Available" while a newer version is out: it opens Software
+      Update, where Later and Skip This Version are.
+    - "What\u2019s New" after an update, for that session: it shows the
+      release notes.
 
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setObjectName("FileChangedBar")
-        self.is_dark = True
-
-        layout = QHBoxLayout(self)
-        layout.setContentsMargins(12, 6, 8, 6)
-        layout.setSpacing(10)
-
-        self._icon = QLabel("⚠")
-        self._icon.setFixedWidth(18)
-        layout.addWidget(self._icon)
-
-        self._text = QLabel()
-        self._reload_btn = QPushButton(_("Reload"))
-        self._reload_btn.setFixedHeight(26)
-        self._reload_btn.clicked.connect(self.reload_requested)
-
-        self._dismiss_btn = QPushButton("×")
-        self._dismiss_btn.setFixedSize(26, 26)
-        self._dismiss_btn.setToolTip(_("Dismiss"))
-        self._dismiss_btn.clicked.connect(self._on_dismiss)
-
-        layout.addWidget(self._text, 1)
-        layout.addWidget(self._reload_btn)
-        layout.addWidget(self._dismiss_btn)
-
-        self._update_theme()
-        self.hide()
-
-    def show_changed(self, has_unsaved: bool):
-        self._text.setText(_("File was changed externally."))
-        self._reload_btn.setText(_("Discard my changes and reload") if has_unsaved
-                                 else _("Reload"))
-        self._reload_btn.show()
-        self.show()
-
-    def show_deleted(self):
-        self._text.setText(_("File was deleted - save to recreate it."))
-        self._reload_btn.hide()
-        self.show()
-
-    def show_already_open(self):
-        self._text.setText(_("This file is already open in this tab."))
-        self._reload_btn.hide()
-        self.show()
-
-    def show_unsupported(self, filename: str = ""):
-        msg = (_("File type not supported: {names}").format(names=filename) if filename
-               else _("File type not supported."))
-        self._text.setText(msg)
-        self._reload_btn.hide()
-        self.show()
-
-    def show_notice(self, message: str):
-        """Show an arbitrary one-line notice with no reload offer."""
-        self._text.setText(message)
-        self._reload_btn.hide()
-        self.show()
-
-    def _on_dismiss(self):
-        self.hide()
-        self.dismissed.emit()
-
-    def update_theme(self, is_dark: bool):
-        self.is_dark = is_dark
-        self._update_theme()
-
-    def _update_theme(self):
-        if self.is_dark:
-            self.setStyleSheet("""
-                #FileChangedBar {
-                    background: #3C3000;
-                    border-bottom: 1px solid #5C4A00;
-                }
-                QLabel { color: #FFD080; background: transparent; font-size: 12px; font-weight: bold; }
-                QPushButton {
-                    background: #5C4A00;
-                    color: #FFD080;
-                    border: 1px solid #7A6200;
-                    padding: 3px 10px;
-                    border-radius: 4px;
-                    font-size: 12px;
-                }
-                QPushButton:hover { background: #7A6200; }
-            """)
-        else:
-            self.setStyleSheet("""
-                #FileChangedBar {
-                    background: #FFF8DC;
-                    border-bottom: 1px solid #D4A800;
-                }
-                QLabel { color: #7A5000; background: transparent; font-size: 12px; font-weight: bold; }
-                QPushButton {
-                    background: #F0D060;
-                    color: #4A3000;
-                    border: 1px solid #C0A000;
-                    padding: 3px 10px;
-                    border-radius: 4px;
-                    font-size: 12px;
-                }
-                QPushButton:hover { background: #D4B840; }
-            """)
-
-
-class UpdateBar(QWidget):
-    """Notification bar at the top of the window about the app's version.
-
-    Two messages, one place:
-
-    - A newer version is available. It only announces the update.
-      "Update\u2026" opens Software Update, where the person chooses; closing
-      the bar means Later (skipping a version is an explicit button in that
-      dialog, never a side effect of closing this).
-    - MyEditor was just updated. "What\u2019s New" shows the release notes.
+    Hidden otherwise. A tinted capsule in the accent, never over the text.
     """
 
     update_requested = Signal()
@@ -505,94 +395,46 @@ class UpdateBar(QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setObjectName("UpdateBar")
-        self.is_dark = True
-
-        layout = QHBoxLayout(self)
-        layout.setContentsMargins(12, 6, 8, 6)
-        layout.setSpacing(10)
-
-        self._icon = QLabel("⬆")
-        self._icon.setFixedWidth(18)
-        layout.addWidget(self._icon)
-
-        self._text = QLabel()
-        self._update_btn = QPushButton(_("Update\u2026"))
-        self._update_btn.setFixedHeight(26)
-        self._update_btn.clicked.connect(self._on_button)
+        self.setObjectName("UpdateButton")
+        self.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextOnly)
+        self.setFocusPolicy(Qt.FocusPolicy.TabFocus)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
         self._mode = "available"
-
-        self._dismiss_btn = QPushButton("×")
-        self._dismiss_btn.setFixedSize(26, 26)
-        self._dismiss_btn.setToolTip(_("Later"))
-        self._dismiss_btn.setAccessibleName(_("Close"))
-        self._dismiss_btn.clicked.connect(self.hide)
-
-        layout.addWidget(self._text, 1)
-        layout.addWidget(self._update_btn)
-        layout.addWidget(self._dismiss_btn)
-
-        self._update_theme()
+        self.setAccessibleName(_("Update Available"))
+        self.clicked.connect(self._on_click)
+        self.update_theme(True)
         self.hide()
 
     def show_update(self, version: str):
         self._mode = "available"
-        self._icon.setText("\u2b06")
-        self._text.setText(_("MyEditor {version} is available.").format(version=version))
-        self._update_btn.setText(_("Update\u2026"))
-        self._dismiss_btn.setToolTip(_("Later"))
+        self.setText(_("Update Available"))
+        self.setToolTip(_("MyEditor {version} is available.").format(version=version))
+        self.setAccessibleName(self.toolTip())
         self.show()
 
     def show_updated(self, version: str):
         self._mode = "updated"
-        self._icon.setText("\u2713")
-        self._text.setText(_("You\u2019re now using MyEditor {version}.").format(version=version))
-        self._update_btn.setText(_("What\u2019s New"))
-        self._dismiss_btn.setToolTip(_("Close"))
+        self.setText(_("What\u2019s New"))
+        self.setToolTip(_("You\u2019re now using MyEditor {version}.").format(version=version))
+        self.setAccessibleName(self.toolTip())
         self.show()
 
-    def _on_button(self):
+    def _on_click(self):
         if self._mode == "updated":
+            self.hide()                    # read once: the reminder is done
             self.whats_new_requested.emit()
         else:
             self.update_requested.emit()
 
     def update_theme(self, is_dark: bool):
-        self.is_dark = is_dark
-        self._update_theme()
-
-    def _update_theme(self):
-        if self.is_dark:
-            self.setStyleSheet("""
-                #UpdateBar {
-                    background: #16324A;
-                    border-bottom: 1px solid #1F4C6E;
-                }
-                QLabel { color: #8FD0FF; background: transparent; font-size: 12px; font-weight: bold; }
-                QPushButton {
-                    background: #1F4C6E;
-                    color: #8FD0FF;
-                    border: 1px solid #2C6690;
-                    padding: 3px 10px;
-                    border-radius: 4px;
-                    font-size: 12px;
-                }
-                QPushButton:hover { background: #2C6690; }
-            """)
-        else:
-            self.setStyleSheet("""
-                #UpdateBar {
-                    background: #E3F2FD;
-                    border-bottom: 1px solid #90CAF9;
-                }
-                QLabel { color: #0D47A1; background: transparent; font-size: 12px; font-weight: bold; }
-                QPushButton {
-                    background: #BBDEFB;
-                    color: #0D47A1;
-                    border: 1px solid #64B5F6;
-                    padding: 3px 10px;
-                    border-radius: 4px;
-                    font-size: 12px;
-                }
-                QPushButton:hover { background: #90CAF9; }
-            """)
+        ink, fill, hover = (("#5EB1FF", "rgba(10, 132, 255, 0.22)", "rgba(10, 132, 255, 0.32)")
+                            if is_dark else
+                            ("#0A6CDB", "rgba(10, 132, 255, 0.12)", "rgba(10, 132, 255, 0.20)"))
+        self.setStyleSheet(f"""
+            #UpdateButton {{
+                color: {ink}; background: {fill}; border: 1px solid transparent;
+                border-radius: 11px; padding: 2px 10px; font-size: 12px; font-weight: 600;
+            }}
+            #UpdateButton:hover {{ background: {hover}; }}
+            #UpdateButton:focus {{ border-color: {ink}; }}
+        """)

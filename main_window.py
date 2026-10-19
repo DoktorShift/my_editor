@@ -44,7 +44,8 @@ from constants import (
     DARK_BORDER, LIGHT_BORDER, APP_DISPLAY_NAME, APP_VERSION, APP_URL, TEXT_COLORS,
     DARK_MUTED_FG, LIGHT_MUTED_FG, IPC_SERVER_NAME,
 )
-from widgets import ElidedLabel, FindBar, LineNumberGutter, FileChangedBar, UpdateBar
+from widgets import ElidedLabel, FindBar, LineNumberGutter, UpdateButton
+from document_notice import CAUTION, DocumentNotice
 import format_icons
 from format_toolbar import FormatToolbar, tooltip_for
 from selection_bar import SelectionBar
@@ -147,8 +148,8 @@ _SUPPORTED_EXTS = {'.md', '.html', '.htm', '.txt', '.rmd', '.pdf'}
 
 # Image extensions accepted on drag-and-drop. These never overlap with
 # _SUPPORTED_EXTS so the dispatcher stays simple. SVG is absent: it is
-# not decoded anywhere in this process, so a dropped .svg gets the
-# ordinary "unsupported" bar message instead of a silent nothing.
+# not decoded anywhere in this process, so a drop of an .svg is not
+# accepted, and one among files MyEditor takes is named in an alert.
 _IMAGE_EXTS = image_safety.IMAGE_FILE_SUFFIXES
 
 
@@ -473,6 +474,7 @@ class MainWindow(QMainWindow):
 
         self._watcher = QFileSystemWatcher(self)
         self._watcher.fileChanged.connect(self._on_file_changed)
+        self._watcher.directoryChanged.connect(self._on_folder_changed)
         # Each file as this window last saved it (_file_stamp): while it is
         # so, what the watcher reports is that save, not a change made outside.
         self._saved_stamps: dict[str, Optional[tuple]] = {}
@@ -495,10 +497,16 @@ class MainWindow(QMainWindow):
         # The account in use, at the end of the tab row (where browsers
         # show theirs); there only while Nostr is in use.
         self.profile_chip = ProfileChip()
+        # A newer version, or what is new in this one: at the end of the tab
+        # row, in the window's own chrome as Sparkle's reminder is, never
+        # over the documents, and in sight whatever the tab or the toolbar.
+        self.update_button = UpdateButton()
+        self.update_button.update_theme(self.is_dark_theme)
         corner = QWidget()
         corner_row = QHBoxLayout(corner)
         corner_row.setContentsMargins(0, 0, 4, 0)
         corner_row.setSpacing(6)
+        corner_row.addWidget(self.update_button)
         corner_row.addWidget(self.plus_btn)
         corner_row.addWidget(self.profile_chip)
         self.tabs.setCornerWidget(corner, Qt.TopRightCorner)
@@ -1417,6 +1425,7 @@ class MainWindow(QMainWindow):
         ed.set_web_image_resolver(self._resolve_web_image)
         ed.set_library_check(lambda url: self._library_file_at(url) is not None)
         ed.set_media_badges(lambda name, e=ed: self._media_badge(e, name))
+        ed.set_drop_check(self._accepts_drop)
         ed.media_clicked.connect(self._on_media_clicked)
         ed.image_pasted.connect(lambda img, e=ed: self._handle_pasted_image(e, img))
         ed.notice.connect(lambda text: self.status.showMessage(text, 8000))
@@ -2009,6 +2018,10 @@ class MainWindow(QMainWindow):
         # ``_on_save_as_pressed`` for the full decision tree.
         self.act_save_as = add(Command("file.save_as", _("Save As…"), FILE, "Ctrl+Shift+S"),
                                triggered=self._on_save_as_pressed)
+        # The version on disk in place of this one, asked first (a Mac's
+        # File > Revert To): also the keyboard's way to a notice's Revert….
+        self.act_revert = add(Command("file.revert", _("Revert to Saved…"), FILE),
+                              triggered=self._revert_current)
         # Lock the document with a password, as Pages' File > Set Password…
         # does; Change Password… once it is locked (locked_files.py).
         self.act_password = add(Command("file.password", _("Set Password…"), FILE,
@@ -2781,6 +2794,8 @@ class MainWindow(QMainWindow):
         m_file.addSeparator()
         m_file.addAction(self.act_save)
         m_file.addAction(self.act_save_as)
+        m_file.addAction(self.act_revert)
+        m_file.aboutToShow.connect(self._update_revert_command)
         m_file.addAction(self.act_password)
         m_file.addSeparator()
         m_file.addAction(self.act_page_setup)
@@ -3038,10 +3053,8 @@ class MainWindow(QMainWindow):
         self._find_refresh.setInterval(250)
         self._find_refresh.timeout.connect(self._refresh_matches)
 
-        self.update_bar = UpdateBar()
-        self.update_bar.update_theme(self.is_dark_theme)
-        self.update_bar.update_requested.connect(self._on_update_bar_clicked)
-        self.update_bar.whats_new_requested.connect(self._on_whats_new_requested)
+        self.update_button.update_requested.connect(self._on_update_button_clicked)
+        self.update_button.whats_new_requested.connect(self._on_whats_new_requested)
 
         # The editor area (header + findbar + tabs) lives on the left
         # of a horizontal splitter; the drafts panel docks on the right.
@@ -3084,7 +3097,6 @@ class MainWindow(QMainWindow):
         QTimer.singleShot(0, lambda: self._apply_view(self.current_editor()))
         v.addWidget(self.format_bar, 0)
         v.addWidget(self.findbar, 0)
-        v.addWidget(self.update_bar, 0)
         v.addWidget(self.tabs, 1)
 
         self._drafts_panel = DraftsPanel(is_dark=self.is_dark_theme)
@@ -3302,7 +3314,7 @@ class MainWindow(QMainWindow):
             draft_type=DraftBinding)
         self._attach_highlighter(ed, ed._file_path)
 
-        container, bar = self._editor_container(ed)
+        container, notice = self._editor_container(ed)
 
         base_name = os.path.basename(original_path) if original_path else _("Untitled")
         if freshness == "stale":
@@ -3315,10 +3327,11 @@ class MainWindow(QMainWindow):
         self._attach_close_button(idx, container)
 
         if freshness == "stale" and original_path:
-            bar.show_notice(
+            ed._newer_file = original_path
+            notice.present(
                 _("Recovered a copy. The file on disk is newer: {path}").format(
-                    path=original_path)
-            )
+                    path=original_path),
+                actions=[("open_newer", _("Open File"))])
         elif ed._file_path:
             self._watcher.addPath(ed._file_path)
 
@@ -3333,7 +3346,7 @@ class MainWindow(QMainWindow):
         """Open an untitled tab, make it current, and return its editor."""
         ed = self._new_wired_editor()
 
-        container, bar = self._editor_container(ed)
+        container, notice = self._editor_container(ed)
 
         idx = self.tabs.addTab(container, _("Untitled") + "*")
         self.tabs.setCurrentIndex(idx)
@@ -3517,7 +3530,9 @@ class MainWindow(QMainWindow):
                 return
             if r == "save":
                 self.tabs.setCurrentIndex(index)
-                if not self.save():
+                # Not saved, and still unsaved: it stays. Reverted at the
+                # question instead, it has nothing left to lose.
+                if not self.save() and editor.document().isModified():
                     return
         self._discard_tab(index)
 
@@ -3529,6 +3544,9 @@ class MainWindow(QMainWindow):
         editor = self._editor_from_widget(w)
         if editor:
             self._drop_media_reads(editor)
+            if getattr(editor, "_file_gone", False):
+                self._forget_folder_unless_needed(
+                    os.path.dirname(editor._file_path), closing=editor)
             # What the tab set going stops: its spelling (no late result
             # comes to it), and Find's matches when they are its own.
             spelling_of_tab = editor.spelling()
@@ -3625,7 +3643,7 @@ class MainWindow(QMainWindow):
         if answer == "save":
             for i in unsaved:
                 self.tabs.setCurrentIndex(i)
-                if not self.save():
+                if not self.save() and self.current_editor().document().isModified():
                     return False
         return True
 
@@ -3650,19 +3668,38 @@ class MainWindow(QMainWindow):
         viewer = self._pdf_viewer_from_widget(w)
         return viewer._file_path if viewer is not None else None
 
-    def _bar_from_widget(self, w) -> FileChangedBar | None:
-        if isinstance(w, QWidget):
-            return w.findChild(FileChangedBar)
-        return None
+    def _notice_from_widget(self, w) -> DocumentNotice | None:
+        """The notice of the tab ``w`` (not a newer draft's, which is one
+        too)."""
+        ed = self._editor_from_widget(w)
+        return getattr(ed, "_notice", None) if ed is not None else None
 
     # ----------------------------------------------------------------------
     # DRAG AND DROP
     # ----------------------------------------------------------------------
     def dragEnterEvent(self, event):
-        if event.mimeData().hasUrls() or event.mimeData().hasText():
+        mime = event.mimeData()
+        if (mime.hasUrls() and self._accepts_drop(mime.urls())) \
+                or (not mime.hasUrls() and mime.hasText()):
             event.acceptProposedAction()
         else:
             event.ignore()
+
+    def _accepts_drop(self, urls) -> bool:
+        """Whether dropping ``urls`` brings anything MyEditor takes: a
+        document to open, a picture (audio or video while a Nostr account
+        is in use), or an address. Otherwise the drop is not accepted, and
+        the pointer says so before it is let go, as the Finder's does."""
+        for url in urls:
+            if not url.isLocalFile():
+                return True
+            path = url.toLocalFile()
+            ext = os.path.splitext(path)[1].lower()
+            if ext in _SUPPORTED_EXTS or ext in _IMAGE_EXTS or (
+                    media_files.is_audio_or_video(path)
+                    and self._may_insert_audio_video(self.current_editor())):
+                return True
+        return False
 
     def dropEvent(self, event):
         if event.mimeData().hasUrls():
@@ -3700,9 +3737,9 @@ class MainWindow(QMainWindow):
             self._handle_dropped_images(image_paths)
 
         if unsupported:
-            bar = self._bar_from_widget(self.tabs.currentWidget())
-            if bar:
-                bar.show_unsupported(", ".join(unsupported))
+            # Said after the drop: an alert inside it holds up the drag
+            # the system's file manager is still finishing.
+            QTimer.singleShot(0, lambda names=list(unsupported): self._say_cannot_open(names))
 
     def _library_file_at(self, url: str):
         """The Media Library's file at this address, or None."""
@@ -3815,6 +3852,9 @@ class MainWindow(QMainWindow):
         the text under it is saved with the ending most of its own lines
         have.
         """
+        # A whole new text: the highlights of the old one go first
+        # (HtmlEditor.clear_highlights).
+        ed.clear_highlights()
         ext = path.lower()
         front = None
         if ext.endswith('.md'):
@@ -3860,10 +3900,9 @@ class MainWindow(QMainWindow):
         path = file_paths.normalize(path)
         for i in range(self.tabs.count()):
             if file_paths.same_file(self._tab_file_path(self.tabs.widget(i)), path):
+                # Its tab is the answer, as a Mac brings an open document
+                # forward: nothing to warn about.
                 self.tabs.setCurrentIndex(i)
-                bar = self._bar_from_widget(self.tabs.widget(i))
-                if bar:
-                    bar.show_already_open()
                 return None
 
         if path.lower().endswith('.pdf'):
@@ -3893,7 +3932,7 @@ class MainWindow(QMainWindow):
         ed.document().setModified(False)
         self._attach_highlighter(ed, path)
 
-        container, bar = self._editor_container(ed)
+        container, notice = self._editor_container(ed)
 
         idx = self.tabs.addTab(container, os.path.basename(path))
         self.tabs.setCurrentIndex(idx)
@@ -4345,9 +4384,14 @@ class MainWindow(QMainWindow):
             self._update_knit_actions()
         return ok
 
-    def _save_to(self, path: str) -> bool:
+    def _save_to(self, path: str, *, asked: bool = False) -> bool:
+        """Write the current document to ``path``; True once it is written.
+        ``asked``: the caller asked already about writing over a file that
+        another app changed (_confirm_save_over_changes)."""
         ed = self.current_editor()
         if not ed:
+            return False
+        if not asked and not self._confirm_save_over_changes(ed, path):
             return False
 
         ext = path.lower()
@@ -4412,6 +4456,7 @@ class MainWindow(QMainWindow):
                 ed._details_not_saved = front.refused if front is not None else frozenset()
                 tab_details.file_changed(ed)
             ed._recovered_title = ""
+            self._resolve_disk_change(ed)
             ed.document().setModified(False)
             self._update_tab_title()
             self._say_saved(ed, path, left_out)
@@ -4546,26 +4591,180 @@ class MainWindow(QMainWindow):
             w = self.tabs.widget(i)
             ed = self._editor_from_widget(w)
             if ed and getattr(ed, '_file_path', None) == path:
-                bar = self._bar_from_widget(w)
-                if bar:
-                    if os.path.exists(path):
-                        bar.show_changed(ed.document().isModified())
-                    else:
-                        bar.show_deleted()
+                self._look_at_file_soon(ed)
                 break
+
+    def _look_at_file_soon(self, ed) -> None:
+        """Another app may write a file in steps (emptied, then written):
+        it is looked at a moment after its last change, never half done."""
+        timer = getattr(ed, "_disk_timer", None)
+        if timer is None:
+            timer = ed._disk_timer = QTimer(ed)
+            timer.setSingleShot(True)
+            timer.setInterval(250)
+            timer.timeout.connect(
+                lambda e=ed: e._file_path and self._file_changed_on_disk(e, e._file_path))
+        timer.start()
+
+    def _on_folder_changed(self, folder: str) -> None:
+        """A file that went away may be put back (by another app, or Save
+        As elsewhere): its document follows it again, as after a change."""
+        for ed in self._all_editors():
+            path = getattr(ed, "_file_path", None)
+            if (getattr(ed, "_file_gone", False) and path
+                    and os.path.dirname(path) == folder and os.path.exists(path)):
+                ed._file_gone = False
+                was_clean, revision = getattr(ed, "_gone_unchanged", (False, -1))
+                if was_clean and ed.document().revision() == revision:
+                    ed.document().setModified(False)   # nothing of its own to keep
+                self._watcher.addPath(path)
+                self._on_file_changed(path)
+        self._forget_folder_unless_needed(folder)
+
+    def _forget_folder_unless_needed(self, folder: str, closing=None) -> None:
+        """Stop watching ``folder`` once no document (but ``closing``)
+        waits there for its file: on Windows a watched folder can't be
+        renamed or deleted."""
+        if not any(getattr(ed, "_file_gone", False) and ed is not closing
+                   and os.path.dirname(getattr(ed, "_file_path", None) or "") == folder
+                   for ed in self._all_editors()):
+            self._watcher.removePath(folder)
+
+    def _file_changed_on_disk(self, ed, path: str) -> None:
+        """Another app changed or removed the file of ``ed``. As TextEdit
+        does: with nothing unsaved the document simply follows its file,
+        keeping the place in it; with unsaved changes nothing is lost, the
+        notice says so and offers Revert…, and saving asks before writing
+        over the newer file (_confirm_save_over_changes). A file gone is
+        said, with Save As…; the text stays as it is."""
+        name = os.path.basename(path)
+        notice = self._notice_of(ed)
+        if not os.path.exists(path):
+            # The text is now the only copy: closing asks to save it, and a
+            # file put back there is followed (_on_folder_changed). Whether
+            # it had changes of its own is kept: a file saved by deleting
+            # and writing it anew (as many apps save) is then only followed.
+            ed._file_gone = True
+            ed._gone_unchanged = (not ed.document().isModified(), ed.document().revision())
+            ed.document().setModified(True)
+            self._update_tab_title(ed)
+            self._watcher.addPath(os.path.dirname(path))
+            notice.present(_("“{name}” was moved or deleted.").format(name=name),
+                           actions=[("save_as", _("Save As…"))])
+            return
+        was_locked = getattr(ed, "_lock", None) is not None
+        if not ed.document().isModified() and self._reload_from_disk(ed, quiet=True):
+            said = _("“{name}” was updated from disk.").format(name=name)
+            if was_locked and ed._lock is None:
+                said += " " + _("It is no longer locked with a password.")
+            self.status.showMessage(said, 5000)
+            return
+        # Unsaved changes, or a file that can't be read by itself: nothing
+        # is lost; Revert… takes the file (asking what it needs), and saving
+        # asks before writing over it.
+        ed._changed_on_disk = True
+        notice.present(_("“{name}” was changed in another app.").format(name=name),
+                       kind=CAUTION, actions=[("revert", _("Revert…"))])
+
+    @staticmethod
+    def _notice_of(ed) -> DocumentNotice | None:
+        return getattr(ed, "_notice", None)
+
+    def _on_notice_action(self, ed, key: str) -> None:
+        """An action of the notice over ``ed`` (document_notice.py)."""
+        if key == "revert":
+            self._revert_to_disk(ed)
+        elif key == "save_as":
+            self.tabs.setCurrentIndex(self._editor_widget_index(ed))
+            self.save_as()
+        elif key == "open_newer":
+            self.open_path(ed._newer_file)
+
+    def _revert_to_disk(self, ed) -> bool:
+        """Revert…: the version on disk in place of the unsaved one, once
+        the person said so (Cancel is the default: Return never throws work
+        away). The notice comes back when they keep theirs."""
+        path = getattr(ed, "_file_path", None) or ""
+        name = os.path.basename(path)
+        if confirm_destructive(
+                self, title=_("Revert to the version on disk?"),
+                message=_("Your unsaved changes to “{name}” will be lost.").format(name=name),
+                action=_("Revert")):
+            self._reload_from_disk(ed)
+            return True
+        if getattr(ed, "_changed_on_disk", False):
+            self._notice_of(ed).present(
+                _("“{name}” was changed in another app.").format(name=name),
+                kind=CAUTION, actions=[("revert", _("Revert…"))])
+        return False
+
+    def _can_revert(self, ed) -> bool:
+        """Whether ``ed`` has a version on disk other than what it shows:
+        unsaved changes, or its file changed by another app."""
+        path = getattr(ed, "_file_path", None) or ""
+        return bool(path) and os.path.exists(path) and (
+            ed.document().isModified() or getattr(ed, "_changed_on_disk", False))
+
+    def _update_revert_command(self) -> None:
+        ed = self.current_editor()
+        self.act_revert.setEnabled(ed is not None and self._can_revert(ed))
+
+    def _revert_current(self) -> None:
+        ed = self.current_editor()
+        if ed is not None and self._can_revert(ed):
+            self._revert_to_disk(ed)
+
+    def _confirm_save_over_changes(self, ed, path: str) -> bool:
+        """Saving a document whose file another app changed since it was
+        opened asks first, as a Mac app does: Save Anyway (what was asked
+        for) writes over those changes, Revert… takes them instead."""
+        if not getattr(ed, "_changed_on_disk", False) or not os.path.exists(path) \
+                or not file_paths.same_file(path, ed._file_path or ""):
+            return True
+        answer = ask(
+            self, title=_("“{name}” was changed in another app since you opened it.").format(
+                name=os.path.basename(path)),
+            message=_("Saving replaces the changes made there."),
+            buttons=(Button(_("Revert…"), "revert", NORMAL),
+                     Button(_("Cancel"), False, CANCEL),
+                     Button(_("Save Anyway"), True, DEFAULT)))
+        if answer == "revert":
+            self._revert_to_disk(ed)
+            return False
+        return answer is True
+
+    def _resolve_disk_change(self, ed) -> None:
+        """Saved: what another app wrote to its file is replaced (or the
+        document is now another file), so the notice about it has nothing
+        left to say."""
+        ed._file_gone = False
+        if getattr(ed, "_changed_on_disk", False):
+            ed._changed_on_disk = False
+            notice = self._notice_of(ed)
+            if notice is not None:
+                notice.hide()
+
+    def _say_cannot_open(self, names) -> None:
+        """Files dropped that MyEditor can't open: said in an alert, an
+        error being one (Apple's guidelines), naming them."""
+        inform(self, title=ngettext("MyEditor can’t open “{name}”",
+                                    "MyEditor can’t open {count} of these files",
+                                    len(names)).format(name=names[0], count=len(names)),
+               message=_("It opens Markdown, HTML, plain text, R Markdown and PDF documents, "
+                         "and puts pictures into them."))
 
     # -- documents locked with a password (locked_files.py) ---------------------
 
-    def _read_document(self, path: str, lock: Optional[Lock] = None):
+    def _read_document(self, path: str, lock: Optional[Lock] = None, *, ask: bool = True):
         """A document's text as written, its line ending, and its lock (None
         when it has no password). A locked one opens with ``lock`` (the
-        password it had when read before) or asks for its password; None
-        when it is not given. Raises OSError, and ValueError for text that
-        is not UTF-8."""
+        password it had when read before) or asks for its password (unless
+        ``ask`` is False); None when it is not given. Raises OSError, and
+        ValueError for text that is not UTF-8."""
         with open(path, "rb") as f:
             data = f.read()
         if locked_files.is_locked(data):
-            opened = MainWindow._unlock(self, os.path.basename(path), data, lock)
+            opened = MainWindow._unlock(self, os.path.basename(path), data, lock, ask=ask)
             if opened is None:
                 return None
             lock, data = opened
@@ -4574,14 +4773,17 @@ class MainWindow(QMainWindow):
         text, newline = decode_text_as_written(data)
         return text, newline, lock
 
-    def _unlock(self, name: str, data: bytes, lock: Optional[Lock]):
+    def _unlock(self, name: str, data: bytes, lock: Optional[Lock], *, ask: bool = True):
         """(lock, bytes) of a locked document: with the password ``lock``
-        has, else the one the person gives; None when none is given."""
+        has, else the one the person gives (when ``ask``); None when none
+        is given."""
         if lock is not None:
             try:
                 return lock, lock.unseal(data)
             except WrongPassword:
                 pass                         # locked with another password since
+        if not ask:
+            return None
 
         def check(password):
             try:
@@ -4640,6 +4842,11 @@ class MainWindow(QMainWindow):
                 new_password = None
             else:
                 return
+        path = getattr(ed, "_file_path", None)
+        # Asked before the lock changes, so Cancel (or Revert…) there
+        # leaves the document as it was.
+        if path and not self._confirm_save_over_changes(ed, path):
+            return
         QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
         try:
             ed._lock = Lock(new_password) if new_password else None
@@ -4648,8 +4855,7 @@ class MainWindow(QMainWindow):
         backup = getattr(ed, "_backup", None)
         if backup is not None:
             backup.write_now()
-        path = getattr(ed, "_file_path", None)
-        if path and not self._save_to(path):
+        if path and not self._save_to(path, asked=True):
             return
         self._update_password_command()
         self.status.showMessage(_("Locked with a password.") if ed._lock is not None
@@ -4663,29 +4869,47 @@ class MainWindow(QMainWindow):
         self.act_password.setText(_("Change Password…") if locked else _("Set Password…"))
         self.act_password.setEnabled(ed is not None and self.current_pdf_viewer() is None)
 
-    def _reload_from_disk(self, ed, bar: FileChangedBar):
+    def _reload_from_disk(self, ed, *, quiet: bool = False) -> bool:
+        """``ed`` as its file is now on disk, the caret and the view where
+        they were (as far as the text still reaches). ``quiet`` (following
+        the file by itself) asks nothing and says nothing: a file it can't
+        read so (another password, text that isn't UTF-8) is left to the
+        person (False). True once it is reloaded."""
         path = getattr(ed, '_file_path', None)
         if not path or not os.path.exists(path):
-            return
+            return False
         try:
-            opened = self._read_document(path, getattr(ed, "_lock", None))
+            opened = self._read_document(path, getattr(ed, "_lock", None), ask=not quiet)
         except (OSError, ValueError) as e:
-            inform(self, title=_("Couldn't reload \u201c{name}\u201d").format(
-                       name=os.path.basename(path)),
-                   message=str(e))
-            return
+            if not quiet:
+                inform(self, title=_("Couldn't reload \u201c{name}\u201d").format(
+                           name=os.path.basename(path)),
+                       message=str(e))
+            return False
         if opened is None:
-            return                          # locked anew, and no password given
+            return False                    # locked anew, and no password given
         content, newline, ed._lock = opened
         ed._newline = newline
 
+        caret, scrolled = ed.textCursor().position(), ed.verticalScrollBar().value()
         self._set_editor_content(ed, path, content)
         self._attach_highlighter(ed, path)
         ed._recovered_title = ""
+        ed._changed_on_disk = False
 
         ed.document().setModified(False)
-        bar.hide()
-        self._update_tab_title()
+        caret = min(caret, ed.document().characterCount() - 1)
+        if caret > 0 and 0xD800 <= ord(ed.document().characterAt(caret - 1)) <= 0xDBFF:
+            caret -= 1                      # never inside a character of two units
+        cursor = ed.textCursor()
+        cursor.setPosition(caret)
+        ed.setTextCursor(cursor)
+        ed.verticalScrollBar().setValue(scrolled)
+        notice = self._notice_of(ed)
+        if notice is not None:
+            notice.hide()
+        self._update_tab_title(ed)
+        return True
 
     def _open_external(self, url: str) -> None:
         """Hand a URL to the desktop browser, if it is one.
@@ -5493,9 +5717,9 @@ class MainWindow(QMainWindow):
         if load_settings().get("skipped_version") == info.version:
             return
         self._pending_release = info
-        self.update_bar.show_update(info.version)
+        self.update_button.show_update(info.version)
 
-    def _on_update_bar_clicked(self):
+    def _on_update_button_clicked(self):
         info = getattr(self, "_pending_release", None)
         if info is not None:
             self._show_update_dialog(info)
@@ -5531,7 +5755,7 @@ class MainWindow(QMainWindow):
 
     def _skip_update_version(self, version):
         save_setting("skipped_version", version)
-        self.update_bar.hide()
+        self.update_button.hide()
 
     def _close_for_update(self):
         # The installer (Windows) or the swap or relaunch helper (AppImage,
@@ -6549,12 +6773,12 @@ class MainWindow(QMainWindow):
         if getattr(self, 'view_switch', None) is not None:
             self.view_switch.set_dark(self.is_dark_theme)
         self._paint_pane_toggles()
-        if hasattr(self, 'update_bar'):
-            self.update_bar.update_theme(self.is_dark_theme)
+        if hasattr(self, 'update_button'):
+            self.update_button.update_theme(self.is_dark_theme)
         for i in range(self.tabs.count()):
-            bar = self._bar_from_widget(self.tabs.widget(i))
-            if bar:
-                bar.update_theme(self.is_dark_theme)
+            notice = self._notice_from_widget(self.tabs.widget(i))
+            if notice is not None:
+                notice.apply_theme(self.is_dark_theme)
             viewer = self._pdf_viewer_from_widget(self.tabs.widget(i))
             if viewer is not None:
                 viewer.update_theme(self.is_dark_theme)
@@ -6633,16 +6857,18 @@ class MainWindow(QMainWindow):
     # -- Write, Preview, Split ------------------------------------------------
 
     def _editor_container(self, ed):
-        """A tab's content and its file-changed bar: the bar over the text
-        (with its line numbers), the preview beside it when it shows."""
+        """A tab's content and its notice (document_notice.py): the notice
+        over the text (with its line numbers), the preview beside it when
+        it shows."""
         container = QWidget()
         vbox = QVBoxLayout(container)
         vbox.setContentsMargins(0, 0, 0, 0)
         vbox.setSpacing(0)
-        bar = FileChangedBar()
-        bar.update_theme(self.is_dark_theme)
-        bar.reload_requested.connect(lambda b=bar, e=ed: self._reload_from_disk(e, b))
-        vbox.addWidget(bar)
+        notice = DocumentNotice(container, is_dark=self.is_dark_theme)
+        notice.set_focus_return(ed)
+        notice.acted.connect(lambda key, e=ed: self._on_notice_action(e, key))
+        vbox.addWidget(notice)
+        ed._notice = notice
         editor_area = QWidget()
         layout = QHBoxLayout(editor_area)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -6658,12 +6884,13 @@ class MainWindow(QMainWindow):
         splitter.addWidget(editor_area)
         splitter.splitterMoved.connect(lambda *_args, s=splitter: self._remember_split(s))
         _WidthWatcher(splitter, lambda e=ed: self._width_changed(e))
-        vbox.addWidget(splitter)
+        # The text takes the room; a notice above it, only what it needs.
+        vbox.addWidget(splitter, 1)
         ed._view_splitter = splitter
         ed._view_side = WRITE           # the side used last, for a narrow Split
         ed._preview_pane = None
         ed._split_fits = None
-        return container, bar
+        return container, notice
 
     def _previewable(self, ed) -> bool:
         """Whether a tab has a preview: a document with Markdown structure,
@@ -7115,11 +7342,10 @@ class MainWindow(QMainWindow):
             self._report_unfinished_update(news.version)
             return
         self._whats_new = (news.notes, news.release_url)
-        self.update_bar.show_updated(APP_VERSION)
+        self.update_button.show_updated(APP_VERSION)
 
     def _on_whats_new_requested(self) -> None:
         notes, release_url = getattr(self, "_whats_new", ("", ""))
-        self.update_bar.hide()
         if not notes:
             self._open_external(release_url)
             return
@@ -10490,6 +10716,7 @@ class MainWindow(QMainWindow):
     def _load_draft_content(cls, ed, record) -> None:
         """Put a draft's text in the editor the way it was written: an
         article draft is Markdown, a note is plain text."""
+        ed.clear_highlights()               # a whole new text (see there)
         if record.inner_kind == INNER_KIND_LONG_FORM:
             cls._load_markdown(ed, record.content)
         else:
@@ -10504,7 +10731,8 @@ class MainWindow(QMainWindow):
             # version has updated again.
             self._tab_conflict_banners[ed].show()
             return
-        banner = DraftConflictBanner(is_dark=self.is_dark_theme)
+        banner = DraftConflictBanner(is_dark=self.is_dark_theme, parent=container)
+        banner.set_focus_return(ed)
         identifier = record.identifier
         banner.view_remote.connect(
             lambda i=identifier: self._on_conflict_view(i)
@@ -10512,10 +10740,9 @@ class MainWindow(QMainWindow):
         banner.reload.connect(
             lambda e=ed, i=identifier: self._on_conflict_reload(e, i)
         )
-        banner.keep_mine.connect(lambda e=ed: self._dismiss_conflict_banner(e))
         banner.dismissed.connect(lambda e=ed: self._dismiss_conflict_banner(e))
 
-        # The container's layout is a QVBoxLayout holding [bar, editor_area].
+        # The container's layout is a QVBoxLayout holding [notice, editor_area].
         # We insert the banner at the very top so it sits above both.
         layout = container.layout()
         layout.insertWidget(0, banner)
@@ -10544,8 +10771,17 @@ class MainWindow(QMainWindow):
         self._update_tab_title()
 
     def _on_conflict_reload(self, ed, identifier: str) -> None:
+        """Reload: the newer version in place of this one, asked first when
+        that throws unsaved edits away (Cancel keeps them, and the notice)."""
         record = self._draft_store.get(identifier)
         if record is None or record.state is not DraftState.READY:
+            return
+        if ed.document().isModified() and not confirm_destructive(
+                self, title=_("Replace this draft with the newer version?"),
+                message=_("Your unsaved changes will be lost."), action=_("Replace")):
+            banner = self._tab_conflict_banners.get(ed)
+            if banner is not None:
+                banner.show()
             return
         self._load_draft_content(ed, record)
         ed.document().setModified(False)

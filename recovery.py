@@ -527,7 +527,12 @@ class EditorBackup:
             "content": content,
             "assets": list(dict.fromkeys(_ASSET_KEY_RE.findall(content))),
             "saved_at": int(time.time()),
-            "source_mtime_ns": _source_mtime_ns(self._file_path),
+            # Changed by another app since it was read, or gone: the backup
+            # can't prove it is newer than the file (classify_backup), so a
+            # restore keeps the file and asks for a new name.
+            "source_mtime_ns": (None if getattr(self._editor, "_changed_on_disk", False)
+                                or getattr(self._editor, "_file_gone", False)
+                                else _source_mtime_ns(self._file_path)),
         }
         if structure is not None:
             record["structure"] = structure

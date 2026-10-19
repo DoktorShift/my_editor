@@ -87,6 +87,9 @@ NO_SHORTCUT: Tuple[Tuple[str, str, str], ...] = (
     ("file.knit_pdf", "all",
      "R Markdown is for the few; RStudio, whose key Knit to HTML has, has none for it."),
     ("file.rmd_toolchain", "all", "A one-off setup."),
+    ("file.revert", "all",
+     "Rare, and it asks before it throws anything away; TextEdit's Revert To has no key "
+     "either."),
     ("format.color.", "all",
      "Choices from the Color menu; Clear Formatting (Ctrl+D) takes color away too."),
     ("format.code_language.", "all",

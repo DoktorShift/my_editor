@@ -46,8 +46,8 @@ def band_heights(side: QWidget, toolbar: QWidget, tabs: QTabWidget) -> Tuple[int
         return toolbar_height, 0
     tabs_top = tabs.mapTo(side, QPoint(0, 0)).y()
     if tabs_top != toolbar_height:
-        # Something sits between the toolbar and the tabs (the find bar,
-        # the update bar): band 2 keeps its own height.
+        # Something sits between the toolbar and the tabs (the find bar):
+        # band 2 keeps its own height.
         return toolbar_height, 0
     # The line under the tabs is the tab pane's top border, on the last
     # row before the content; band 2 ends on it with its own line.

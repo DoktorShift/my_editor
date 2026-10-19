@@ -47,6 +47,8 @@ class SaveWindow(_Window):
     _article_details_of = MainWindow._article_details_of
     _published_article_of = MainWindow._published_article_of
     _say_saved = MainWindow._say_saved
+    _confirm_save_over_changes = MainWindow._confirm_save_over_changes
+    _resolve_disk_change = MainWindow._resolve_disk_change
 
     def __init__(self, cache_dir):
         super().__init__(cache_dir)
