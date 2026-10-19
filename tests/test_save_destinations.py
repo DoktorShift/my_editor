@@ -199,19 +199,26 @@ def test_a_saved_file_keeps_the_line_endings_it_was_read_with(win, tmp_path, mon
     assert b"\r\n" in open(path, "rb").read()
 
 
-def test_a_save_leaving_typed_details_out_says_so_beside_the_media_still_to_go_in():
+@pytest.mark.parametrize("path, said", [
+    # A Markdown file holds the file itself, as a copy beside it.
+    ("/notes/post.md", "Saved without what you typed for “Hashtags”: MyEditor can’t write it "
+                       "into the file."),
+    # A PDF links to it once it is on a media server.
+    ("/notes/post.pdf", "Saved. “talk.mp4” goes into the file once it is uploaded."),
+])
+def test_a_save_says_what_it_left_out(path, said):
     """Round 8, L1: the message about the details replaced the one about
     audio or video still to be uploaded."""
     shown = []
     window = types.SimpleNamespace(
         status=types.SimpleNamespace(showMessage=shown.append),
-        _media_not_uploaded=lambda document: [types.SimpleNamespace(alt="talk.mp4", sha256="s")])
+        _media_not_uploaded=lambda document: [types.SimpleNamespace(alt="talk.mp4", sha256="s",
+                                                                    size=10)])
     window._detail_names = lambda details: MainWindow._detail_names(window, details)
     window._detail_label = MainWindow._detail_label
     ed = types.SimpleNamespace(document=lambda: None, _details_not_saved=frozenset({"tags"}))
-    MainWindow._say_saved(window, ed, "/notes/post.md")
-    assert shown == ["Saved without what you typed for “Hashtags”: MyEditor can’t write it "
-                     "into the file. “talk.mp4” goes into the file once it is uploaded."]
+    MainWindow._say_saved(window, ed, path)
+    assert shown == [said]
 
 
 @pytest.mark.parametrize("refused, title, button", [

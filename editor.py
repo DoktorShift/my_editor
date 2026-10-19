@@ -36,6 +36,7 @@ import file_paths
 import link_url
 import mac_words
 import markdown_shortcuts
+import media_badge
 import media_files
 import paste
 import rich_text
@@ -226,6 +227,9 @@ class HtmlEditor(QTextEdit):
         # Whether a web address names a file of the Media Library: pasted
         # on its own, that file goes in, not its address (_pasted_media).
         self._in_library = lambda _address: False
+        # Where each picture, audio or video of the text is (media_badge.py):
+        # the window answers while a Nostr account is in use; none on its own.
+        self._media_badge = lambda _name: None
 
         # Resource seam: a resolver plus the URL scheme it answers for.
         # Injected by the window so the editor carries no knowledge of
@@ -925,13 +929,12 @@ class HtmlEditor(QTextEdit):
 
         super().paintEvent(event)
 
-        # Block cursor on top of the text, in code and plain text.
-        if not self.block_caret_shown():
-            return
-        rect = self._block_cursor_rect()
-        color = QColor(212, 212, 212, 210) if self._is_dark() else QColor(51, 51, 51, 210)
         p2 = QPainter(vp)
-        p2.fillRect(rect, color)
+        media_badge.paint(self, p2, self._media_badge)
+        # Block cursor on top of the text, in code and plain text.
+        if self.block_caret_shown():
+            color = QColor(212, 212, 212, 210) if self._is_dark() else QColor(51, 51, 51, 210)
+            p2.fillRect(self._block_cursor_rect(), color)
         p2.end()
 
     def _paint_guides(self, painter):
@@ -1467,6 +1470,11 @@ class HtmlEditor(QTextEdit):
         of the Media Library."""
         self._in_library = check
 
+    def set_media_badges(self, badge_of) -> None:
+        """Install ``badge_of(name)``: the media_badge.Badge the object of
+        the text named ``name`` wears, or None."""
+        self._media_badge = badge_of
+
     def set_link_opener(self, opener) -> None:
         """Install ``opener(href)``, which opens a Command-clicked link."""
         self._link_opener = opener
@@ -1714,7 +1722,10 @@ class HtmlEditor(QTextEdit):
         if event.type() == QEvent.Type.ToolTip:
             href = self.anchorAt(event.pos())
             note = "" if href else self._footnote_tip(event.pos())
-            if href:
+            badge = None if href or note else self._badge_at(event.pos())
+            if badge is not None:
+                QToolTip.showText(event.globalPos(), badge.hint, self)
+            elif href:
                 how = (_("Command-click to open") if sys.platform == "darwin"
                        else _("Ctrl+click to open"))
                 QToolTip.showText(event.globalPos(),
@@ -1727,6 +1738,16 @@ class HtmlEditor(QTextEdit):
                 QToolTip.hideText()
             return True
         return super().viewportEvent(event)
+
+    def media_object_at(self, pos):
+        """The name of the picture, audio or video under ``pos`` (viewport
+        coordinates), or None."""
+        return media_badge.object_at(self, pos)
+
+    def _badge_at(self, pos):
+        name = self.media_object_at(pos)
+        badge = self._media_badge(name) if name else None
+        return badge if badge is not None and badge.hint else None
 
     # -------- Quotes and dividers --------
     @_named_step(N_("Quote"))

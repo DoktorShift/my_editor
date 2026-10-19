@@ -41,6 +41,7 @@ from doc_walk import (
     parse_bullet_line,
     skip_prefix,
 )
+from markdown_writer import link_markdown
 import rich_text
 import rmd_toolchain
 from i18n import _
@@ -130,8 +131,7 @@ class MediaLink:
     url: str
 
     def markdown(self) -> str:
-        label = re.sub(r"([\\\[\]])", r"\\\1", self.label)
-        return f"[{label}]({self.url})"
+        return link_markdown(self.label, self.url)
 
 
 def _render_runs_md(runs, copy_image, heading: bool = False) -> str:

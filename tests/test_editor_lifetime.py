@@ -162,7 +162,7 @@ def work(ed):
         elif step == "split":
             w.act_view_split.trigger()
         elif step == "audio":
-            w._upload_into(ed, song)
+            w._add_media_file(ed, song)
         elif step == "details":
             w.act_article_details.setChecked(not w.act_article_details.isChecked())
         elif step == "drafts":

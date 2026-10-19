@@ -152,13 +152,13 @@ def test_both_are_sheets_on_their_window(tmp_path, make):
 def test_the_window_opens_them_as_sheets_and_takes_back_what_changed():
     import inspect
     from main_window import MainWindow
-    for handler in (MainWindow._on_nostr_publish_article, MainWindow._on_nostr_publish_note):
+    for handler in (MainWindow._open_publish_article, MainWindow._open_publish_note):
         source = inspect.getsource(handler)
         assert "dialog.open()" in source and ".exec()" not in source
-    article_source = inspect.getsource(MainWindow._on_nostr_publish_article)
+    article_source = inspect.getsource(MainWindow._open_publish_article)
     assert "dialog.finished.connect" in article_source
     # A note is composed for sharing: nothing goes back to the document.
-    assert "finished" not in inspect.getsource(MainWindow._on_nostr_publish_note)
+    assert "finished" not in inspect.getsource(MainWindow._open_publish_note)
 
 
 def test_what_changed_goes_back_when_the_sheet_closes_published_or_not(tmp_path):
@@ -477,7 +477,7 @@ def test_the_window_gives_an_open_sheet_its_new_appearance():
     import inspect
     from main_window import MainWindow
     assert "_publish_sheet" in inspect.getsource(MainWindow._set_theme)
-    for handler in (MainWindow._on_nostr_publish_article, MainWindow._on_nostr_publish_note):
+    for handler in (MainWindow._open_publish_article, MainWindow._open_publish_note):
         assert "self._publish_sheet = dialog" in inspect.getsource(handler)
 
 

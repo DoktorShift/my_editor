@@ -102,7 +102,8 @@ def test_saving_the_draft_again_takes_the_tabs_title_and_details():
     sent = []
     window._profile_store = types.SimpleNamespace(default=lambda: types.SimpleNamespace(
         user_pubkey=PK))
-    window._confirm_images_uploaded = lambda _ed: True
+    window._after_uploads = lambda _ed, then, draft=False: then()
+    window._save_draft = lambda *args: MainWindow._save_draft(window, *args)
     window._publish_text = lambda _ed, _flavor: "The text."
     window._build_inner_for_choice = lambda profile, choice, content, details: (
         MainWindow._build_inner_for_choice(window, profile, choice, content, details=details))

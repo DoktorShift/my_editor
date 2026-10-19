@@ -278,7 +278,7 @@ from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
 app = QApplication(sys.argv[:1])
 import main_window
-main_window.ask = lambda parent, **kw: False          # Keep Local
+main_window.ask = lambda parent, **kw: False          # Cancel, should anything ask
 w = main_window.MainWindow()
 w.show()
 picture = os.path.join(sys.argv[2], "picture.png")
@@ -322,7 +322,7 @@ step("library", ed, lambda: w._insert_media_at_cursor(None, ed, "a picture"))
 w.nostr_state._active = True
 w._update_nostr_commands()
 w._media_store.upload_bytes = lambda body, name, mime_type: None
-step("audio", ed, lambda: w._upload_into(ed, song))
+step("audio", ed, lambda: w._add_media_file(ed, song))
 ed.document().setModified(False)
 w.close()
 print("RESULT " + json.dumps(r))

@@ -5,8 +5,9 @@
 The defect classes this file guards against:
 - a pasted screenshot, which exists nowhere else, being dropped because
   no signer is connected, an upload failed or the network is down,
-- Ctrl+V publishing to a public server with no confirmation, or the
-  remembered preference being ignored in either direction,
+- a paste or a drop putting a file on a public server, or asking about
+  it, before the document is published (unless Upload Right Away is
+  chosen in Settings),
 - a drop refusing to insert until a signer is connected,
 - an asset name falling through to Qt's default resolution, which reads
   it as a relative file path,
@@ -267,7 +268,7 @@ def test_a_drop_falls_back_to_text_with_nobody_listening(qt_app):
 
 
 # --------------------------------------------------------------------------- #
-# Paste and drop: the insert comes first, consent comes after
+# Paste and drop: the insert comes first, and stays on this computer
 # --------------------------------------------------------------------------- #
 
 class _Status:
@@ -293,9 +294,8 @@ class _EntryWindow:
     _handle_dropped_images = MainWindow._handle_dropped_images
     _handle_dropped_urls = MainWindow._handle_dropped_urls
     _library_file_at = MainWindow._library_file_at
-    _confirm_paste_upload = MainWindow._confirm_paste_upload
-    _paste_choice = MainWindow._paste_choice
-    _store_paste_choice = MainWindow._store_paste_choice
+    _upload_added = MainWindow._upload_added
+    _upload_choice = MainWindow._upload_choice
     _insert_asset = MainWindow._insert_asset
 
     def __init__(self, cache_dir, *, profile=None):
@@ -310,6 +310,7 @@ class _EntryWindow:
             index=AssetIndex(path=cache_dir.parent / "media_assets.json"),
         )
         self._profile_store = types.SimpleNamespace(default=lambda: profile)
+        self.nostr_state = types.SimpleNamespace(active=profile is not None)
         self.status = _Status()
         self.bar = _Bar()
         self.editor = HtmlEditor()
@@ -342,12 +343,19 @@ class _EntryWindow:
 
 
 @pytest.fixture
-def paste_choice(monkeypatch):
-    """Set the persisted answer to the paste-upload prompt."""
-    def choose(value):
-        monkeypatch.setattr(main_window_module, "load_settings",
-                            lambda: {"upload_pasted_images": value})
-    return choose
+def settings(monkeypatch):
+    """Set what the settings file holds."""
+    def hold(**values):
+        monkeypatch.setattr(main_window_module, "load_settings", lambda: dict(values))
+    return hold
+
+
+@pytest.fixture
+def no_alerts(monkeypatch):
+    box, shown = fake_alert()
+    monkeypatch.setattr(alerts, "Alert", box)
+    yield
+    assert shown == [], "adding a file asks nothing"
 
 
 def _png_file(tmp_path, name="shot.png", data=PNG_BYTES):
@@ -387,95 +395,49 @@ def test_a_paste_that_cannot_encode_falls_back_to_a_normal_paste(tmp_path):
     assert win.image_names() == []
 
 
-def test_never_keeps_a_pasted_image_off_every_server(tmp_path, paste_choice):
-    paste_choice("never")
+def test_a_paste_stays_on_this_computer_and_asks_nothing(tmp_path, settings, no_alerts):
+    # Pasting is a quick, low-intent gesture: nothing leaves the machine
+    # for it; publishing asks, once, for everything the document holds.
+    settings()
     win = _EntryWindow(tmp_path / "cache", profile=object())
 
     win._handle_pasted_image(win.editor, _clipboard_image())
 
     assert len(win.image_names()) == 1
     assert win._uploader.calls == []
+    assert win.assets()[0].upload_state is AssetState.LOCAL
 
 
-def test_always_uploads_a_pasted_image_without_asking(tmp_path, paste_choice,
-                                                      monkeypatch):
-    paste_choice("always")
-    box, shown = fake_alert()
-    monkeypatch.setattr(alerts, "Alert", box)
+def test_upload_right_away_sends_a_pasted_image_at_once(tmp_path, settings, no_alerts):
+    settings(upload_added_media="now")
     win = _EntryWindow(tmp_path / "cache", profile=object())
 
     win._handle_pasted_image(win.editor, _clipboard_image())
 
-    assert shown == [], "the remembered answer replaces the prompt"
     assert len(win._uploader.calls) == 1
     assert win.assets()[0].upload_state is AssetState.SIGNING
 
 
-def test_ask_consults_the_prompt_and_keeps_local_by_default(tmp_path,
-                                                            paste_choice,
-                                                            monkeypatch):
-    # A paste is a high-frequency, low-intent gesture, so the outcome of
-    # an accidental one has to be that nothing left the machine.
-    paste_choice("ask")
-    box, shown = fake_alert()
-    monkeypatch.setattr(alerts, "Alert", box)
-    monkeypatch.setattr(main_window_module, "save_setting",
-                        lambda *a, **k: pytest.fail("nothing to remember"))
-    win = _EntryWindow(tmp_path / "cache", profile=object())
-    win._media_store = types.SimpleNamespace(target_servers=lambda: ["https://cdn.example"])
+@pytest.mark.parametrize("earlier, choice", [
+    ("always", "now"), ("never", "publishing"), ("ask", "publishing"), (None, "publishing")])
+def test_the_earlier_answer_about_pasted_images_is_kept(tmp_path, settings, earlier, choice):
+    # Who had pasted images uploaded always keeps uploading at once.
+    settings(**({"upload_pasted_images": earlier} if earlier else {}))
+
+    assert _EntryWindow(tmp_path / "cache")._upload_choice() == choice
+
+
+def test_upload_right_away_does_nothing_of_nostr_without_an_account(tmp_path, settings):
+    settings(upload_added_media="now")
+    win = _EntryWindow(tmp_path / "cache", profile=None)
 
     win._handle_pasted_image(win.editor, _clipboard_image())
 
-    assert [d.title for d in shown] == ["Upload this image to your media servers?"]
-    assert shown[0].message == ("Anyone with the link can view it. The image is already in "
-                                "your document and stays there either way.")
-    assert shown[0].default.label == "Keep Local"
     assert win._uploader.calls == []
-    assert len(win.image_names()) == 1
 
 
-def test_ask_uploads_when_the_prompt_is_answered_with_upload(tmp_path,
-                                                             paste_choice,
-                                                             monkeypatch):
-    paste_choice("ask")
-    box, shown = fake_alert(click="Upload")
-    remembered = []
-    monkeypatch.setattr(alerts, "Alert", box)
-    monkeypatch.setattr(main_window_module, "save_setting",
-                        lambda key, value: remembered.append((key, value)))
-    win = _EntryWindow(tmp_path / "cache", profile=object())
-    win._media_store = types.SimpleNamespace(target_servers=lambda: ["https://cdn.example"])
-
-    win._handle_pasted_image(win.editor, _clipboard_image())
-
-    assert len(win._uploader.calls) == 1
-    assert remembered == [], "the box was never ticked"
-    assert shown[0].checkbox == "Remember this choice"
-
-
-def test_remember_this_choice_shows_at_once_in_an_open_settings_window(tmp_path,
-                                                                      monkeypatch):
-    # Review L5: Settings stays open beside the document, and kept saying
-    # Ask Every Time after the alert had stored the answer.
-    settings = {"upload_pasted_images": "ask"}
-    monkeypatch.setattr(main_window_module, "load_settings", lambda: dict(settings))
-    monkeypatch.setattr(main_window_module, "save_setting", settings.__setitem__)
-    monkeypatch.setattr(main_window_module, "ask_with_checkbox",
-                        lambda *args, **kwargs: (True, True))     # Upload, remembered
-    win = _EntryWindow(tmp_path / "cache", profile=object())
-    win._media_store = types.SimpleNamespace(target_servers=lambda: ["https://cdn.example"])
-    shown = []
-    win._settings_window = types.SimpleNamespace(refresh=lambda: shown.append(win._paste_choice()))
-
-    win._handle_pasted_image(win.editor, _clipboard_image())
-
-    assert settings["upload_pasted_images"] == "always"
-    assert shown == ["always"]
-
-
-def test_a_failed_upload_leaves_the_image_in_the_document(tmp_path,
-                                                          paste_choice):
-    paste_choice("always")
+def test_a_failed_upload_leaves_the_image_in_the_document(tmp_path, settings):
+    settings(upload_added_media="now")
     win = _EntryWindow(tmp_path / "cache", profile=object())
     win._uploader.fail_synchronously = "UPLOAD_FAILED"
 
@@ -507,23 +469,18 @@ def test_a_dropped_image_keeps_the_filename_as_its_alt_text(tmp_path):
     assert win.assets()[0].alt == "holiday"
 
 
-def test_a_drop_uploads_only_when_the_prompt_is_accepted(tmp_path, monkeypatch):
-    box, shown = fake_alert(click="Keep Local")
-    monkeypatch.setattr(alerts, "Alert", box)
+def test_a_drop_stays_on_this_computer_and_asks_nothing(tmp_path, settings, no_alerts):
+    settings()
     win = _EntryWindow(tmp_path / "cache", profile=object())
 
     win._handle_dropped_images([_png_file(tmp_path)])
 
-    assert [d.title for d in shown] == ["Upload 1 image to your media servers?"]
-    assert shown[0].message.startswith("Anyone with the link can view them.")
-    assert shown[0].default.label == "Upload", "dropping is a deliberate act"
     assert win._uploader.calls == []
     assert len(win.image_names()) == 1
 
 
-def test_a_drop_uploads_each_image_when_accepted(tmp_path, monkeypatch):
-    box, _shown = fake_alert(click="Upload")
-    monkeypatch.setattr(alerts, "Alert", box)
+def test_upload_right_away_sends_each_dropped_image(tmp_path, settings, no_alerts):
+    settings(upload_added_media="now")
     win = _EntryWindow(tmp_path / "cache", profile=object())
     first = _png_file(tmp_path, "one.png")
     second = _png_file(tmp_path, "two.png", data=PNG_BYTES[:-1] + b"\x00")
@@ -637,23 +594,6 @@ def test_a_refresh_for_bytes_that_never_arrived_changes_nothing(tmp_path):
 
     assert ed.document().isModified() is False
 
-
-def test_the_prompt_says_who_can_see_the_image_not_which_hosts(
-        tmp_path, paste_choice, monkeypatch):
-    # What the person decides is whether the image may be seen by anyone
-    # with its link; the servers are their own, listed in Media Servers,
-    # and a row of host names is not what they can judge it by.
-    paste_choice("ask")
-    box, shown = fake_alert()
-    monkeypatch.setattr(alerts, "Alert", box)
-    win = _EntryWindow(tmp_path / "cache", profile=object())
-    win._media_store = types.SimpleNamespace(target_servers=lambda: [
-        "https://cdn.example", "https://blossom.einundzwanzig.space"])
-
-    win._handle_pasted_image(win.editor, _clipboard_image())
-
-    assert shown[0].title == "Upload this image to your media servers?"
-    assert "cdn.example" not in shown[0].title + shown[0].message
 
 def test_a_drop_goes_where_it_is_dropped_not_at_the_caret(qt_app):
     """As in Pages and TextEdit: the caret moves to the drop point, and
