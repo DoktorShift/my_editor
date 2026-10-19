@@ -407,6 +407,38 @@ def test_image_files_copied_in_a_file_manager_go_to_the_media_handler(tmp_path):
     assert len(seen) == 1 and ed.toPlainText() == "notes.pdf"
 
 
+def test_a_media_library_link_pasted_goes_to_the_media_handler():
+    """Copy Link in the Media Library, then Paste: the picture or player
+    goes in, as a tile dragged from there does, not its address."""
+    library = "https://media.example/" + "ab" * 32 + ".png"
+    ed = editor()
+    ed.set_library_check(lambda address: address == library)
+    seen = []
+    ed.urls_dropped.connect(seen.append)
+    mime = QMimeData()
+    mime.setText(library + "\n")
+    ed.insertFromMimeData(mime)
+    assert [[url.toString() for url in urls] for urls in seen] == [[library]]
+    assert ed.toPlainText() == ""
+    other = QMimeData()
+    other.setText("https://example.com/a.png")
+    ed.insertFromMimeData(other)
+    assert len(seen) == 1 and ed.toPlainText() == "https://example.com/a.png"
+
+
+def test_a_media_library_link_stays_an_address_in_a_plain_text_file():
+    library = "https://media.example/" + "ab" * 32 + ".png"
+    ed = editor()
+    ed.set_library_check(lambda address: True)
+    ed.set_pictures_check(lambda: False)
+    seen = []
+    ed.urls_dropped.connect(seen.append)
+    mime = QMimeData()
+    mime.setText(library)
+    ed.insertFromMimeData(mime)
+    assert seen == [] and ed.toPlainText() == library
+
+
 
 # -- what was text stays text (review H1) ---------------------------------------------
 

@@ -132,6 +132,20 @@ def iter_image_names(doc):
                 yield fmt.toImageFormat().name()
 
 
+def image_positions(doc, name: str) -> list:
+    """The position of every image fragment named ``name``, in order."""
+    found = []
+    for block in iter_blocks(doc):
+        it = block.begin()
+        while not it.atEnd():
+            frag = it.fragment()
+            fmt = frag.charFormat()
+            if fmt.isImageFormat() and fmt.toImageFormat().name() == name:
+                found.extend(range(frag.position(), frag.position() + frag.length()))
+            it += 1
+    return found
+
+
 def serialize_plain_with_images(doc, image_target) -> str:
     """Plain text with each image replaced by image_target(QTextImageFormat).
 

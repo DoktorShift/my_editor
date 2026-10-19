@@ -818,3 +818,27 @@ def test_a_library_file_with_no_name_is_called_by_its_day():
                                short_month=True)
     assert MainWindow._library_name(host, media) == expected
     assert MainWindow._library_name(host, SimpleNamespace(hash="d" * 64, uploaded_at_ms=0)) == ""
+
+
+def test_an_uploading_card_is_drawn_again_where_it_stands_only():
+    """Its bar moves many times a second: the card's picture is drawn
+    again and only its place laid out again, never the whole text, and
+    the document stays unmodified."""
+    from types import SimpleNamespace
+    sha = "e" * 64
+    key = asset_key(sha)
+    editor = HtmlEditor()
+    cursor = editor.textCursor()
+    cursor.insertText("Before\n")
+    cursor.insertImage(_image_fmt(key))
+    cursor.insertText("\nAfter")
+    doc = editor.document()
+    doc.setModified(False)
+    dirty = []
+    doc.markContentsDirty = lambda position, length: dirty.append((position, length))
+    card = QImage(4, 4, QImage.Format.Format_ARGB32)
+    host = SimpleNamespace(_all_editors=lambda: [editor], _media_card=lambda asset: card)
+    MainWindow._redraw_card(host, SimpleNamespace(sha256=sha))
+    assert dirty == [(len("Before\n"), 1)]
+    assert doc.resource(QTextDocument.ImageResource, QUrl(key)) == card
+    assert not doc.isModified()
