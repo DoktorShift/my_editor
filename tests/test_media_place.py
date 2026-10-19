@@ -23,7 +23,7 @@ import pytest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtCore import QPoint, QUrl
+from PySide6.QtCore import QPoint, Qt, QUrl
 from PySide6.QtGui import QGuiApplication, QImage, QPainter, QTextDocument, QTextImageFormat
 from PySide6.QtWidgets import QApplication, QMenu
 
@@ -63,6 +63,12 @@ def _finish(manager):
     call = uploader.calls[-1]
     uploader.finish(call.name, types.SimpleNamespace(
         url=f"https://cdn.example/{sha_of(call.body)}.png", size=len(call.body), servers=()))
+    QApplication.processEvents()
+
+
+def _fail(manager, name=None):
+    manager._uploader.fail(name or manager._uploader.calls[-1].name, "UPLOAD_FAILED")
+    QApplication.processEvents()
 
 
 # --------------------------------------------------------------------------- #
@@ -123,6 +129,85 @@ def test_a_badge_is_drawn_on_the_objects_top_left_corner():
     ed.close()
 
 
+def _image_fmt(name, width=0, height=0):
+    fmt = QTextImageFormat()
+    fmt.setName(name)
+    if width:
+        fmt.setWidth(width)
+        fmt.setHeight(height)
+    return fmt
+
+
+def _show(ed):
+    ed.resize(700, 400)
+    ed.show()
+    QApplication.processEvents()
+
+
+def _drawn_at(ed, name):
+    """Where Qt draws the object named ``name``: from the caret before it."""
+    at = ed.document().find("\ufffc")
+    at.setPosition(at.selectionStart())
+    return ed.cursorRect(at)
+
+
+def test_an_object_in_a_table_cell_is_found_where_it_is_drawn():
+    # A cell's paragraph is laid out within its cell: the badge was drawn
+    # at the corner of the view, over the text there.
+    ed = HtmlEditor()
+    cursor = ed.textCursor()
+    cursor.insertText("Above")
+    cursor.insertBlock()
+    table = cursor.insertTable(2, 2)
+    table.cellAt(1, 1).firstCursorPosition().insertImage(_image_fmt("pic", 200, 100))
+    _show(ed)
+    [(_name, box)] = list(media_badge.objects_in_sight(ed))
+    caret = _drawn_at(ed, "pic")              # whole pixels: a cell's padding is not
+    assert abs(box.left() - caret.left()) <= 1 and abs(box.top() - caret.top()) <= 1
+    assert (box.width(), box.height()) == (200, 100)
+    ed.close()
+
+
+def test_an_object_beside_a_tall_cell_is_still_found():
+    ed = HtmlEditor()
+    table = ed.textCursor().insertTable(1, 2)
+    table.cellAt(0, 0).firstCursorPosition().insertText("\n".join(["line"] * 80))
+    table.cellAt(0, 1).firstCursorPosition().insertImage(_image_fmt("pic", 200, 100))
+    _show(ed)
+    assert [name for name, _box in media_badge.objects_in_sight(ed)] == ["pic"]
+    ed.close()
+
+
+def test_an_object_in_right_to_left_text_has_its_width():
+    ed = HtmlEditor()
+    cursor = ed.textCursor()
+    block = cursor.blockFormat()
+    block.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
+    cursor.setBlockFormat(block)
+    cursor.insertImage(_image_fmt("pic", 200, 100))
+    _show(ed)
+    [(_name, box)] = list(media_badge.objects_in_sight(ed))
+    assert (box.width(), box.height()) == (200, 100)
+    assert media_badge.object_at(ed, box.center().toPoint()) == "pic"
+    ed.close()
+
+
+def test_the_badge_keeps_its_words_inside_at_the_largest_text_size():
+    ed = _editor_with_picture(400, 200)
+    font = ed.font()
+    font.setPointSizeF(40)
+    ed.setFont(font)
+    QApplication.processEvents()
+    [(_name, box)] = list(media_badge.objects_in_sight(ed))
+    _asked, image = _painted(ed, lambda name: media_badge.Badge(media_badge.LOCAL,
+                                                                 "On This Computer"))
+    # The capsule ends above the middle of the picture: its words are a
+    # badge's size, whatever the text's.
+    middle = box.topLeft().toPoint() + QPoint(14, 40)
+    assert image.pixelColor(middle).alpha() == 0
+    ed.close()
+
+
 def test_an_object_too_small_for_a_badge_wears_none():
     ed = _editor_with_picture(40, 20)
     asked, _image = _painted(ed, lambda name: media_badge.Badge(media_badge.LOCAL, "x"))
@@ -146,6 +231,7 @@ def test_the_editor_shows_the_badge_the_window_answers_as_its_tooltip():
 class _Window:
     _asset_named = MainWindow._asset_named
     _local_image_bytes = staticmethod(MainWindow._local_image_bytes)
+    _has_local_image = staticmethod(MainWindow._has_local_image)
     _media_badge = MainWindow._media_badge
     _media_context = MainWindow._media_context
     _upload_object = MainWindow._upload_object
@@ -166,7 +252,10 @@ def test_each_object_wears_where_it_is(tmp_path):
     manager = win._asset_manager
     local = manager.adopt_bytes(GIF_BYTES, alt="sketch")
     hosted = _uploaded(manager)
+    (tmp_path / "Trip_media").mkdir()
+    (tmp_path / "Trip_media" / "sea.png").write_bytes(PNG_BYTES)
     ed = HtmlEditor()
+    ed._file_path = str(tmp_path / "Trip.md")
     assert _places(win, ed, local.key, hosted.key, hosted.remote_url,
                    "https://elsewhere.example/cat.png", "Trip_media/sea.png") == [
         media_badge.LOCAL, media_badge.UPLOADED, media_badge.UPLOADED, None, media_badge.LOCAL]
@@ -175,6 +264,18 @@ def test_each_object_wears_where_it_is(tmp_path):
     manager._uploader.fail(manager._uploader.calls[-1].name, "UPLOAD_FAILED")
     failed = win._media_badge(ed, local.key)
     assert failed.place == media_badge.FAILED and failed.hint.endswith("Publishing tries again.")
+
+
+def test_what_is_not_on_this_computer_wears_no_badge(tmp_path):
+    # A picture beside no file, a record with no bytes, a key with no
+    # record: nothing to upload, so nothing says it is here.
+    win = _Window(tmp_path)
+    ed = HtmlEditor()
+    ed._file_path = str(tmp_path / "Trip.md")
+    gone = win._asset_manager.adopt_bytes(GIF_BYTES, alt="sketch")
+    win._asset_manager._blob_store.cache_path(gone.sha256).unlink()
+    assert _places(win, ed, "Trip_media/gone.png", gone.key, "myeditor-asset:" + "b" * 64) == [
+        None, None, None]
 
 
 def test_nothing_of_it_shows_without_a_nostr_account(tmp_path):
@@ -203,7 +304,8 @@ def test_an_uploaded_object_gives_its_link(tmp_path):
     win = _Window(tmp_path)
     hosted = _uploaded(win._asset_manager)
     menu = _menu_on(win, HtmlEditor(), hosted.key)
-    [copy] = [a for a in menu.actions() if a.text() == "Copy Link"]
+    # Named apart from Copy Link, which a link around the picture brings.
+    [copy] = [a for a in menu.actions() if a.text() == "Copy Media Link"]
     copy.trigger()
     assert QGuiApplication.clipboard().text() == hosted.remote_url
 
@@ -212,6 +314,89 @@ def test_the_menu_offers_nothing_of_it_without_an_account(tmp_path):
     win = _Window(tmp_path, nostr=False)
     local = win._asset_manager.adopt_bytes(GIF_BYTES, alt="sketch")
     assert _menu_on(win, HtmlEditor(), local.key).actions() == []
+
+
+# --------------------------------------------------------------------------- #
+# Audio and video a .md file holds as a copy beside it
+# --------------------------------------------------------------------------- #
+
+class _Reopening(_Window):
+    _media_from_addresses = MainWindow._media_from_addresses
+    _media_copy_linked = MainWindow._media_copy_linked
+    _adopt_media_copy = MainWindow._adopt_media_copy
+    _editor_kind = MainWindow._editor_kind
+    _may_insert_audio_video = MainWindow._may_insert_audio_video
+
+
+SONG = b"ID3" + b"sound" * 40
+
+
+def _reopened(tmp_path, link, data=SONG, name=None):
+    """A .md beside a copy of ``data`` (called ``name``, else its hash),
+    read back: the editor, and the window."""
+    win = _Reopening(tmp_path)
+    folder = tmp_path / "Doc_media"
+    folder.mkdir(exist_ok=True)
+    name = name or sha_of(data) + ".mp3"
+    if data is not None:
+        (folder / name).write_bytes(data)
+    ed = HtmlEditor()
+    ed._file_path = str(tmp_path / "Doc.md")
+    from markdown_writer import read_markdown
+    read_markdown(ed.document(), f"Listen:\n\n{link.format(name=name)}\n")
+    win._media_from_addresses(ed)
+    return ed, win
+
+
+def _cards(ed):
+    from doc_walk import iter_blocks
+    found = []
+    for block in iter_blocks(ed.document()):
+        it = block.begin()
+        while not it.atEnd():
+            fmt = it.fragment().charFormat()
+            if fmt.isImageFormat():
+                image = fmt.toImageFormat()
+                found.append((image.name(), image.property(QTextImageFormat.ImageAltText)))
+            it += 1
+    return found
+
+
+def test_a_copy_beside_the_document_is_its_card_again_keeping_its_words(tmp_path):
+    ed, _win = _reopened(tmp_path, "[Our wedding song](Doc_media/{name})")
+    assert _cards(ed) == [(f"myeditor-asset:{sha_of(SONG)}", "Our wedding song")]
+
+
+def test_a_copy_changed_since_is_taken_for_what_it_holds(tmp_path):
+    # Its name is the hash of what was copied; the person trimmed it since.
+    edited = b"ID3" + b"trimmed" * 10
+    ed, win = _reopened(tmp_path, "[song.mp3](Doc_media/{name})", data=edited,
+                        name=sha_of(SONG) + ".mp3")
+    [(name, _words)] = _cards(ed)
+    assert name == f"myeditor-asset:{sha_of(edited)}"
+    assert (tmp_path / "Doc_media" / f"{sha_of(SONG)}.mp3").read_bytes() == edited
+
+
+def test_a_link_the_person_wrote_to_a_file_of_their_own_stays_a_link(tmp_path):
+    ed, _win = _reopened(tmp_path, "[my interview](Doc_media/{name})", name="interview.mp3")
+    assert _cards(ed) == []
+
+
+def test_a_copy_that_leads_outside_the_media_folder_stays_a_link(tmp_path):
+    outside = tmp_path / "private.mp3"
+    outside.write_bytes(SONG)
+    (tmp_path / "Doc_media").mkdir()
+    (tmp_path / "Doc_media" / (sha_of(SONG) + ".mp3")).symlink_to(outside)
+    ed, _win = _reopened(tmp_path, "[song](Doc_media/{name})", data=None,
+                         name=sha_of(SONG) + ".mp3")
+    assert _cards(ed) == []
+
+
+def test_a_copy_larger_than_a_media_server_takes_is_not_read(tmp_path, monkeypatch):
+    import main_window as main_window_module
+    monkeypatch.setattr(main_window_module, "MAX_MEDIA_BYTES", 10)
+    ed, _win = _reopened(tmp_path, "[song](Doc_media/{name})")
+    assert _cards(ed) == []
 
 
 # --------------------------------------------------------------------------- #
@@ -228,6 +413,7 @@ def _wait(manager, *assets):
     wait.done.connect(lambda: seen.append("done"))
     wait.failed.connect(lambda sha, code: seen.append(("failed", sha, code)))
     wait.start()
+    QApplication.processEvents()
     return seen
 
 
@@ -251,7 +437,7 @@ def test_a_wait_ends_at_the_first_failure_saying_which(tmp_path):
     manager = _manager(tmp_path)
     local = manager.adopt_bytes(GIF_BYTES, alt="one")
     seen = _wait(manager, local)
-    manager._uploader.fail(manager._uploader.calls[-1].name, "UPLOAD_FAILED")
+    _fail(manager)
     _finish(manager)
     assert seen == [("failed", local.sha256, "UPLOAD_FAILED")]
 

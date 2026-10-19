@@ -231,6 +231,7 @@ content, records = w._publish_payload(ed, "markdown")
 r["published"] = content
 r["published note"] = w._publish_text(ed, "note")
 r["imeta"] = build_imeta_tags(records, content)
+app.processEvents()                         # what waits is told from the event loop
 r["gate_done"] = bool(gate)                 # publishing went on by itself
 # Undo takes back the person's typing, not the finished upload.
 ed.undo()

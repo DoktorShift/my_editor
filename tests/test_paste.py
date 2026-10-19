@@ -511,7 +511,7 @@ def test_a_page_keeps_its_own_structure_around_literal_text():
     found = paste.from_mime(html("<p><b>Bold</b> and <a href='https://example.com/a'>"
                                  "a [link]</a> in <code>*code*</code></p>"))
     assert with_pictures(found.document) == (
-        "**Bold** and [a [link\\]](https://example.com/a) in `*code*`\n")
+        "**Bold** and [a \\[link\\]](https://example.com/a) in `*code*`\n")
 
 
 def test_markdown_pasted_as_text_keeps_its_tags_as_text():

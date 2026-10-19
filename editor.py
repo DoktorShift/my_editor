@@ -930,12 +930,14 @@ class HtmlEditor(QTextEdit):
         super().paintEvent(event)
 
         p2 = QPainter(vp)
-        media_badge.paint(self, p2, self._media_badge)
-        # Block cursor on top of the text, in code and plain text.
-        if self.block_caret_shown():
-            color = QColor(212, 212, 212, 210) if self._is_dark() else QColor(51, 51, 51, 210)
-            p2.fillRect(self._block_cursor_rect(), color)
-        p2.end()
+        try:
+            media_badge.paint(self, p2, self._media_badge)
+            # Block cursor on top of the text, in code and plain text.
+            if self.block_caret_shown():
+                color = QColor(212, 212, 212, 210) if self._is_dark() else QColor(51, 51, 51, 210)
+                p2.fillRect(self._block_cursor_rect(), color)
+        finally:
+            p2.end()
 
     def _paint_guides(self, painter):
         vp = self.viewport()

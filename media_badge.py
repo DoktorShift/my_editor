@@ -22,7 +22,9 @@ from dataclasses import dataclass
 from typing import Callable, Iterator, Optional, Tuple
 
 from PySide6.QtCore import QPoint, QPointF, QRectF, Qt
-from PySide6.QtGui import QColor, QFont, QFontMetricsF, QPainter, QPainterPath, QPen
+from PySide6.QtGui import (
+    QColor, QFont, QFontMetricsF, QPainter, QPainterPath, QPen, QTextCharFormat, QTextCursor,
+)
 
 LOCAL = "local"
 UPLOADING = "uploading"
@@ -48,8 +50,9 @@ MIN_WIDTH = 96
 MIN_HEIGHT = 48
 
 _INSET = 8          # from the object's corner
-_HEIGHT = 20        # the capsule's height
+_HEIGHT = 20        # the capsule's height, at least
 _PAD = 7            # room inside the capsule, left and right
+_POINTS = (8.0, 11.0)   # the words' size: the text's, smaller, within these
 _GLYPH = 12         # the glyph's box
 _GAP = 5            # between glyph and words
 
@@ -67,14 +70,18 @@ def objects_in_sight(view) -> Iterator[Tuple[str, QRectF]]:
     dx, dy = view.horizontalScrollBar().value(), view.verticalScrollBar().value()
     block = view.cursorForPosition(QPoint(0, 0)).block()
     while block.isValid():
-        if layout.blockBoundingRect(block).top() - dy > height:
+        top = layout.blockBoundingRect(block).top()
+        if top - dy > height and QTextCursor(block).currentTable() is None:
+            # Below the view. Not in a table: its cells' paragraphs come
+            # cell after cell, so one below the view in a tall cell may be
+            # followed by one in sight in the next cell of the row.
             break
         it = block.begin()
         while not it.atEnd():
             fragment = it.fragment()
             fmt = fragment.charFormat()
             if fragment.isValid() and fmt.isImageFormat():
-                box = _object_box(block, fragment.position() - block.position(),
+                box = _object_box(layout, block, fragment.position() - block.position(),
                                   fmt.toImageFormat())
                 if box is not None:
                     yield fmt.toImageFormat().name(), box.translated(-dx, -dy)
@@ -82,21 +89,26 @@ def objects_in_sight(view) -> Iterator[Tuple[str, QRectF]]:
         block = block.next()
 
 
-def _object_box(block, offset: int, image) -> Optional[QRectF]:
+def _object_box(layout, block, offset: int, image) -> Optional[QRectF]:
     """Where the object at ``offset`` in ``block`` stands, in document
-    coordinates. It sits on its line's baseline, as Qt lays it out: its
-    width the room it takes in the line, its height its own (or, with none
-    set, the line's ascent, which an object taller than the text sets)."""
-    text_layout = block.layout()
-    line = text_layout.lineForTextPosition(offset)
+    coordinates (a block's own layout is placed within its frame, a table
+    cell's within the cell, so the document layout says where it is). It
+    sits on its line's baseline, as Qt lays it out: its width the room it
+    takes in the line (either way, in right-to-left text too), its height
+    its own (or, with none set, the line's ascent, which an object taller
+    than the text sets). One aligned otherwise takes its line's height."""
+    line = block.layout().lineForTextPosition(offset)
     if not line.isValid():
         return None
-    x = line.cursorToX(offset)[0]
-    width = image.width() if image.width() > 0 else line.cursorToX(offset + 1)[0] - x
+    start, end = line.cursorToX(offset)[0], line.cursorToX(offset + 1)[0]
+    width = image.width() if image.width() > 0 else abs(end - start)
+    origin = layout.blockBoundingRect(block).topLeft()
+    if image.verticalAlignment() not in (QTextCharFormat.VerticalAlignment.AlignNormal,
+                                          QTextCharFormat.VerticalAlignment.AlignBaseline):
+        return QRectF(origin.x() + min(start, end), origin.y() + line.y(), width, line.height())
     height = image.height() if image.height() > 0 else line.ascent()
-    origin = text_layout.position()
     baseline = origin.y() + line.y() + line.ascent()
-    return QRectF(origin.x() + x, baseline - height, width, height)
+    return QRectF(origin.x() + min(start, end), baseline - height, width, height)
 
 
 def object_at(view, pos: QPoint) -> Optional[str]:
@@ -112,7 +124,7 @@ def paint(view, painter: QPainter, badge_of: BadgeOf) -> None:
     """A badge on each object in sight of ``view`` that ``badge_of``
     answers one for."""
     font = QFont(view.font())
-    font.setPointSizeF(max(8.0, font.pointSizeF() * 0.72))
+    font.setPointSizeF(min(max(font.pointSizeF() * 0.72, _POINTS[0]), _POINTS[1]))
     font.setWeight(QFont.Weight.DemiBold)
     metrics = QFontMetricsF(font)
     painter.save()
@@ -132,10 +144,11 @@ def _draw(painter: QPainter, box: QRectF, badge: Badge, metrics: QFontMetricsF) 
     width = _PAD * 2 + _GLYPH + (_GAP + metrics.horizontalAdvance(words) if words else 0)
     if width > box.width() - 2 * _INSET:
         words, width = "", _PAD * 2 + _GLYPH          # too narrow for words: the glyph
-    capsule = QRectF(box.left() + _INSET, box.top() + _INSET, width, _HEIGHT)
+    height = max(_HEIGHT, metrics.height() + 6)
+    capsule = QRectF(box.left() + _INSET, box.top() + _INSET, width, height)
     painter.setPen(Qt.PenStyle.NoPen)
     painter.setBrush(_FAILED_FILL if badge.place == FAILED else _FILL)
-    painter.drawRoundedRect(capsule, _HEIGHT / 2, _HEIGHT / 2)
+    painter.drawRoundedRect(capsule, height / 2, height / 2)
     glyph = QRectF(capsule.left() + _PAD, capsule.center().y() - _GLYPH / 2, _GLYPH, _GLYPH)
     _GLYPHS[badge.place](painter, glyph)
     if words:
