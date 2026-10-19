@@ -131,6 +131,9 @@ import rmd_toolchain
 
 # These extensions are loaded as rendered documents, not plain-text source code.
 _RICH_DOC_EXTS = ('.html', '.htm', '.md', '.markdown')
+# Plain text written to be read, as prose; any other file without a
+# language of its own (a log, a table, a configuration) is kept as it is.
+_PROSE_TEXT_EXTS = ('.txt', '.text')
 
 # Extensions accepted for drag-and-drop and file open.
 # .rmd opens as SOURCE (plain text + markdown highlighting), like RStudio.
@@ -1147,9 +1150,19 @@ class MainWindow(QMainWindow):
         if (ed is None or not self.check_spelling or ed.isReadOnly()
                 or getattr(ed, "_is_welcome", False)):
             return False
-        kind = self._editor_kind(ed)
-        return kind == "rich" or (kind == "source"
-                                  and getattr(ed, "_language", None) in (None, "markdown"))
+        return self._is_prose(ed)
+
+    def _is_prose(self, ed) -> bool:
+        """Whether a tab holds prose: a document with Markdown structure,
+        Markdown (an R Markdown file too) or plain text (_PROSE_TEXT_EXTS,
+        or a new tab), not code, nor a file of another kind."""
+        if self._editor_kind(ed) == "rich":
+            return True
+        language = getattr(ed, "_language", None)
+        if language == "markdown":
+            return True
+        path = (getattr(ed, "_file_path", None) or "").lower()
+        return language is None and (not path or path.endswith(_PROSE_TEXT_EXTS))
 
     def _attach_spelling(self, ed) -> None:
         """Start or stop checking a tab's spelling, as it should be now."""
@@ -1270,7 +1283,8 @@ class MainWindow(QMainWindow):
         """Writing in the font chosen in Settings, code and plain text in
         the monospace font (Monospace as the writing font, View > Use
         Monospace Font for Writing, sets writing that way too); both at the
-        app's text size (text_size.py)."""
+        app's text size (text_size.py). Prose, in either font, keeps to a
+        readable width; code runs across the window."""
         writing = (self.writing_family != fonts.MONOSPACE
                    and (self._editor_kind(editor) == "rich"
                         or getattr(editor, "_markdown_source", False)))
@@ -1278,6 +1292,7 @@ class MainWindow(QMainWindow):
         font = (fonts.writing_font(size.pixels(fonts.WRITING_PIXEL_SIZE), self.writing_family)
                 if writing else fonts.code_font(size.pixels(fonts.CODE_PIXEL_SIZE)))
         editor.set_writing_font(writing, font)
+        editor.set_readable_width(self._is_prose(editor))
         headers = getattr(self, "_article_headers", None)
         if headers is not None:
             headers.update(editor)               # its head in the new font
@@ -3419,6 +3434,8 @@ class MainWindow(QMainWindow):
         ed._file_path = new_path
         if hasattr(ed, '_backup'):
             ed._backup.update_file_path(new_path)
+        # Another extension is another kind of file, as after Save As.
+        self._attach_highlighter(ed, new_path)
         self.tabs.setTabText(idx, new_name)
         ed.setAccessibleName(self._document_name(ed))
         self._update_window_title()
@@ -6478,6 +6495,7 @@ class MainWindow(QMainWindow):
             gutter = LineNumberGutter(ed)
             layout.addWidget(gutter)
             ed._line_gutter = gutter
+            ed.set_gutter_shown(True)
         layout.addWidget(ed)
         splitter = QSplitter(Qt.Orientation.Horizontal)
         splitter.setChildrenCollapsible(False)
@@ -6810,6 +6828,7 @@ class MainWindow(QMainWindow):
                         editor.parent().layout().removeWidget(editor._line_gutter)
                         editor._line_gutter.deleteLater()
                         delattr(editor, '_line_gutter')
+                    editor.set_gutter_shown(self.show_line_numbers)
 
         self.status.showMessage(_("Line numbers enabled") if self.show_line_numbers
                                 else _("Line numbers disabled"), 2000)

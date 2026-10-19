@@ -307,12 +307,16 @@ class _RenameWindow:
 
     def __init__(self):
         self.titles = []
+        self.kinds = []          # what each rename has the file read as
         self.tabs = SimpleNamespace(setTabText=lambda index, text: self.titles.append(text))
         self._watcher = SimpleNamespace(addPath=lambda path: None,
                                         removePath=lambda path: None)
 
     def _update_window_title(self):
         pass
+
+    def _attach_highlighter(self, ed, path):
+        self.kinds.append(path)
 
 
 def _rename(monkeypatch, path, new_name):
@@ -337,6 +341,7 @@ def test_another_case_of_its_own_name_renames_the_file(note, monkeypatch):
     assert "Note.md" in os.listdir(note.parent) and "note.md" not in os.listdir(note.parent)
     assert ed._file_path == renamed and moved == [renamed]
     assert window.titles == ["Note.md"] and ed.names == ["Note.md"]
+    assert window.kinds == [renamed]           # read again for what it now is
 
 
 def test_a_name_another_file_has_is_refused(note, monkeypatch):
