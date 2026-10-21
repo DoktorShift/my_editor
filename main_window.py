@@ -100,7 +100,7 @@ from markdown_writer import (
 )
 from editor import CARET_STYLES, DEFAULT_CARET_STYLE, PROSE_INSET, HtmlEditor
 import panel_layout
-from side_panels import RIGHT, PanelSplitter, SidePanels
+from side_panels import RIGHT, PanelSplitter, SidePanels, inner_room
 import library_actions
 import link_rewrite
 import regular_files
@@ -10440,10 +10440,12 @@ class MainWindow(QMainWindow):
     # -- room for side panels (side_panels.py, panel_layout.py) ---------------
 
     def _screen_room(self) -> panel_layout.Rect:
-        """The room the window's screen gives windows."""
+        """The room the window's screen gives the window's inside: the
+        screen's room for windows, less the window's own frame."""
         screen = self.screen() or QGuiApplication.primaryScreen()
         room = screen.availableGeometry()
-        return panel_layout.Rect(room.x(), room.y(), room.width(), room.height())
+        return inner_room(
+            self, panel_layout.Rect(room.x(), room.y(), room.width(), room.height()))
 
     def _min_text_width(self) -> int:
         """The narrowest the text gives way to for side panels: a line of

@@ -101,6 +101,23 @@ def _rect(qrect: QRect) -> Rect:
     return Rect(qrect.x(), qrect.y(), qrect.width(), qrect.height())
 
 
+def inner_room(window: QWidget, room: Rect) -> Rect:
+    """The part of ``room`` (the screen's room for windows) that
+    ``window``'s inside may take: its frame, which the system draws
+    around it (a title bar, borders), stays on the screen too.
+    SidePanels works with the window's inside (QWidget.geometry); on
+    Windows the title bar above it is 30 pixels and more, and a window
+    grown to the screen's width without leaving room for its frame is cut
+    back by the system to what fits."""
+    frame, inside = window.frameGeometry(), window.geometry()
+    left = max(0, inside.left() - frame.left())
+    top = max(0, inside.top() - frame.top())
+    right = max(0, frame.right() - inside.right())
+    bottom = max(0, frame.bottom() - inside.bottom())
+    return Rect(room.x + left, room.y + top, max(0, room.w - left - right),
+                max(0, room.h - top - bottom))
+
+
 def _within(window: Rect, screen: Rect) -> bool:
     """Whether ``window`` lies across ``screen``'s width."""
     return window.x >= screen.x and window.x + window.w <= screen.x + screen.w

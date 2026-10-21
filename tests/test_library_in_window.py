@@ -367,30 +367,67 @@ def test_closing_while_links_update_shows_progress_and_waits(window, monkeypatch
     assert shown == ["Updating links before closing…"]
 
 
-def test_split_folds_the_file_list_and_the_sidebar_as_it_needs(window, folder, monkeypatch):
-    import main_window
-    import panel_layout
-    from preview_pane import SPLIT, SPLIT_MIN_WIDTH, WRITE
-    monkeypatch.setattr(main_window.MainWindow, "_screen_room",
-                        lambda self: panel_layout.Rect(0, 0, 1440, 900))
-    window.setGeometry(0, 0, 1440, 800)
-    window.show()
-    settle()
-    ed = window.open_path(os.path.join(folder, "Plan.md"))
-    settle()
-    panels = window._side_panels
-    assert panels.is_open("sidebar") and panels.is_open("file_list")
-    assert ed._view_splitter.width() < SPLIT_MIN_WIDTH        # no room for two columns
-    assert window.act_view_split.isEnabled()                    # but folding makes it
-    window._choose_view(SPLIT)
-    settle()
-    assert not panels.is_open("file_list")
-    assert window._shown_view(ed) == SPLIT
-    assert ed._view_splitter.width() >= SPLIT_MIN_WIDTH
-    window._choose_view(WRITE)
-    settle()
-    assert panels.is_open("file_list") and panels.is_open("sidebar")
-    window._choose_view(WRITE)
+SPLIT_SCRIPT = r"""
+import json, os, sys
+sys.path.insert(0, sys.argv[1])
+home = os.path.expanduser("~")
+with open(os.path.join(home, "screen.json"), "w") as f:
+    json.dump({"windowFrameMargins": False,
+               "screens": [{"name": "wide", "x": 0, "y": 0, "width": 1600, "height": 1000,
+                            "logicalDpi": 96, "logicalBaseDpi": 96, "dpr": 1}]}, f)
+# Qt splits the platform's options at every colon, a Windows drive's too.
+os.chdir(home)
+os.environ["QT_QPA_PLATFORM"] = "offscreen:configfile=screen.json"
+from PySide6.QtWidgets import QApplication
+app = QApplication(sys.argv[:1])
+import main_window, panel_layout, settings
+from preview_pane import SPLIT, SPLIT_MIN_WIDTH, WRITE
+main_window.MainWindow._maybe_auto_check_for_updates = lambda self: None
+main_window.MainWindow._screen_room = lambda self: panel_layout.Rect(0, 0, 1440, 900)
+folder = os.path.join(home, "Library")
+os.makedirs(folder)
+with open(os.path.join(folder, "Plan.md"), "w", encoding="utf-8") as f:
+    f.write("Plan\n")
+settings.save_setting("library_folders", [folder])
+
+def settle():
+    for _ in range(5):
+        app.processEvents()
+
+w = main_window.MainWindow()
+w.setGeometry(0, 0, 1440, 800)
+w.show(); settle()
+ed = w.open_path(os.path.join(folder, "Plan.md")); settle()
+panels = w._side_panels
+r = {"window": w.width(),
+     "before": [panels.is_open("sidebar"), panels.is_open("file_list"),
+                ed._view_splitter.width() < SPLIT_MIN_WIDTH, w.act_view_split.isEnabled()]}
+w._choose_view(SPLIT); settle()
+r["split"] = [panels.is_open("file_list"), w._shown_view(ed) == SPLIT,
+              ed._view_splitter.width() >= SPLIT_MIN_WIDTH]
+w._choose_view(WRITE); settle()
+r["write"] = [panels.is_open("file_list"), panels.is_open("sidebar")]
+w._choose_view(WRITE)
+ed.document().setModified(False)
+w.close()
+print("RESULT " + json.dumps(r))
+"""
+
+
+def test_split_folds_the_file_list_and_the_sidebar_as_it_needs(tmp_path):
+    # A window 1440 wide, on a screen of its own that has the room: the
+    # Windows runner's screen is 1024 wide, narrower than Split needs at
+    # all (preview_pane.SPLIT_MIN_WIDTH), and the system keeps a window
+    # within its screen.
+    from tests.app_process import run_window_script
+    r = run_window_script(SPLIT_SCRIPT, tmp_path)
+    assert r["window"] == 1440
+    sidebar, file_list, too_narrow, split_enabled = r["before"]
+    assert sidebar and file_list
+    assert too_narrow                                    # no room for two columns
+    assert split_enabled                                 # but folding makes it
+    assert r["split"] == [False, True, True]
+    assert r["write"] == [True, True]
 
 
 def test_find_replace_and_save_as_are_on_only_where_they_act(window, folder, tmp_path):

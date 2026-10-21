@@ -219,7 +219,18 @@ def settle():
 
 
 def test_left_panels_go_before_the_text_and_grow_the_window_to_the_left(tmp_path, monkeypatch):
+    import panel_layout
+    import side_panels
     w = _Window(tmp_path, monkeypatch)
+    # The screen this runs on, as the window's own sees it: a real one
+    # (Windows' own platform) keeps a window and its frame within it, so
+    # the window stands where the panel's width fits beside it.
+    screen = QApplication.primaryScreen().availableGeometry()
+    w.panels._screen_room = lambda: side_panels.inner_room(w.top, panel_layout.Rect(
+        screen.x(), screen.y(), screen.width(), screen.height()))
+    room = w.panels._screen_room()
+    w.top.setGeometry(room.x + 250, room.y + 40, 500, 400)
+    settle()
     order = [w.splitter.widget(i) for i in range(w.splitter.count())]
     assert order == [w.made["sidebar"], w.made["file_list"], w.text, w.made["details"]]
     x, width, text = w.top.geometry().x(), w.top.width(), w.text.width()
@@ -274,7 +285,11 @@ with open(screen, "w") as f:
     json.dump({"synchronousWindowSystemEvents": False, "windowFrameMargins": False,
                "screens": [{"name": "big", "x": 0, "y": 0, "width": 2400, "height": 1300,
                             "logicalDpi": 96, "logicalBaseDpi": 96, "dpr": 1}]}, f)
-os.environ["QT_QPA_PLATFORM"] = "offscreen:configfile=" + screen
+# Qt splits the platform's options at every colon, a Windows drive's
+# too (the platform then ends the process without a word): the file is
+# named from its own folder.
+os.chdir(os.path.dirname(screen))
+os.environ["QT_QPA_PLATFORM"] = "offscreen:configfile=" + os.path.basename(screen)
 from PySide6.QtWidgets import QApplication
 app = QApplication(sys.argv[:1])
 import main_window
