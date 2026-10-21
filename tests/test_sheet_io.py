@@ -12,6 +12,7 @@ would be lost).
 import datetime as dt
 import os
 import re
+import sys
 import zipfile
 
 import openpyxl
@@ -394,12 +395,29 @@ def test_a_file_that_changed_on_the_disk_is_not_overwritten_unasked(styled_xlsx)
     assert not book.changed_on_disk()
 
 
+# Permission bits are macOS's and Linux's: on Windows chmod sets only the
+# read-only flag, and a file's access list says who may read and change
+# it (the test below).
+@pytest.mark.skipif(sys.platform == "win32", reason="Windows files have no permission bits")
 def test_saving_keeps_the_files_permissions(styled_xlsx):
     os.chmod(styled_xlsx, 0o640)
     book = load_workbook(styled_xlsx)
     edit(book, book.sheets[0], "B2", 1)
     book.save()
     assert os.stat(styled_xlsx).st_mode & 0o777 == 0o640
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="access lists are Windows'")
+def test_saving_keeps_the_files_access_list_on_windows(styled_xlsx):
+    from tests.access_lists import access_list, let_everyone_read
+    let_everyone_read(styled_xlsx)
+    before = access_list(styled_xlsx)
+    assert "Everyone:(R)" in before
+    book = load_workbook(styled_xlsx)
+    edit(book, book.sheets[0], "B2", 1)
+    book.save()
+    assert openpyxl.load_workbook(styled_xlsx)[book.sheets[0].name]["B2"].value == 1
+    assert access_list(styled_xlsx) == before
 
 
 # --------------------------------------------------------------------------- #
