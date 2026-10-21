@@ -55,7 +55,13 @@ offscreen_fonts(os.environ)
 # before any app module is imported: a window a test builds never takes
 # over the socket of a MyEditor the person is using.
 os.environ.setdefault("MYEDITOR_IPC_NAME", f"myeditor-tests-{os.getpid()}")
+# The run speaks English, whatever this computer's language or the
+# person's language setting: importing main installs the chosen language
+# (main.py, before any text is read), and on a German Mac every test
+# after the first that imports main saw German texts.
+os.environ.setdefault("MYEDITOR_LANGUAGE", "en")
 
+from PySide6.QtCore import QEvent  # noqa: E402
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
 from main_thread_gc import collect_due  # noqa: E402
@@ -82,6 +88,28 @@ def pytest_configure(config):
     if os.environ.get("MYEDITOR_TEST_AS") == "other":
         import alerts
         alerts.IS_MAC = False
+
+
+def pytest_sessionfinish(session, exitstatus):
+    """Every window a test left behind is deleted while the application
+    still lives.
+
+    A main window that was shown and then closed (not deleted, so the
+    application's signals still reach it during its test) was otherwise
+    destroyed by the interpreter's last collection, after the
+    QApplication, and the run ended in a segmentation fault although
+    every test had passed. Widgets are deleted the way Qt deletes them
+    (deleteLater, then the posted deferred deletes), and what Python
+    still held of them is collected on this thread afterwards. A window
+    with a parent (a menu, a pop-up) goes with that parent: deleted on
+    its own first, it left its parent pointing at it (a toolbar's
+    chevron menu, held by the toolbar's layout)."""
+    for widget in QApplication.topLevelWidgets():
+        if widget.parent() is None:
+            widget.deleteLater()
+    QApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+    gc.collect()
+    QApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
 
 
 def pytest_unconfigure(config):

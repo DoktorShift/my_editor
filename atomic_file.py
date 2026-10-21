@@ -20,10 +20,18 @@ starting.
 The person's own files (a saved document, an export, a copied picture)
 are written with ``save_document``: the same one-step replacement, but
 keeping what belongs to the existing file (see there).
+
+Two parts of the app may write one file: the editor saving a note, and
+the folder library pointing that note's links at a file that moved (on
+a worker thread). ``one_writer`` makes them take turns: whoever holds a
+file's turn may look at it and replace it, and ``save_document`` takes
+the turn itself, so a save waits for a replacement in progress and the
+other way round, and nobody replaces what the other just wrote unseen.
 """
 
 from __future__ import annotations
 
+import contextlib
 import ctypes
 import ctypes.util
 import json
@@ -32,7 +40,9 @@ import os
 import stat
 import sys
 import tempfile
+import threading
 import time
+import unicodedata
 from typing import Any, Optional, Tuple, Type, TypeVar, Union
 
 PathLike = Union[str, "os.PathLike[str]"]
@@ -110,8 +120,38 @@ def write_json(path: PathLike, data: Any, **dump_options) -> bool:
     return True
 
 
+# One lock for each of a fixed number of stripes of file names: two names
+# may share one (they only take turns then), and the locks never pile up.
+_WRITER_STRIPES = tuple(threading.RLock() for _ in range(64))
+
+
+def _stripe(path: PathLike) -> int:
+    key = unicodedata.normalize("NFC", os.path.realpath(os.fspath(path)))
+    if sys.platform in ("darwin", "win32"):
+        key = key.casefold()                 # one file, however its case is written
+    return hash(key) % len(_WRITER_STRIPES)
+
+
+@contextlib.contextmanager
+def one_writer(*paths: PathLike):
+    """While held, no other thread of this app writes, replaces or
+    renames the files at ``paths`` (through ``save_document`` or another
+    holder of their turn). A thread may take a turn it holds again."""
+    stripes = sorted({_stripe(path) for path in paths})
+    taken = []
+    try:
+        for stripe in stripes:
+            _WRITER_STRIPES[stripe].acquire()
+            taken.append(stripe)
+        yield
+    finally:
+        for stripe in reversed(taken):
+            _WRITER_STRIPES[stripe].release()
+
+
 def save_document(path: PathLike, data: bytes) -> None:
-    """Save one of the person's own files in one step.
+    """Save one of the person's own files in one step, in its turn
+    (``one_writer``).
 
     A full disk or a crash during the save leaves the file as it was,
     instead of empty or cut off. What belongs to an existing file stays:
@@ -123,6 +163,11 @@ def save_document(path: PathLike, data: bytes) -> None:
     with several hard links, which a replacement would split), it is
     written in place, as before. Raises OSError."""
     target = os.path.realpath(os.fspath(path))
+    with one_writer(target):
+        _save_document(target, data)
+
+
+def _save_document(target: str, data: bytes) -> None:
     if _hard_linked(target) or _denies_delete(target):
         _write_in_place(target, data)
         return
