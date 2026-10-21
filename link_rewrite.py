@@ -1097,7 +1097,9 @@ def _notes_to_rewrite(roots: Iterable[str], moves: Dict[str, str]) -> List[str]:
     def take(note: str) -> None:
         try:
             info = os.lstat(note)
-            key = (info.st_dev, info.st_ino)
+            # A disk that gives no file numbers (a network drive on
+            # Windows) has every note's 0: the name tells them apart there.
+            key = (info.st_dev, info.st_ino) if info.st_ino else tuple(_parts(note))
         except OSError:
             key = tuple(_parts(note))
         if key not in known:

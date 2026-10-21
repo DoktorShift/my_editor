@@ -196,12 +196,31 @@ def _as_on_disk(path: str) -> str:
             for entry in found:
                 if entry.name == name:
                     return path
-                if spelled is None and entry.inode() == wanted.st_ino \
-                        and entry.stat(follow_symlinks=False).st_dev == wanted.st_dev:
+                if spelled is None and _is_entry(entry, wanted, name):
                     spelled = entry.path
     except OSError:
         return path
     return spelled or path
+
+
+def _is_entry(entry: os.DirEntry, wanted: os.stat_result, name: str) -> bool:
+    """Whether the folder's ``entry`` is the item ``wanted``, found by
+    ``name`` in another spelling. The disk's file number decides, with
+    the device asked of the entry itself: a listing on Windows gives no
+    device (DirEntry.stat leaves it 0 there). On a disk that gives no
+    file numbers (a network drive on Windows) the names decide, ignoring
+    case and Unicode normalization as such a disk does."""
+    if not wanted.st_ino:
+        return _folded(entry.name) == _folded(name)
+    try:
+        return (entry.inode() == wanted.st_ino
+                and os.lstat(entry.path).st_dev == wanted.st_dev)
+    except OSError:
+        return False
+
+
+def _folded(name: str) -> str:
+    return unicodedata.normalize("NFC", name).casefold()
 
 
 def _package_size(path: str) -> int:
@@ -787,6 +806,12 @@ def _same_item(one: str, other: str) -> bool:
         first, second = os.lstat(one), os.lstat(other)
     except OSError:
         return False
+    if not first.st_ino or not second.st_ino:
+        # A disk that gives no file numbers (a network drive on Windows,
+        # where every item's is 0): only the same name in another case or
+        # form, in the same folder, shows the same item.
+        return (os.path.dirname(one) == os.path.dirname(other)
+                and _folded(os.path.basename(one)) == _folded(os.path.basename(other)))
     return (first.st_dev, first.st_ino) == (second.st_dev, second.st_ino)
 
 
