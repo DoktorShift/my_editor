@@ -137,6 +137,58 @@ def substack_zip() -> bytes:
     return buffer.getvalue()
 
 
+MEDIUM_EXPORT_POST = (
+    '<html><body><article class="h-entry">'
+    '<header><h1 class="p-name">Sound Money</h1></header>'
+    '<section data-field="subtitle" class="p-summary">A snippet</section>'
+    '<section data-field="body" class="e-content">'
+    '<section class="section section--body section--first">'
+    '<div class="section-divider"><hr class="section-divider"></div>'
+    '<div class="section-content"><div class="section-inner">'
+    '<h3 class="graf graf--h3 graf--leading graf--title">Sound Money</h3>'
+    '<h4 class="graf graf--h4 graf--subtitle">Why it matters</h4>'
+    '<figure class="graf graf--figure"><img class="graf-image" '
+    'src="https://cdn-images-1.medium.com/max/800/1.png"></figure>'
+    '<p class="graf graf--p">First words.</p></div></div></section>'
+    '<section class="section section--body">'
+    '<div class="section-divider"><hr class="section-divider"></div>'
+    '<div class="section-content"><p>Second part.</p></div></section></section>'
+    '<footer><p>By <a class="p-author h-card" href="https://medium.com/@jane">Jane Doe</a>'
+    ' on <a href="https://medium.com/p/1"><time class="dt-published" '
+    'datetime="2020-01-01T10:00:00.000Z">January 1, 2020</time></a>.</p>'
+    '<p><a class="p-canonical" href="https://medium.com/@jane/sound-money-1">'
+    'Canonical link</a></p></footer></article></body></html>'
+)
+
+
+def substack_export_zip() -> bytes:
+    csv_text = (
+        "post_id,post_date,is_published,email_sent_at,inbox_sent_at,type,audience,"
+        "title,subtitle,podcast_url\n"
+        "101.sound-money,2024-03-01T00:00:00.000Z,true,,,newsletter,everyone,"
+        "Sound Money,Why it matters,\n"
+        "102.episode-one,2024-03-02T00:00:00.000Z,true,,,podcast,everyone,"
+        "Episode One,,https://api.substack.com/feed/podcast/102/ep.mp3\n"
+    )
+    body = (
+        "<p>The text.</p>"
+        '<div class="subscription-widget-wrap"><div class="subscription-widget">'
+        '<div class="preamble"><p>Thanks for reading! Subscribe for free.</p></div>'
+        '<form><input type="email"></form></div></div>'
+        '<p class="button-wrapper"><a class="button primary" '
+        'href="https://jane.example.com/subscribe?"><span>Subscribe now</span></a></p>'
+        '<p class="button-wrapper"><a class="button primary" '
+        'href="https://jane.example.com/p/sound-money?action=share">'
+        "<span>Share</span></a></p><p>The end.</p>"
+    )
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w") as zf:
+        zf.writestr("posts.csv", csv_text)
+        zf.writestr("posts/101.sound-money.html", body)
+        zf.writestr("posts/102.episode-one.html", "<p>Show notes</p>")
+    return buffer.getvalue()
+
+
 class Sink:
     def __init__(self):
         self.result = None
@@ -365,6 +417,46 @@ class TestArchives(unittest.TestCase):
         self.assertEqual(post.guid, "substack-101")
         self.assertEqual(post.title, "Sub Title")
         self.assertIn("Substack body", post.content_html)
+
+    def test_medium_title_subtitle_and_divider_left_out_of_the_body(self):
+        buffer = io.BytesIO()
+        with zipfile.ZipFile(buffer, "w") as zf:
+            zf.writestr("posts/2020-01-01_Sound-Money-1.html", MEDIUM_EXPORT_POST)
+        (post,) = extract_archive(buffer.getvalue()).items
+        self.assertNotIn("Sound Money", post.content_html)
+        self.assertNotIn("Why it matters", post.content_html)
+        # Only the rule above the first words goes; the one between the
+        # two sections is a break the writer made.
+        self.assertEqual(post.content_html.count("section-divider"), 2)
+        self.assertLess(post.content_html.index("First words"),
+                        post.content_html.index("section-divider"))
+        self.assertEqual(post.summary, "Why it matters")
+        self.assertEqual(post.image, "https://cdn-images-1.medium.com/max/800/1.png")
+        self.assertEqual(post.link, "https://medium.com/@jane/sound-money-1")
+        self.assertEqual(post.author, "Jane Doe")
+        self.assertEqual(post.published_at, 1577872800)
+
+    def test_substack_details_and_furniture(self):
+        posts = extract_archive(substack_export_zip()).items
+        article, episode = posts
+        # "newsletter" says what Substack made of it, not what it is about.
+        self.assertEqual(article.categories, ())
+        self.assertEqual(article.summary, "Why it matters")
+        self.assertEqual(article.published_at, 1709251200)
+        # The publication's address comes from its own subscribe links.
+        self.assertEqual(article.link, "https://jane.example.com/p/sound-money")
+        self.assertIn("The text.", article.content_html)
+        self.assertIn("The end.", article.content_html)
+        for furniture in ("Subscribe", "Share", "Thanks for reading", "<form"):
+            self.assertNotIn(furniture, article.content_html)
+        # A podcast row's audio comes along as the episode.
+        self.assertEqual(episode.podcast.audio,
+                         "https://api.substack.com/feed/podcast/102/ep.mp3")
+        self.assertEqual(episode.categories, ())
+
+    def test_substack_link_left_out_without_the_publications_address(self):
+        (post,) = extract_archive(substack_zip()).items
+        self.assertIsNone(post.link)
 
     def test_unknown_zip_layout(self):
         buffer = io.BytesIO()
