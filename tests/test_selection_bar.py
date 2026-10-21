@@ -36,6 +36,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from PySide6.QtCore import QEvent, QPoint, QPointF, Qt  # noqa: E402
 from PySide6.QtGui import QFocusEvent, QInputMethodEvent, QMouseEvent, QTextCursor  # noqa: E402
 from PySide6.QtTest import QTest  # noqa: E402
+from tests.waiting import wait_until  # noqa: E402
 from PySide6.QtWidgets import (  # noqa: E402
     QApplication, QLineEdit, QMainWindow, QMenu, QToolButton, QVBoxLayout, QWidget,
 )
@@ -323,7 +324,9 @@ def test_the_focus_or_the_window_going_elsewhere_closes_it(w):
     other = QMainWindow()
     other.show()
     other.activateWindow()
-    settle()
+    # The window's deactivation arrives when the system says so: a slow
+    # machine can take longer than one short wait.
+    wait_until(lambda: not w.bar.isVisible(), timeout_s=2.0)
     assert not w.bar.isVisible()
     other.close()
 

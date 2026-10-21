@@ -987,7 +987,7 @@ class MainWindow(QMainWindow):
         QApplication.clipboard().dataChanged.connect(self._update_clipboard_commands)
         QApplication.instance().focusChanged.connect(self._update_window_commands)
         library = self._library_window
-        QApplication.instance().focusChanged.connect(library.update_file_commands)
+        QApplication.instance().focusChanged.connect(library.focus_moved)
         self.tabs.currentChanged.connect(library.update_file_commands)
         self._file_list.view.selectionModel().selectionChanged.connect(
             library.update_file_commands)

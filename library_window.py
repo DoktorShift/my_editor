@@ -331,6 +331,14 @@ class LibraryWindow(QObject):
         focus = QApplication.focusWidget()
         return focus is not None and self.sidebar.isAncestorOf(focus)
 
+    def focus_moved(self, _old, now) -> None:
+        """The focus moved somewhere in the app: only a move inside this
+        window changes what its File menu can act on. A window left behind
+        does no work for every focus change elsewhere (it looks again when
+        the focus comes back into it)."""
+        if now is not None and now.window() is self.window:
+            self.update_file_commands()
+
     def update_file_commands(self, *_args) -> None:
         """The File menu's library commands, on only where they act."""
         window = self.window
