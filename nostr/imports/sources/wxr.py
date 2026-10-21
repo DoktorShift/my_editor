@@ -17,11 +17,24 @@ Parsed with a CDATA-masking regex scan: ``content:encoded`` bodies are
 CDATA-wrapped HTML that routinely contains ``<tag>`` markup and can
 even contain a literal ``</item>``, which would tear a naive structural
 scan. Masking every CDATA section behind a placeholder first makes the
-structure scan safe; fields are unmasked on extraction.
+structure scan safe; fields are unmasked on extraction, and the XML
+entities of a field outside CDATA decoded (a title read
+"Tom &amp; Jerry").
+
+A post's body in the export is what its author typed, not the HTML its
+page shows: WordPress makes paragraphs of the blank lines of a classic
+post (``wpautop``) and expands its shortcodes (``[caption]``,
+``[gallery]``, ``[embed]``, ``[video]``) only when the page is shown.
+:func:`post_html` does both, so a classic post keeps its paragraphs
+and its captions and galleries show. The featured image (the post's
+``_thumbnail_id``, an attachment item of the same export) is the cover,
+the author is the display name the export lists for the login in
+``dc:creator``, and tags come with categories.
 """
 
 from __future__ import annotations
 
+import html
 import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -37,9 +50,12 @@ _WXR_VERSION_RE = re.compile(r"<wp:wxr_version[\s>]", re.IGNORECASE)
 
 _ITEM_RE = re.compile(r"<item\b[^>]*>([\s\S]*?)</item>", re.IGNORECASE)
 _CATEGORY_RE = re.compile(
-    r"<category\b[^>]*>([\s\S]*?)</category>", re.IGNORECASE)
+    r"<category\b([^>]*)>([\s\S]*?)</category>", re.IGNORECASE)
 _TITLE_RE = re.compile(r"<title\b[^>]*>([\s\S]*?)</title>", re.IGNORECASE)
 _CDATA_RE = re.compile(r"<!\[CDATA\[([\s\S]*?)\]\]>")
+_POSTMETA_RE = re.compile(r"<wp:postmeta\b[^>]*>([\s\S]*?)</wp:postmeta>", re.IGNORECASE)
+_AUTHOR_RE = re.compile(r"<wp:author\b[^>]*>([\s\S]*?)</wp:author>", re.IGNORECASE)
+_ATTRIBUTE_RE = re.compile(r"""([\w:-]+)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'\]>]+))""")
 
 
 def is_wxr(text: Optional[str]) -> bool:
@@ -51,7 +67,10 @@ def is_wxr(text: Optional[str]) -> bool:
 
 
 def _mask_cdata(text: str) -> Tuple[str, Callable[[str], str]]:
-    """Stash CDATA sections behind placeholders; returns (masked, unmask)."""
+    """Stash CDATA sections behind placeholders; returns (masked, unmask).
+
+    ``unmask`` decodes the XML entities of what lies outside the CDATA
+    sections and restores the sections as written."""
     blocks: List[str] = []
 
     def _stash(match: re.Match) -> str:
@@ -65,7 +84,7 @@ def _mask_cdata(text: str) -> Tuple[str, Callable[[str], str]]:
             r"\x00C(\d+)\x00",
             lambda m: blocks[int(m.group(1))]
             if int(m.group(1)) < len(blocks) else "",
-            str(value),
+            html.unescape(str(value)),
         )
 
     return masked, _unmask
@@ -75,6 +94,13 @@ def _field(body: str, name: str, unmask: Callable[[str], str]) -> str:
     match = re.search(
         rf"<{name}\b[^>]*>([\s\S]*?)</{name}>", body, re.IGNORECASE)
     return unmask(match.group(1)).strip() if match else ""
+
+
+def _attributes(text: str) -> dict:
+    return {m.group(1).lower(): html.unescape(m.group(2) if m.group(2) is not None
+                                             else m.group(3) if m.group(3) is not None
+                                             else m.group(4))
+            for m in _ATTRIBUTE_RE.finditer(text or "")}
 
 
 def _to_unix(gmt: str, pub_date: str) -> Optional[int]:
@@ -108,19 +134,35 @@ class WxrExport:
 def parse_wxr(text: str, *, include_pages: bool = True) -> WxrExport:
     """Parse WXR text into published posts (and pages) as ``FeedItem``s.
 
-    The HTML body stays in ``content_html`` so the pipeline's normal
-    HTML-to-Markdown pass handles it. Never throws on malformed input;
-    unknown shapes just yield fewer items.
+    The body is made the HTML its page shows (:func:`post_html`) and
+    stays in ``content_html`` so the pipeline's normal HTML-to-Markdown
+    pass handles it. Never throws on malformed input; unknown shapes just
+    yield fewer items.
     """
     masked, unmask = _mask_cdata(text or "")
 
     title_match = _TITLE_RE.search(masked)
     export_title = unmask(title_match.group(1)).strip() if title_match else ""
 
+    authors = {}
+    for match in _AUTHOR_RE.finditer(masked):
+        login = _field(match.group(1), "wp:author_login", unmask)
+        name = _field(match.group(1), "wp:author_display_name", unmask)
+        if login and name:
+            authors[login] = name
+
+    bodies = [m.group(1) for m in _ITEM_RE.finditer(masked)]
+    attachments = {}
+    for body in bodies:
+        if _field(body, "wp:post_type", unmask) == "attachment":
+            url = _field(body, "wp:attachment_url", unmask) or _field(body, "guid", unmask)
+            post_id = _field(body, "wp:post_id", unmask)
+            if post_id and url:
+                attachments[post_id] = url
+
     items: List[FeedItem] = []
     seen: set = set()
-    for match in _ITEM_RE.finditer(masked):
-        body = match.group(1)
+    for body in bodies:
         if _field(body, "wp:status", unmask) != "publish":
             continue
         post_type = _field(body, "wp:post_type", unmask)
@@ -138,22 +180,153 @@ def parse_wxr(text: str, *, include_pages: bool = True) -> WxrExport:
 
         categories: List[str] = []
         for cat in _CATEGORY_RE.finditer(body):
-            name = unmask(cat.group(1)).strip()
+            attributes = _attributes(cat.group(1))
+            if attributes.get("domain", "category") not in ("category", "post_tag"):
+                continue  # post formats, products' own taxonomies
+            if attributes.get("nicename") == "uncategorized":
+                continue
+            name = unmask(cat.group(2)).strip()
             if name and name not in categories:
                 categories.append(name)
+
+        meta = {}
+        for block in _POSTMETA_RE.finditer(body):
+            key = _field(block.group(1), "wp:meta_key", unmask)
+            if key:
+                meta.setdefault(key, _field(block.group(1), "wp:meta_value", unmask))
+        creator = _field(body, "dc:creator", unmask)
 
         items.append(FeedItem(
             guid=guid,
             title=item_title or post_name or "Untitled",
             link=link or None,
             summary=_field(body, "excerpt:encoded", unmask) or None,
-            content_html=_field(body, "content:encoded", unmask),
+            content_html=post_html(_field(body, "content:encoded", unmask),
+                                   attachments=attachments),
             published_at=_to_unix(
                 _field(body, "wp:post_date_gmt", unmask),
                 _field(body, "pubDate", unmask),
             ),
             categories=tuple(categories),
-            image=None,
-            author=_field(body, "dc:creator", unmask) or None,
+            image=attachments.get(meta.get("_thumbnail_id", "")) or None,
+            author=authors.get(creator, creator) or None,
         ))
     return WxrExport(title=export_title, items=tuple(items))
+
+
+# -- a post's body as its page shows it ---------------------------------------- #
+
+_BLOCK_START = re.compile(
+    r"^\s*<(p|div|h[1-6]|ul|ol|li|dl|blockquote|pre|table|thead|tbody|tr|figure|"
+    r"figcaption|hr|form|address|section|article|aside|header|footer|nav|details|"
+    r"iframe|video|audio|!--)\b", re.IGNORECASE)
+_PRE = re.compile(r"<pre\b[\s\S]*?</pre>", re.IGNORECASE)
+_SHORTCODE = re.compile(r"\[(\[?)(/?)([A-Za-z][\w-]*)([^\]]*?)(/?)\](\]?)")
+_CAPTION = re.compile(r"\[(caption|wp_caption)\b([^\]]*)\]([\s\S]*?)\[/\1\]", re.IGNORECASE)
+_EMBED = re.compile(r"\[embed\b[^\]]*\]([\s\S]*?)\[/embed\]", re.IGNORECASE)
+_MEDIA = re.compile(r"\[(video|audio|playlist)\b([^\]]*)\](?:[\s\S]*?\[/\1\])?",
+                    re.IGNORECASE)
+_GALLERY = re.compile(r"\[gallery\b([^\]]*)\]", re.IGNORECASE)
+_URL_SHORTCODE = re.compile(r"\[(youtube|vimeo|soundcloud|spotify|tweet)\s+([^\]\s]+)[^\]]*\]",
+                            re.IGNORECASE)
+_CAPTION_IMAGE = re.compile(r"^\s*((?:<a\b[^>]*>\s*)?<img\b[^>]*>(?:\s*</a>)?)\s*([\s\S]*)$",
+                            re.IGNORECASE)
+
+
+def post_html(raw: str, *, attachments: Optional[dict] = None) -> str:
+    """A post's stored body as the HTML its page shows: shortcodes
+    expanded or, when unknown (a page builder's), their tags dropped and
+    their words kept; a classic post's blank lines made paragraphs."""
+    if not raw or not raw.strip():
+        return ""
+    attachments = attachments or {}
+    # [[name]] is how WordPress writes a shortcode as text: kept aside,
+    # as written less one pair of brackets.
+    literal: List[str] = []
+
+    def _aside(match: re.Match) -> str:
+        literal.append(match.group(1))
+        return f"\x00S{len(literal) - 1}\x00"
+
+    text = re.sub(r"\[(\[[^\[\]]+\])\]", _aside, raw)
+    text = _CAPTION.sub(_caption, text)
+    text = _EMBED.sub(lambda m: _link_line(m.group(1).strip()), text)
+    text = _URL_SHORTCODE.sub(lambda m: _link_line(m.group(2)), text)
+    text = _MEDIA.sub(_media, text)
+    text = _GALLERY.sub(lambda m: _gallery(m.group(1), attachments), text)
+    closed = {m.group(1).lower() for m in re.finditer(r"\[/([A-Za-z][\w-]*)\]", text)}
+    text = _SHORTCODE.sub(lambda m: _drop_shortcode(m, closed), text)
+    if "<!-- wp:" not in text:
+        text = autop(text)
+    text = re.sub(r"\x00S(\d+)\x00", lambda m: literal[int(m.group(1))], text)
+    return text.strip()
+
+
+def autop(text: str) -> str:
+    """WordPress's ``wpautop``, as much of it as an import needs: blank
+    lines part paragraphs, a single line break inside one is a ``<br>``,
+    and blocks (``<pre>`` kept whole) are left as they are."""
+    kept: List[str] = []
+
+    def _keep(match: re.Match) -> str:
+        kept.append(match.group(0))
+        return f"\x00P{len(kept) - 1}\x00"
+
+    text = _PRE.sub(_keep, text.replace("\r\n", "\n").replace("\r", "\n"))
+    out = []
+    for chunk in re.split(r"\n\s*\n", text):
+        chunk = chunk.strip()
+        if not chunk:
+            continue
+        if chunk.startswith("\x00P") or _BLOCK_START.match(chunk):
+            out.append(chunk)
+        else:
+            out.append("<p>" + re.sub(r"\s*\n\s*", "<br>\n", chunk) + "</p>")
+    joined = "\n\n".join(out)
+    return re.sub(r"\x00P(\d+)\x00", lambda m: kept[int(m.group(1))], joined)
+
+
+def _caption(match: re.Match) -> str:
+    inner = match.group(3)
+    attributes = _attributes(match.group(2))
+    found = _CAPTION_IMAGE.match(inner)
+    if not found:
+        return inner
+    image, caption = found.group(1), (found.group(2) or attributes.get("caption", "")).strip()
+    if not caption:
+        return f"<figure>{image}</figure>"
+    return f"<figure>{image}<figcaption>{caption}</figcaption></figure>"
+
+
+def _media(match: re.Match) -> str:
+    attributes = _attributes(match.group(2))
+    for key in ("src", "mp4", "m4v", "webm", "ogv", "mp3", "m4a", "ogg", "wav", "url"):
+        if attributes.get(key, "").startswith(("http://", "https://")):
+            return _link_line(attributes[key])
+    return ""
+
+
+def _gallery(attribute_text: str, attachments: dict) -> str:
+    ids = [i.strip() for i in _attributes(attribute_text).get("ids", "").split(",")]
+    images = [f'<img src="{html.escape(attachments[i], quote=True)}">'
+              for i in ids if i in attachments]
+    return "<p>" + "".join(images) + "</p>" if images else ""
+
+
+def _drop_shortcode(match: re.Match, closed: set) -> str:
+    """A shortcode nothing above expanded (a page builder's, a plugin's)
+    loses its tags and keeps the words between them. Only what is surely
+    a shortcode: attributes, a builder-style name (``et_pb_text``,
+    ``vc_row``) or a closing tag in the post. "[see below]" is text."""
+    _open, closing, name, attributes, _self, _close = match.groups()
+    if closing or "=" in attributes or "_" in name or "-" in name \
+            or name.lower() in closed:
+        return ""
+    return match.group(0)
+
+
+def _link_line(url: str) -> str:
+    if not url.startswith(("http://", "https://")):
+        return ""
+    safe = html.escape(url, quote=True)
+    return f'<p><a href="{safe}">{safe}</a></p>'

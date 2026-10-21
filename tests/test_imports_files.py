@@ -23,7 +23,7 @@ from nostr.imports.sources.archive import (
 )
 from nostr.imports.sources.ghost import is_ghost_export, parse_ghost_export
 from nostr.imports.sources.opml import is_opml, parse_opml
-from nostr.imports.sources.wxr import is_wxr, parse_wxr
+from nostr.imports.sources.wxr import is_wxr, parse_wxr, post_html
 
 from tests.imports_fakes import FakeFetcher
 
@@ -160,6 +160,33 @@ def run_paste(body):
 # WXR                                                                         #
 # --------------------------------------------------------------------------- #
 
+WXR_CLASSIC = """<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0" xmlns:excerpt="http://wordpress.org/export/1.2/excerpt/"
+ xmlns:content="http://purl.org/rss/1.0/modules/content/"
+ xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:wp="http://wordpress.org/export/1.2/">
+<channel><title>Blog</title><wp:wxr_version>1.2</wp:wxr_version>
+<wp:author><wp:author_login><![CDATA[admin]]></wp:author_login>
+<wp:author_display_name><![CDATA[Alice Example]]></wp:author_display_name></wp:author>
+<item><title>Tom &amp; Jerry</title><link>https://b.example/tj</link>
+<dc:creator><![CDATA[admin]]></dc:creator>
+<wp:post_id>5</wp:post_id><wp:status>publish</wp:status><wp:post_type>post</wp:post_type>
+<category domain="category" nicename="uncategorized"><![CDATA[Uncategorized]]></category>
+<category domain="category" nicename="lightning"><![CDATA[Lightning]]></category>
+<category domain="post_tag" nicename="self-custody"><![CDATA[self custody]]></category>
+<category domain="post_format" nicename="post-format-aside"><![CDATA[Aside]]></category>
+<content:encoded><![CDATA[First line.
+still the first paragraph.
+
+Second paragraph.
+
+[caption id="attachment_9" align="alignnone" width="300"]<img src="https://b.example/i.jpg" /> A caption[/caption]]]></content:encoded>
+<wp:postmeta><wp:meta_key><![CDATA[_thumbnail_id]]></wp:meta_key><wp:meta_value><![CDATA[9]]></wp:meta_value></wp:postmeta>
+</item>
+<item><title>cover</title><wp:post_id>9</wp:post_id><wp:status>inherit</wp:status>
+<wp:post_type>attachment</wp:post_type><wp:attachment_url><![CDATA[https://b.example/cover.jpg]]></wp:attachment_url></item>
+</channel></rss>"""
+
+
 class TestWxr(unittest.TestCase):
     def test_detection(self):
         self.assertTrue(is_wxr(WXR))
@@ -189,6 +216,41 @@ class TestWxr(unittest.TestCase):
     def test_pages_can_be_excluded(self):
         export = parse_wxr(WXR, include_pages=False)
         self.assertEqual([i.guid for i in export.items], ["wp-11"])
+
+    def test_a_wordpress_export_reads_as_its_site_shows_it(self):
+        export = parse_wxr(WXR_CLASSIC)
+        post = export.items[0]
+        self.assertEqual(post.title, "Tom & Jerry")
+        self.assertEqual(post.author, "Alice Example")
+        self.assertEqual(post.image, "https://b.example/cover.jpg")
+        self.assertEqual(post.categories, ("Lightning", "self custody"))
+        self.assertIn("<p>First line.<br>\nstill the first paragraph.</p>", post.content_html)
+        self.assertIn("<p>Second paragraph.</p>", post.content_html)
+        self.assertIn("<figcaption>A caption</figcaption>", post.content_html)
+        self.assertNotIn("[caption", post.content_html)
+
+    def test_shortcodes_become_what_the_page_shows(self):
+        body = post_html(
+            "[embed]https://www.youtube.com/watch?v=abc[/embed]\n\n"
+            '[video src="https://b.example/v.mp4"][/video]\n\n'
+            '[gallery ids="9,10"]\n\n'
+            "[et_pb_section][et_pb_text]Builder words[/et_pb_text][/et_pb_section]\n\n"
+            "Text [see below] stays, and [[gallery]] is written as text.",
+            attachments={"9": "https://b.example/g9.jpg"})
+        self.assertIn('<a href="https://www.youtube.com/watch?v=abc">', body)
+        self.assertIn('<a href="https://b.example/v.mp4">', body)
+        self.assertIn('<img src="https://b.example/g9.jpg">', body)
+        self.assertIn("<p>Builder words</p>", body)
+        self.assertIn("Text [see below] stays, and [gallery] is written as text.", body)
+
+    def test_block_editor_posts_are_left_as_they_are(self):
+        body = post_html("<!-- wp:paragraph -->\n<p>One</p>\n<!-- /wp:paragraph -->\n\n"
+                         "<!-- wp:paragraph -->\n<p>Two</p>\n<!-- /wp:paragraph -->")
+        self.assertNotIn("<p><p>", body)
+        self.assertNotIn("<br>", body)
+
+    def test_preformatted_code_keeps_its_blank_lines(self):
+        self.assertIn("<pre>a\n\nb</pre>", post_html("Intro\n\n<pre>a\n\nb</pre>"))
 
     def test_registry_claims_wxr_paste(self):
         self.assertEqual(
