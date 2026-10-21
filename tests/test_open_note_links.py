@@ -133,6 +133,10 @@ def test_a_tab_follows_its_file_whatever_unicode_form_it_was_opened_with(window,
     with open(nfd, "w", encoding="utf-8") as f:
         f.write("hello\n")
     nfc = os.path.join(library, unicodedata.normalize("NFC", "Müller.md"))
+    if not os.path.exists(nfc):
+        # Only where the disk takes both spellings for one name (APFS and
+        # HFS+ on a Mac); elsewhere the other spelling is another file.
+        pytest.skip("this disk tells the two Unicode forms of a name apart")
     ed = window.open_path(nfc)
     window._library.rename(nfd, "Meier.md", skip_notes=window._library_window.unsaved_notes())
     window._library.wait_for_links()

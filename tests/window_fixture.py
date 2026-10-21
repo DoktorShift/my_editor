@@ -28,6 +28,15 @@ def make_window(tmp_path, monkeypatch, *, settings_values=None):
                         lambda self: None)
     monkeypatch.setattr(main_window, "ProfileStore",
                         lambda: ProfileStore(tmp_path / "profiles.json"))
+    # An alert nobody expected fails the test at once: on a test machine
+    # nobody answers it, and the run would wait for a click forever.
+    # (A test that expects one replaces ask, inform or the alert itself.)
+    import alerts
+
+    def unanswered(alert):
+        raise AssertionError("an alert would wait for an answer: "
+                             + alert.title_label.text())
+    monkeypatch.setattr(alerts.Alert, "run", unanswered)
     # The apps that open a file, never asked of this computer.
     monkeypatch.setattr(default_apps, "default_app_name", lambda path: "Preview")
     monkeypatch.setattr(default_apps, "other_apps", lambda path: [
