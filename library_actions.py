@@ -36,6 +36,7 @@ from PySide6.QtWidgets import QFileDialog, QInputDialog, QLineEdit, QMenu, QWidg
 import alerts
 import default_apps
 import file_kinds
+import file_paths
 import folder_library
 from folder_library import MoveIncomplete, OriginalLeft
 from i18n import _, ngettext
@@ -65,14 +66,17 @@ def mime_for(paths: Sequence[str]) -> QMimeData:
 
 def dropped(mime: QMimeData) -> Tuple[List[str], List[str]]:
     """``(from_library, from_outside)``: the paths a drop carries, those
-    dragged from the app's own lists apart from files from elsewhere."""
+    dragged from the app's own lists apart from files from elsewhere,
+    each in the app's one spelling (file_paths.normalize: a URL gives
+    "C:/Users/..." on Windows, where the app keeps "C:\\Users\\...")."""
     if mime is None:
         return [], []
     if mime.hasFormat(MIME_PATHS):
         text = bytes(mime.data(MIME_PATHS)).decode("utf-8", "replace")
-        return [p for p in text.split("\n") if p], []
+        return [file_paths.normalize(p) for p in text.split("\n") if p], []
     if mime.hasUrls():
-        return [], [u.toLocalFile() for u in mime.urls() if u.isLocalFile() and u.toLocalFile()]
+        return [], [file_paths.normalize(u.toLocalFile()) for u in mime.urls()
+                    if u.isLocalFile() and u.toLocalFile()]
     return [], []
 
 
