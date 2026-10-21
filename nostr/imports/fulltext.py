@@ -26,6 +26,8 @@ from typing import Optional
 
 from readability import Document
 
+from ..rss.clean import clean_html
+
 _log = logging.getLogger(__name__)
 
 _TAG_RE = re.compile(r"<[^>]+>")
@@ -47,14 +49,16 @@ def extract_readable_content(
 ) -> Optional[ReadableContent]:
     """Extract the main article content from a full HTML page.
 
-    ``url`` is the page's own address; passing it lets the extractor
-    absolutise relative ``src``/``href`` values so images and links
-    survive the import instead of 404ing against nothing.
+    ``url`` is the page's own address. It is deliberately not handed to
+    Readability: Readability makes every ``src`` whole, a lazy image's
+    ``data:`` placeholder included, which turned it into the page's own
+    address and hid the real picture in ``data-src``. They are made whole
+    here instead, after the picture is settled (clean.py).
     """
     if not html or not isinstance(html, str):
         return None
     try:
-        doc = Document(html, url=url) if url else Document(html)
+        doc = Document(html)
         summary_html = (doc.summary(html_partial=True) or "").strip()
         title = (doc.short_title() or "").strip()
     except Exception as exc:  # noqa: BLE001, any parse failure means "no article"
@@ -62,6 +66,7 @@ def extract_readable_content(
         return None
     if not summary_html:
         return None
+    summary_html = clean_html(summary_html, base_url=url)
     text = _TAG_RE.sub(" ", summary_html)
     text_length = len(" ".join(text.split()))
     if text_length == 0:

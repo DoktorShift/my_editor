@@ -76,6 +76,7 @@ _UNFILED = frozenset({
 _SUMMARY_CHARS = 280
 _SPACE = re.compile(r"\s+")
 _TAG = re.compile(r"<[^>]+>")
+_SPACE_BEFORE_MARK = re.compile(r"\s+([.,;:!?)])")
 _EMAIL = re.compile(r"^[^@\s()<>]+@[^@\s()<>]+\.[^@\s()<>]+$")
 _EMAIL_WITH_NAME = re.compile(r"^\S+@\S+\s*\((.+)\)$")
 _READ_MORE = re.compile(r"\s*(\[(…|\.\.\.|&hellip;)\]|…|\.\.\.)\s*"
@@ -130,6 +131,7 @@ def plain_summary(summary_html: Optional[str]) -> str:
     entities, one line, without the "[…]" a teaser ends on or the
     "The post X appeared first on Y." line SEO plugins add."""
     text = _SPACE.sub(" ", html.unescape(_TAG.sub(" ", summary_html or ""))).strip()
+    text = _SPACE_BEFORE_MARK.sub(r"\1", text)
     text = _APPEARED_FIRST.sub("", text).strip()
     trimmed = _READ_MORE.sub("", text).strip()
     if trimmed != text and trimmed:
@@ -225,6 +227,7 @@ def item_to_article(
         markdown = str(item.content_markdown).strip()
     else:
         markdown = html_to_markdown(item.content_html, base_url=item.link).strip()
+    markdown = _without_title_heading(markdown, item.title)
     body = markdown
     if append_source_link and item.link:
         markdown = (markdown + source_link_footer(item.link, item.author)).strip()
@@ -245,6 +248,23 @@ def item_to_article(
         published_at=item.published_at,
         hashtags=_merge_hashtags(item.categories, hashtags),
     )
+
+
+_HEADING = re.compile(r"\A#{1,2}[ \t]+(.+?)[ \t#]*(\n+|\Z)")
+
+
+def _without_title_heading(markdown: str, title: Optional[str]) -> str:
+    """The body without a first heading that only repeats the title (a
+    page read for its full text, a Markdown file): the title is shown
+    above the article already."""
+    match = _HEADING.match(markdown)
+    if match and title and _comparable(match.group(1)) == _comparable(title):
+        return markdown[match.end():].lstrip()
+    return markdown
+
+
+def _comparable(text: str) -> str:
+    return "".join(ch for ch in html.unescape(text).lower() if ch.isalnum())
 
 
 def cover_address(image: Optional[str], page: Optional[str]) -> str:

@@ -163,6 +163,10 @@ class ArticleDetailTests(unittest.TestCase):
         self.assertEqual(plain_summary("First words [...] Continue reading →"),
                          "First words…")
 
+    def test_no_space_before_punctuation_where_a_tag_was(self) -> None:
+        self.assertEqual(plain_summary("Notes with <a href='/x'>a link</a>."),
+                         "Notes with a link.")
+
     def test_the_appeared_first_line_leaves_the_summary(self) -> None:
         self.assertEqual(plain_summary("Teaser. The post <a>X</a> appeared first on "
                                        "<a>Blog</a>."), "Teaser.")
@@ -193,6 +197,16 @@ class ArticleDetailTests(unittest.TestCase):
 
     def test_a_cover_that_is_no_web_address_is_left_out(self) -> None:
         self.assertEqual(item_to_article(_item(image="data:image/png;base64,AA")).image, "")
+
+
+class TitleHeadingTests(unittest.TestCase):
+    def test_a_first_heading_that_repeats_the_title_is_dropped(self) -> None:
+        template = item_to_article(_item(title="Hello", summary="s"))
+        self.assertTrue(template.content.startswith("Body _here_."))
+
+    def test_another_first_heading_stays(self) -> None:
+        template = item_to_article(_item(title="Other", summary="s"))
+        self.assertTrue(template.content.startswith("# Hello"))
 
 
 class TeaserTests(unittest.TestCase):

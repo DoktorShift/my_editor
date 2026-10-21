@@ -67,11 +67,6 @@ from .fetch import BlobFetcher
 _UNSAFE_URL_ERROR = _("URL was not allowed")
 
 
-# Matches ``![alt](url)``. Mirrors the reference importer's scan; titles
-# and angle-bracketed destinations are rare enough in feed-generated
-# markdown that the simple form wins.
-_MD_IMAGE_RE = re.compile(r"!\[([^\]]*)\]\(([^)]+)\)")
-
 _HTML_IMG_SRC_RE = re.compile(
     r"""<img[^>]+src=["']([^"']+)["']""", re.IGNORECASE)
 
@@ -153,12 +148,155 @@ def _is_web_url(url: str) -> bool:
 def scan_markdown_images(markdown: str) -> List[str]:
     """Unique image URLs in ``markdown``, in first-seen order."""
     seen: List[str] = []
-    for match in _MD_IMAGE_RE.finditer(markdown or ""):
-        url = match.group(2).strip()
-        if not url or url in seen or not _is_web_url(url):
-            continue
-        seen.append(url)
+    for _start, _end, url in _image_destinations(markdown or ""):
+        if url and url not in seen and _is_web_url(url):
+            seen.append(url)
     return seen
+
+
+# -- Markdown image destinations ------------------------------------------- #
+#
+# Where each image's address sits in Markdown, so it can be read and
+# replaced without touching anything around it. Written for what
+# imported Markdown holds (markdownify's output, and Markdown files and
+# Nostr articles as people write them): ``![alt](url "title")`` with
+# brackets in the alt and parentheses in the address
+# (``Foo_(bar).jpg``), ``<url>`` destinations, reference images
+# (``![alt][ref]`` and their ``[ref]: url`` line) and raw ``<img src>``.
+# Code (fenced blocks and inline spans) is never read: an image there is
+# an example, and rewriting it corrupted code samples.
+
+_FENCE = re.compile(r"^ {0,3}(`{3,}|~{3,})")
+_REF_DEFINITION = re.compile(
+    r"^ {0,3}\[([^\]]+)\]:[ \t]*(<[^>\n]*>|\S+)", re.MULTILINE)
+_HTML_IMG_SRC = re.compile(
+    r"""<img\b[^>]*?\ssrc\s*=\s*(["'])([^"']+)\1""", re.IGNORECASE)
+
+
+def _image_destinations(markdown: str) -> List[Tuple[int, int, str]]:
+    """``(start, end, url)`` of every image address outside code, in
+    order; ``markdown[start:end]`` is the address as written."""
+    code = _code_regions(markdown)
+    in_code = lambda i: any(a <= i < b for a, b in code)  # noqa: E731
+    definitions = {}
+    for match in _REF_DEFINITION.finditer(markdown):
+        if not in_code(match.start()):
+            start, end = match.span(2)
+            if markdown[start] == "<":
+                start, end = start + 1, end - 1
+            definitions.setdefault(_label(match.group(1)), (start, end))
+
+    found: List[Tuple[int, int, str]] = []
+    index = markdown.find("![")
+    while index != -1:
+        if not in_code(index) and (index == 0 or markdown[index - 1] != "\\"):
+            span = _image_at(markdown, index, definitions)
+            if span is not None:
+                found.append((span[0], span[1], markdown[span[0]:span[1]]))
+        index = markdown.find("![", index + 2)
+    for match in _HTML_IMG_SRC.finditer(markdown):
+        if not in_code(match.start()):
+            found.append((match.start(2), match.end(2), match.group(2)))
+    found.sort()
+    return found
+
+
+def _image_at(markdown: str, index: int, definitions: dict) -> Optional[Tuple[int, int]]:
+    alt_end = _closing(markdown, index + 1, "[", "]")
+    if alt_end is None or alt_end + 1 >= len(markdown):
+        return None
+    after = alt_end + 1
+    if markdown[after] == "[":
+        label_end = _closing(markdown, after, "[", "]")
+        if label_end is None:
+            return None
+        label = markdown[after + 1:label_end] or markdown[index + 2:alt_end]
+        return definitions.get(_label(label))
+    if markdown[after] != "(":
+        return definitions.get(_label(markdown[index + 2:alt_end]))
+    position = after + 1
+    while position < len(markdown) and markdown[position] in " \t\n":
+        position += 1
+    if position < len(markdown) and markdown[position] == "<":
+        end = markdown.find(">", position)
+        return (position + 1, end) if end != -1 else None
+    start, depth = position, 0
+    while position < len(markdown):
+        char = markdown[position]
+        if char == "\\":
+            position += 2
+            continue
+        if char in " \t\n":
+            break
+        if char == "(":
+            depth += 1
+        elif char == ")":
+            if depth == 0:
+                break
+            depth -= 1
+        position += 1
+    return (start, position) if position > start else None
+
+
+def _closing(text: str, index: int, opening: str, closing: str) -> Optional[int]:
+    """Index of the bracket that closes the one at ``index``."""
+    depth = 0
+    position = index
+    while position < len(text):
+        char = text[position]
+        if char == "\\":
+            position += 2
+            continue
+        if char == opening:
+            depth += 1
+        elif char == closing:
+            depth -= 1
+            if depth == 0:
+                return position
+        elif char == "\n" and text[position + 1:position + 2] == "\n":
+            return None
+        position += 1
+    return None
+
+
+def _code_regions(markdown: str) -> List[Tuple[int, int]]:
+    """Spans of fenced code blocks and inline code spans."""
+    regions: List[Tuple[int, int]] = []
+    offset, fence, fence_start = 0, "", 0
+    for line in markdown.splitlines(keepends=True):
+        match = _FENCE.match(line)
+        if fence:
+            if match and match.group(1)[0] == fence[0] and len(match.group(1)) >= len(fence) \
+                    and not line.strip()[len(match.group(1)):].strip():
+                regions.append((fence_start, offset + len(line)))
+                fence = ""
+        elif match:
+            fence, fence_start = match.group(1), offset
+        offset += len(line)
+    if fence:
+        regions.append((fence_start, len(markdown)))
+    position = 0
+    while True:
+        start = markdown.find("`", position)
+        if start == -1:
+            break
+        if any(a <= start < b for a, b in regions):
+            position = next(b for a, b in regions if a <= start < b)
+            continue
+        run = len(markdown[start:]) - len(markdown[start:].lstrip("`"))
+        end = markdown.find("`" * run, start + run)
+        while end != -1 and markdown[end + run:end + run + 1] == "`":
+            end = markdown.find("`" * run, end + run + 1)
+        if end == -1:
+            position = start + run
+            continue
+        regions.append((start, end + run))
+        position = end + run
+    return regions
+
+
+def _label(text: str) -> str:
+    return " ".join(text.split()).lower()
 
 
 def scan_html_images(html: str) -> List[str]:
@@ -173,14 +311,14 @@ def scan_html_images(html: str) -> List[str]:
 
 
 def rewrite_markdown_images(markdown: str, mapping: Dict[str, str]) -> str:
-    """Replace image destinations per ``mapping``; unknown URLs stay."""
-
-    def _sub(match: re.Match) -> str:
-        alt, src = match.group(1), match.group(2).strip()
-        replacement = mapping.get(src)
-        return f"![{alt}]({replacement})" if replacement else match.group(0)
-
-    return _MD_IMAGE_RE.sub(_sub, markdown or "")
+    """Replace image destinations per ``mapping``; unknown URLs stay, and
+    so does everything around an address (its alt text, its title)."""
+    markdown = markdown or ""
+    for start, end, url in reversed(_image_destinations(markdown)):
+        replacement = mapping.get(url)
+        if replacement:
+            markdown = markdown[:start] + replacement + markdown[end:]
+    return markdown
 
 
 def rehost_images(

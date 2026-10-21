@@ -61,3 +61,21 @@ class TestExtraction(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class LazyImageTests(unittest.TestCase):
+    def test_a_lazy_image_keeps_its_real_picture(self) -> None:
+        """Readability made the ``data:`` placeholder whole, as the page's
+        own address, and the real picture was lost."""
+        from nostr.rss.normalize import html_to_markdown
+        page = ("<html><body><article>" + "".join(
+            f"<p>Paragraph {i} with plenty of ordinary prose words to satisfy "
+            "readability.</p>" for i in range(8)) +
+            '<p><img src="data:image/svg+xml,%3Csvg%3E" data-lazy-src="/chart.png" '
+            'alt="Chart"><noscript><img src="/chart.png" alt="Chart"></noscript></p>'
+            "</article></body></html>")
+        url = "https://ex.example/2024/01/post/"
+        content = extract_readable_content(page, url=url)
+        markdown = html_to_markdown(content.html, base_url=url)
+        self.assertEqual([line for line in markdown.splitlines() if "Chart" in line],
+                         ["![Chart](https://ex.example/chart.png)"])

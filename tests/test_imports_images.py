@@ -747,3 +747,41 @@ class TestBlobFetcher(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class MarkdownImageAddressTests(unittest.TestCase):
+    """Where each image's address sits, as people and markdownify write
+    Markdown. The simple ``![alt](url)`` scan took a title into the
+    address, cut one with parentheses, skipped an alt with brackets and
+    rewrote images inside code samples."""
+
+    BODY = (
+        '![Sunset](https://a.example/a.jpg "Sunset over the bay")\n'
+        "![Wiki](https://w.example/Foo_(bar).jpg) ![Figure [1]](https://a.example/f1.png)\n"
+        "![x](<https://a.example/sp ace.png>)\n\n"
+        "```\n![code](https://a.example/code.png)\n```\n\n"
+        "Inline `![no](https://a.example/inline.png)` and \\![esc](https://a.example/esc.png)\n\n"
+        "![ref][r1] ![Short]\n"
+        '<img alt="h" src="https://a.example/raw.jpg">\n\n'
+        '[r1]: https://a.example/ref.jpg "T"\n'
+        "[short]: <https://a.example/short.jpg>\n")
+
+    def test_every_image_outside_code_is_found_once(self) -> None:
+        self.assertEqual(scan_markdown_images(self.BODY), [
+            "https://a.example/a.jpg", "https://w.example/Foo_(bar).jpg",
+            "https://a.example/f1.png", "https://a.example/sp ace.png",
+            "https://a.example/raw.jpg", "https://a.example/ref.jpg",
+            "https://a.example/short.jpg"])
+
+    def test_rewriting_keeps_titles_alt_text_and_code(self) -> None:
+        urls = scan_markdown_images(self.BODY)
+        out = rewrite_markdown_images(self.BODY, {u: f"https://m.example/{i}"
+                                                  for i, u in enumerate(urls)})
+        self.assertIn('![Sunset](https://m.example/0 "Sunset over the bay")', out)
+        self.assertIn("![Wiki](https://m.example/1) ![Figure [1]](https://m.example/2)", out)
+        self.assertIn("![x](<https://m.example/3>)", out)
+        self.assertIn("![code](https://a.example/code.png)", out)
+        self.assertIn("`![no](https://a.example/inline.png)`", out)
+        self.assertIn('src="https://m.example/4"', out)
+        self.assertIn('[r1]: https://m.example/5 "T"', out)
+        self.assertIn("[short]: <https://m.example/6>", out)
