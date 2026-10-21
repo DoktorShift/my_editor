@@ -15,6 +15,7 @@ by ``MYEDITOR_SELF_TEST_REPORT`` when that is set.
 
 from __future__ import annotations
 
+import importlib
 import os
 import sys
 from typing import Callable, List, Tuple
@@ -37,7 +38,8 @@ def _translations() -> str:
 
 
 def _icon() -> str:
-    from main import resource_path
+    # Not from main: importing main chooses the app's language.
+    from resources import resource_path
     path = resource_path("packaging/icons/icon-256.png")
     if not os.path.isfile(path):
         raise RuntimeError(f"{path} is missing")
@@ -68,17 +70,28 @@ def _keys_and_encryption() -> str:
     return "sign, verify, encrypt, decrypt"
 
 
+# Imported lazily by the app, so a missing one shows only when used.
+_LAZY_MODULES = (
+    "feedparser", "markdownify", "readability",            # imports
+    "openpyxl", "sheet_tab",                                # spreadsheets
+    "segno",                                                # QR codes for pairing and payment
+    "PySide6.QtPdf", "PySide6.QtPdfWidgets", "pdf_viewer",  # PDF
+    "PySide6.QtTextToSpeech", "PySide6.QtWebSockets",
+    "export_html", "export_pdf",
+    # The file viewers: pictures, films and sound, reading views and
+    # preview pictures of office documents, and Move to Trash.
+    "media_tabs", "office_preview", "lxml.etree", "send2trash",
+)
+# Linux reaches the desktop's Open With and file manager over D-Bus; the
+# app goes without them when the module is missing, so only this says so.
+_LINUX_MODULES = ("PySide6.QtDBus",)
+
+
 def _modules() -> str:
-    # Imported lazily by the app, so a missing one shows only when used.
-    import feedparser  # noqa: F401  imports
-    import markdownify  # noqa: F401
-    import readability  # noqa: F401
-    import segno  # noqa: F401  QR codes for pairing and payment
-    from PySide6 import QtPdf, QtPdfWidgets, QtTextToSpeech, QtWebSockets  # noqa: F401
-    import export_html  # noqa: F401
-    import export_pdf  # noqa: F401
-    import pdf_viewer  # noqa: F401
-    return "PDF, web sockets, speech, exports, imports, QR codes"
+    names = _LAZY_MODULES + (_LINUX_MODULES if sys.platform.startswith("linux") else ())
+    for name in names:
+        importlib.import_module(name)
+    return "PDF, spreadsheets, file viewers, web sockets, speech, exports, imports, QR codes"
 
 
 def _spelling() -> str:

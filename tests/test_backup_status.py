@@ -25,6 +25,9 @@ import atomic_file, main_window, recovery
 from tests.accessibility import unnamed_controls
 
 w = main_window.MainWindow()
+# The status bar's own width is measured: the folder sidebar, whose
+# narrowest width the window keeps, is put away.
+w._library_window.set_pane_shown("sidebar", False)
 w.resize(1100, 700)
 w.show()
 first = w.new_tab()

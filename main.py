@@ -6,7 +6,6 @@
 # MyEditor built by rinbal
 
 
-import os
 import sys
 from PySide6.QtCore import QEvent
 from PySide6.QtWidgets import QApplication
@@ -16,6 +15,7 @@ import constants
 import diagnostics
 import file_paths
 import i18n
+from resources import resource_path
 from main_thread_gc import GuiThreadCollector
 from quit_signals import QuitOnSignal
 import theme
@@ -70,16 +70,6 @@ class EditorApplication(QApplication):
             return self._main_window.quit_application()
         self.quit()
         return True
-
-
-def resource_path(rel_path: str) -> str:
-    """Resolve a bundled resource, working both from source and when frozen.
-
-    PyInstaller unpacks bundled data under sys._MEIPASS; from source we resolve
-    relative to this file (the repo root). The spec bundles assets preserving
-    their repo-relative path, so the same rel_path works in both cases."""
-    base = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))
-    return os.path.join(base, rel_path)
 
 
 def _forward_to_running_instance(path: str) -> bool:

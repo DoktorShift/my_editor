@@ -323,6 +323,32 @@ def inspector(color: QColor) -> QIcon:
     return _icon(draw, color)
 
 
+def sidebar(color: QColor) -> QIcon:
+    """A window with a pane at its left: the sidebar, shown or hidden."""
+    def draw(painter: QPainter, ink: QColor) -> None:
+        painter.setPen(_pen(ink, 1.5))
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.drawRoundedRect(QRectF(2, 3.5, 14, 11), 2.4, 2.4)
+        painter.drawLine(QPointF(7, 3.8), QPointF(7, 14.2))
+        painter.setPen(_pen(ink, 1.3))
+        for y in (7.0, 10.0):
+            painter.drawLine(QPointF(3.8, y), QPointF(5.2, y))
+    return _icon(draw, color)
+
+
+def page(color: QColor) -> QIcon:
+    """A sheet of paper with lines of writing on it: Paper Mode, the text
+    set on a page of its own."""
+    def draw(painter: QPainter, ink: QColor) -> None:
+        painter.setPen(_pen(ink, 1.5))
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.drawRoundedRect(QRectF(4, 2, 10, 14), 1.4, 1.4)
+        painter.setPen(_pen(ink, 1.3))
+        for y, end in ((5.8, 11.5), (8.6, 11.5), (11.4, 9.2)):
+            painter.drawLine(QPointF(6.5, y), QPointF(end, y))
+    return _icon(draw, color)
+
+
 def drafts(color: QColor) -> QIcon:
     """Two pages, one behind the other, the front one written on: the
     drafts and what was published (the Drafts panel)."""

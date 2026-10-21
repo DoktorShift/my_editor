@@ -76,6 +76,12 @@ class BandAligner(QObject):
         for widget in (toolbar, tabs, tabs.tabBar()):
             widget.installEventFilter(self)
 
+    def add_panel(self, align: Align) -> None:
+        """Line up one more panel's bands (a panel added later, such as
+        the folder sidebar)."""
+        self._panels.append(align)
+        self._pending.start()
+
     def eventFilter(self, watched, event) -> bool:
         if event.type() in self._WATCHED:
             self._pending.start()

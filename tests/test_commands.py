@@ -338,10 +338,15 @@ def test_editing_commands_follow_the_tab(fresh_window):
     win._rich_actions.append(rich_only)
 
     win.current_editor = lambda: None                  # a PDF tab
+    win.current_pdf_viewer = lambda: object()
     MainWindow._update_editor_commands(win)
     assert not win.act_paste.isEnabled() and not win.act_bold.isEnabled()
     assert win.act_copy.isEnabled()                    # copies from the PDF
     assert win.act_find.isEnabled()                    # finds in the PDF
+    assert not win.act_replace.isEnabled()             # but replaces nothing there
+    win.current_pdf_viewer = lambda: None              # a picture: nothing to find
+    MainWindow._update_editor_commands(win)
+    assert not win.act_find.isEnabled()
 
     win.current_editor = lambda: _Editor("/notes/a.txt")
     MainWindow._update_editor_commands(win)

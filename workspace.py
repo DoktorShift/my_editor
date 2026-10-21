@@ -40,7 +40,15 @@ WORKSPACE_VERSION = 1
 DOCUMENT = "document"
 PDF = "pdf"
 WELCOME = "welcome"
-_KINDS = (DOCUMENT, PDF, WELCOME)
+# A file shown read-only in a viewer of its own (viewer_tabs.py): a
+# picture, a film, an office file. Like a PDF it holds nothing typed, so
+# its path is all there is to write down.
+FILE = "file"
+# A spreadsheet in a sheet tab (sheet_tab.py). It has no crash backup:
+# unsaved changes are asked about before an update restart, and the tab
+# comes back as its file.
+SHEET = "sheet"
+_KINDS = (DOCUMENT, PDF, WELCOME, FILE, SHEET)
 
 # A record is a short list of paths and numbers. Anything bigger is not one.
 _MAX_BYTES = 4 * 1024 * 1024
@@ -160,7 +168,7 @@ def _parse_tab(raw) -> Optional[TabState]:
     kind = raw["kind"]
     path = _str(raw.get("path"))
     backup_file = _str(raw.get("backup_file"))
-    if kind == PDF and not path:
+    if kind in (PDF, FILE, SHEET) and not path:
         return None
     draft = raw.get("draft")
     article = raw.get("article") if are_tags(raw.get("article")) else None

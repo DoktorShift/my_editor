@@ -94,6 +94,8 @@ def closing_host(monkeypatch, order):
     host._asset_manager = types.SimpleNamespace(flush=lambda: None)
     host._media_saver = types.SimpleNamespace(cancel=lambda: order.append("saves stopped"))
     host._save_session = lambda: None
+    host._remember_window_geometry = lambda: None
+    host._release_file_tabs = lambda: None
     host.tabs = QTabWidget()
     host.status = QStatusBar()
     host._session_pool = types.SimpleNamespace(

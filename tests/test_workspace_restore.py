@@ -130,6 +130,7 @@ def window_of(*editors, current=0):
         tabs=tabs,
         _editor_from_widget=lambda w: w if isinstance(w, HtmlEditor) else None,
         _pdf_viewer_from_widget=lambda w: None,
+        _viewer_from_widget=lambda w: None,
     )
 
 

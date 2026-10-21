@@ -94,6 +94,9 @@ NO_SHORTCUT: Tuple[Tuple[str, str, str], ...] = (
      "Choices from the Color menu; Clear Formatting (Ctrl+D) takes color away too."),
     ("format.code_language.", "all",
      "A choice from a list, offered right after Insert Code Block."),
+    ("format.sheet.", "all",
+     "Choices for a workbook's sheets, also in the sheet bar's context menu; Numbers has "
+     "no keys for them, and deleting a sheet is destructive."),
     ("format.table.", "all",
      "Tab or Return at the end of a table adds a row; no convention has keys for the "
      "others, and deleting rows, columns or the table is destructive."),
@@ -123,9 +126,30 @@ NO_SHORTCUT: Tuple[Tuple[str, str, str], ...] = (
     ("view.highlight_line", "all", "A look preference, set once and remembered."),
     ("view.background.", "all", "A look preference, set once and remembered."),
     ("view.language.", "all", "Set once; it applies at the next start."),
-    ("view.sidebar", "all",
-     "The key belongs to the Imports window, whose sidebar it shows (Control-Command-S on "
-     "a Mac)."),
+    ("view.sidebar", "other",
+     "Windows and Linux have no convention for it; the sidebar button at the start of the "
+     "tab row and the View menu show and hide it."),
+    ("view.file_list", "other",
+     "Windows and Linux have no convention for it; the button at the start of the tab "
+     "row and the View menu show and hide it."),
+    ("file.new_folder", "all",
+     "The Finder's Shift-Command-N opens Imports here (since 3.3); the list's own "
+     "button and context menu make folders too."),
+    ("file.rename", "all", "The Finder gives Rename no key in its menu either."),
+    ("file.duplicate", "all",
+     "Command-D (Ctrl+D) clears formatting here, as since 3.3; the list's context menu "
+     "duplicates too."),
+    ("file.reveal", "all", "The Finder's own Show in Enclosing Folder key moves up a "
+     "folder, which has no meaning here; a one-off."),
+    ("file.quick_look", "all",
+     "Space in the file list, as in the Finder; the Finder's Command-Y is Redo here, as "
+     "on every platform's Edit menu."),
+    ("file.open_as_text", "all",
+     "Rare: for the few text files MyEditor shows another way (a CSV table, an SVG "
+     "picture); the tab's menu and Open With have it too."),
+    ("file.add_folder", "other",
+     "The Finder's Add to Sidebar key (Control-Command-T) has no Windows or Linux "
+     "counterpart; a one-off."),
     ("nostr.insert_mention", "all",
      "Typing @ at the start of a word does it, as in every app that mentions people."),
     ("nostr.draft_relays", "all", "A one-off account setup."),

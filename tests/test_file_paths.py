@@ -197,6 +197,9 @@ class _OpenWindow:
     def _new_wired_editor(self):
         raise _OpensANewTab()
 
+    def _opens_in_viewer(self, path, kind=None):
+        return False
+
 
 def test_a_file_open_under_another_spelling_is_not_opened_again(note, tmp_path, monkeypatch):
     for spelled in spellings(note, monkeypatch):
@@ -227,6 +230,12 @@ class _SaveAsWindow:
                                         removePath=lambda path: None)
 
     def current_editor(self):
+        return None
+
+    def current_sheet(self):
+        return None
+
+    def current_reader(self):
         return None
 
     def current_path(self):
@@ -296,6 +305,7 @@ class _RenameWindow:
     """The slice of MainWindow that renames a file."""
 
     _rename_tab = MainWindow._rename_tab
+    _unwatch = MainWindow._unwatch
     _document_name = staticmethod(MainWindow._document_name)
 
     def __init__(self):
@@ -303,7 +313,8 @@ class _RenameWindow:
         self.kinds = []          # what each rename has the file read as
         self.tabs = SimpleNamespace(setTabText=lambda index, text: self.titles.append(text))
         self._watcher = SimpleNamespace(addPath=lambda path: None,
-                                        removePath=lambda path: None)
+                                        removePath=lambda path: None,
+                                        files=lambda: [], directories=lambda: [])
 
     def _update_window_title(self):
         pass

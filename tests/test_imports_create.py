@@ -256,7 +256,8 @@ def test_the_expiry_sentence_is_said_in_one_place():
     # Q-11: said once, where drafts are created.
     root = pathlib.Path(__file__).resolve().parent.parent
     places = [path for path in root.rglob("*.py")
-              if ".venv" not in path.parts and "tests" not in path.parts
+              if not {".venv", ".claude", ".git", "tests"}.intersection(
+                  path.relative_to(root).parts)
               and "removed after 90 days" in path.read_text(encoding="utf-8")]
     assert [p.name for p in places] == ["imports_actions.py"]
 
