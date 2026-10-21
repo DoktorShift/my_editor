@@ -1114,6 +1114,11 @@ def _budget(path):
     sheet["F8"] = "A long line of words"
     sheet.column_dimensions["F"].width = 4
     sheet.column_dimensions["G"].width = 10.5
+    # Eight digits: what Excel's default column width (8.43) is defined to
+    # hold, in any font; in bold too.
+    sheet["H8"] = 12345678
+    sheet["H8"].font = Font(bold=True)
+    sheet["H9"] = 12345678
     book.save(path)
 
 
@@ -1146,12 +1151,16 @@ def budget(tmp_path):
     tab.deleteLater()
 
 
-def test_a_bold_total_at_excels_default_width_shows_in_full(budget):
-    # Excel holds "1,434.00 €" in a column of the default width; so does
-    # the grid, whose digits are wider than Calibri's.
-    option, room = _shown(budget, "D8")
-    assert option.text == "1,434.00 €" and option.font.bold()
-    assert QFontMetrics(option.font).horizontalAdvance(option.text) <= room
+def test_a_column_of_excels_default_width_holds_as_many_digits_as_in_excel(budget):
+    # Excel's column width counts digits: the default 8.43 holds eight, in
+    # whatever font. So does the grid, whose digits are wider than
+    # Calibri's, in regular and in bold. (Punctuation and currency signs
+    # are as wide as the font makes them: "1,434.00 €" fits in this
+    # column on a Mac and shows ### in a wider font, as Excel would.)
+    for ref, bold in (("H9", False), ("H8", True)):
+        option, room = _shown(budget, ref)
+        assert option.text == "12345678" and option.font.bold() == bold
+        assert QFontMetrics(option.font).horizontalAdvance(option.text) <= room
 
 
 def test_a_number_too_wide_for_its_column_shows_hashes(budget):
