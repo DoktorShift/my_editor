@@ -491,10 +491,28 @@ class MediaGrid(QListView):
         # The columns share the width, so a window between two column
         # counts has no ragged gap at the right.
         cell = self.delegate.cell_size()
-        width = self.viewport().width()
+        width = self._row_width()
         columns = max(1, width // cell.width())
-        self.setGridSize(QSize(max(cell.width(), width // columns), cell.height()))
+        size = QSize(max(cell.width(), width // columns), cell.height())
+        if size != self.gridSize():
+            self.setGridSize(size)
         self._visible_timer.start()
+
+    def _row_width(self) -> int:
+        """The width a row of tiles may fill: the width Qt lays them out in.
+
+        Qt keeps the scroll bar's room whether or not the bar shows, and
+        wraps a tile that would reach the last pixel. Filling the viewport
+        instead made a full row wrap, the extra row brought the scroll bar,
+        the bar narrowed the row until it fit, the bar went, and round
+        again, thousands of times a second. This width is the same with
+        and without the bar, so the layout settles."""
+        bar = self.verticalScrollBar()
+        overlaps = self.style().pixelMetric(QStyle.PixelMetric.PM_ScrollView_ScrollBarOverlap,
+                                            None, bar)
+        extent = 0 if overlaps else self.style().pixelMetric(
+            QStyle.PixelMetric.PM_ScrollBarExtent, None, bar)
+        return self.maximumViewportSize().width() - extent - 1
 
     # -- what is in view ----------------------------------------------------
 

@@ -85,7 +85,9 @@ from preview_pane import (
 )
 from nostr import preview as preview_module
 from nostr.preview import Article as PreviewArticle
-from doc_walk import iter_blocks, iter_image_names, serialize_plain_with_images
+from doc_walk import (
+    image_positions, iter_blocks, iter_image_names, serialize_plain_with_images,
+)
 from markdown_writer import (
     document_to, document_to_markdown, has_local_only_formatting, holds_faithfully,
     image_markdown, read_markdown,
@@ -1380,6 +1382,7 @@ class MainWindow(QMainWindow):
         ed.set_object_lookup(self._outside_of)
         ed.set_local_image_resolver(lambda name, e=ed: self._resolve_local_image(e, name))
         ed.set_web_image_resolver(self._resolve_web_image)
+        ed.set_library_check(lambda url: self._library_file_at(url) is not None)
         ed.media_clicked.connect(self._on_media_clicked)
         ed.image_pasted.connect(lambda img, e=ed: self._handle_pasted_image(e, img))
         ed.notice.connect(lambda text: self.status.showMessage(text, 8000))
@@ -3624,8 +3627,8 @@ class MainWindow(QMainWindow):
         image_paths = []
         for url in urls:
             if not url.isLocalFile():
-                # A tile dragged out of the Media Library: its address,
-                # inserted as Insert Image inserts it.
+                # A tile dragged out of the Media Library, or its link
+                # pasted: the file, inserted as Insert in Document does.
                 media = self._library_file_at(url.toString())
                 if media is not None and self.current_editor() is not None:
                     self._insert_media_at_cursor(media, self.current_editor())
@@ -8255,11 +8258,28 @@ class MainWindow(QMainWindow):
             self._card_ticker.start()
 
     def _redraw_uploading_cards(self) -> None:
-        uploading = {asset.sha256 for asset in self._uploading(*self._all_editors())}
+        uploading = {asset.sha256: asset for asset in self._uploading(*self._all_editors())}
         if not uploading:
             self._card_ticker.stop()
-        for sha in uploading:
-            self._refresh_asset_in_documents(sha)
+        for asset in uploading.values():
+            self._redraw_card(asset)
+
+    def _redraw_card(self, asset) -> None:
+        """Move an uploading card's bar on: its picture drawn again, and
+        only where it stands laid out again. Nothing else in the text or
+        its preview changed, so neither is drawn again many times a
+        second."""
+        key = asset_key(asset.sha256)
+        card = None
+        for ed in self._all_editors():
+            doc = ed.document()
+            positions = image_positions(doc, key)
+            if not positions:
+                continue
+            card = card if card is not None else self._media_card(asset)
+            doc.addResource(QTextDocument.ImageResource, QUrl(key), card)
+            for position in positions:
+                doc.markContentsDirty(position, 1)
 
     @staticmethod
     def _media_file_of(asset) -> MediaFile:

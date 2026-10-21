@@ -223,6 +223,9 @@ class HtmlEditor(QTextEdit):
         # Whether a Nostr account is in use: Nostr shows up in the editor
         # only then (nostr/state.py).
         self._nostr_active = lambda: False
+        # Whether a web address names a file of the Media Library: pasted
+        # on its own, that file goes in, not its address (_pasted_media).
+        self._in_library = lambda _address: False
 
         # Resource seam: a resolver plus the URL scheme it answers for.
         # Injected by the window so the editor carries no knowledge of
@@ -1458,6 +1461,11 @@ class HtmlEditor(QTextEdit):
 
     def nostr_in_use(self) -> bool:
         return bool(self._nostr_active())
+
+    def set_library_check(self, check) -> None:
+        """Install ``check(address)``: whether a web address names a file
+        of the Media Library."""
+        self._in_library = check
 
     def set_link_opener(self, opener) -> None:
         """Install ``opener(href)``, which opens a Command-clicked link."""
@@ -2707,6 +2715,14 @@ class HtmlEditor(QTextEdit):
                 # a Nostr account is in use, audio and video, as a drop.
                 self.urls_dropped.emit(urls)
                 return True
+        address = text.strip()
+        if (link_url.is_bare_http_url(address) and self._keeps_pictures()
+                and self._in_library(address) and self.isSignalConnected(
+                    QMetaMethod.fromSignal(self.urls_dropped))):
+            # A file's link copied in the Media Library: the file, shown
+            # where it goes, as a tile dragged from there puts it.
+            self.urls_dropped.emit([QUrl(address)])
+            return True
         if source.hasImage() and not text.strip() and self._keeps_pictures() and \
                 self.isSignalConnected(QMetaMethod.fromSignal(self.image_pasted)):
             image = source.imageData()

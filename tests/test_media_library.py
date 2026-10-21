@@ -1225,3 +1225,51 @@ def test_in_german_the_save_progress_is_named_as_a_progress(tmp_path, monkeypatc
         assert world.dialog._save_stop.accessibleName() == "Speichern stoppen"
     finally:
         i18n.install("en")
+
+
+@pytest.mark.parametrize("tiles", [2, 5, 8])
+def test_the_grid_settles_whatever_its_width(tiles):
+    """A row that filled the grid to its last pixel wrapped, the extra row
+    brought the scroll bar, the bar made the row fit again and went: the
+    whole library flickered, without end, after the one upload that made
+    the count land on such a width."""
+    from PySide6.QtCore import QEventLoop, QTimer
+    from nostr.ui.media_grid import MediaGrid, MediaModel, Tile
+
+    def spin(ms):
+        loop = QEventLoop()
+        QTimer.singleShot(ms, loop.quit)
+        loop.exec()
+
+    resized = []
+    grid = MediaGrid(is_dark=False)
+    model = MediaModel()
+    grid.setModel(model)
+    grid.show()
+    grid.viewport().installEventFilter(watcher := _ResizeWatcher(resized))
+    model.set_tiles([Tile(key=str(i), name=f"{i}.png", kind="image") for i in range(tiles)])
+    cell = grid.delegate.cell_size()
+    try:
+        for columns in range(1, tiles + 1):
+            # Each column count's widths, where the row fills exactly.
+            for width in (columns * cell.width(), columns * cell.width() + 18):
+                grid.resize(width, int(cell.height() * 1.95))
+                spin(10)
+                resized.clear()
+                spin(40)
+                assert len(resized) <= 1, (tiles, width)
+    finally:
+        grid.viewport().removeEventFilter(watcher)
+        grid.close()
+        grid.deleteLater()
+
+
+class _ResizeWatcher(QObject):
+    def __init__(self, seen: list) -> None:
+        super().__init__()
+        self._seen = seen
+
+    def eventFilter(self, watched, event) -> bool:  # noqa: N802
+        if event.type() == QEvent.Type.Resize:
+            self._seen.append(event.size().width())
+        return False
