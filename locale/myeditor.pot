@@ -6033,34 +6033,34 @@ msgstr ""
 msgid "Could not read that Ghost export: {error}"
 msgstr ""
 
-#: nostr/imports/resolvers/mdx.py:244
+#: nostr/imports/resolvers/mdx.py:252
 msgid "That GitHub path is not a folder"
 msgstr ""
 
-#: nostr/imports/resolvers/mdx.py:257
+#: nostr/imports/resolvers/mdx.py:265
 msgid "No .md or .mdx files in that folder"
 msgstr ""
 
-#: nostr/imports/resolvers/mdx.py:236
+#: nostr/imports/resolvers/mdx.py:244
 msgid "GitHub returned an unexpected folder listing"
 msgstr ""
 
-#: nostr/imports/resolvers/mdx.py:242
+#: nostr/imports/resolvers/mdx.py:250
 #, python-brace-format
 msgid "GitHub: {message}"
 msgstr ""
 
-#: nostr/imports/resolvers/mdx.py:313
+#: nostr/imports/resolvers/mdx.py:322
 #, python-brace-format
 msgid "Showing the first {shown} of {total} files"
 msgstr ""
 
-#: nostr/imports/resolvers/mdx.py:204
+#: nostr/imports/resolvers/mdx.py:212
 #, python-brace-format
 msgid "Could not read that document: {error}"
 msgstr ""
 
-#: nostr/imports/resolvers/mdx.py:299
+#: nostr/imports/resolvers/mdx.py:308
 #, python-brace-format
 msgid "Could not convert that folder: {error}"
 msgstr ""
@@ -6074,11 +6074,11 @@ msgstr ""
 msgid "{name} · Articles"
 msgstr ""
 
-#: nostr/imports/resolvers/nostrhub.py:110
+#: nostr/imports/resolvers/nostrhub.py:105
 msgid "NostrHub NIPs"
 msgstr ""
 
-#: nostr/imports/resolvers/nostrhub.py:109
+#: nostr/imports/resolvers/nostrhub.py:104
 #, python-brace-format
 msgid "{name} · NostrHub NIPs"
 msgstr ""
@@ -6111,11 +6111,11 @@ msgstr ""
 msgid "Could not read that WordPress export: {error}"
 msgstr ""
 
-#: nostr/imports/sources/archive.py:242
+#: nostr/imports/sources/archive.py:366
 msgid "Substack export"
 msgstr ""
 
-#: nostr/imports/sources/archive.py:242
+#: nostr/imports/sources/archive.py:366
 msgid "Medium export"
 msgstr ""
 

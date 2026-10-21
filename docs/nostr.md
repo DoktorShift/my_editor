@@ -229,7 +229,17 @@ Mirror your own blog, or a website you follow, into private Nostr drafts. Choose
 - The toolbar shows how an import is going. Its card pauses, resumes, stops, and tries posts that failed again; the Drafts panel's Imports row shows the same line.
 - **Add > Export Sources…** writes every source to an OPML file, which other feed readers (and EINUNDZWANZIG STANDUP) import.
 
-Each draft keeps the post's title, summary, cover image, hashtags and original date.
+Each draft keeps the post's title, summary, cover image, hashtags and original date, and ends with a line naming where it was first published and, when the source says, by whom (a name, never an e-mail address).
+
+What comes along, whatever the source:
+
+- **The whole text.** A post whose feed gives only its start (a few lines, or a text ending in "[…]" or "Continue reading", as WordPress's "Summary" feeds do) is read from its own page when **Fetch the full article** is on.
+- **The details the page states.** When the source leaves out the cover, a summary, the date, tags or the author, MyEditor takes what the post's page states for link previews; what the source gave always wins. A post without a cover has its page read for that alone. A site's stock preview picture, the author's avatar and counter pixels are never a cover.
+- **Pictures, videos and code as the post shows them.** Lazily loaded pictures keep the real picture, YouTube, Vimeo and other players become their address (which Nostr apps show as a player), video and audio keep their address, and a code block keeps its language. Buttons, forms, tracking pixels and the "The post … appeared first on …" line of SEO plugins are left out.
+- **Clean details.** The summary is plain text (the opening words when the source has none), hashtags have no spaces, and WordPress's "Uncategorized" is no hashtag.
+- **A WordPress export** reads as the site shows it: paragraphs, captions, galleries and embeds, the featured image as the cover, and the author's display name.
+- **A Ghost export** writes the blog's address as a placeholder, so **Import a File** asks once where the blog lives; with it, the posts keep their pictures and links. **Continue Without Address** opens them without.
+- **Markdown files** keep the date, tags, description, cover and author of their front matter (Jekyll, Hugo, Astro and others), **Medium and Substack exports** come without the title, subscribe buttons and other furniture repeated in the text, and **Bluesky threads** keep their line breaks and hashtags.
 
 ### Each source's settings
 

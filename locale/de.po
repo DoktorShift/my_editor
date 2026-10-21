@@ -6048,34 +6048,34 @@ msgstr "Ghost-Export"
 msgid "Could not read that Ghost export: {error}"
 msgstr "Dieser Ghost-Export konnte nicht gelesen werden: {error}"
 
-#: nostr/imports/resolvers/mdx.py:244
+#: nostr/imports/resolvers/mdx.py:252
 msgid "That GitHub path is not a folder"
 msgstr "Dieser GitHub-Pfad ist kein Ordner"
 
-#: nostr/imports/resolvers/mdx.py:257
+#: nostr/imports/resolvers/mdx.py:265
 msgid "No .md or .mdx files in that folder"
 msgstr "In diesem Ordner gibt es keine .md- oder .mdx-Dateien"
 
-#: nostr/imports/resolvers/mdx.py:236
+#: nostr/imports/resolvers/mdx.py:244
 msgid "GitHub returned an unexpected folder listing"
 msgstr "GitHub hat eine unerwartete Ordnerliste geliefert"
 
-#: nostr/imports/resolvers/mdx.py:242
+#: nostr/imports/resolvers/mdx.py:250
 #, python-brace-format
 msgid "GitHub: {message}"
 msgstr "GitHub: {message}"
 
-#: nostr/imports/resolvers/mdx.py:313
+#: nostr/imports/resolvers/mdx.py:322
 #, python-brace-format
 msgid "Showing the first {shown} of {total} files"
 msgstr "Die ersten {shown} von {total} Dateien werden angezeigt"
 
-#: nostr/imports/resolvers/mdx.py:204
+#: nostr/imports/resolvers/mdx.py:212
 #, python-brace-format
 msgid "Could not read that document: {error}"
 msgstr "Dieses Dokument konnte nicht gelesen werden: {error}"
 
-#: nostr/imports/resolvers/mdx.py:299
+#: nostr/imports/resolvers/mdx.py:308
 #, python-brace-format
 msgid "Could not convert that folder: {error}"
 msgstr "Dieser Ordner konnte nicht umgewandelt werden: {error}"
@@ -6089,11 +6089,11 @@ msgstr "Nostr-Artikel"
 msgid "{name} · Articles"
 msgstr "{name} · Artikel"
 
-#: nostr/imports/resolvers/nostrhub.py:110
+#: nostr/imports/resolvers/nostrhub.py:105
 msgid "NostrHub NIPs"
 msgstr "NostrHub-NIPs"
 
-#: nostr/imports/resolvers/nostrhub.py:109
+#: nostr/imports/resolvers/nostrhub.py:104
 #, python-brace-format
 msgid "{name} · NostrHub NIPs"
 msgstr "{name} · NostrHub-NIPs"
@@ -6126,11 +6126,11 @@ msgstr "WordPress-Export"
 msgid "Could not read that WordPress export: {error}"
 msgstr "Dieser WordPress-Export konnte nicht gelesen werden: {error}"
 
-#: nostr/imports/sources/archive.py:242
+#: nostr/imports/sources/archive.py:366
 msgid "Substack export"
 msgstr "Substack-Export"
 
-#: nostr/imports/sources/archive.py:242
+#: nostr/imports/sources/archive.py:366
 msgid "Medium export"
 msgstr "Medium-Export"
 
