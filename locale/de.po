@@ -1012,7 +1012,7 @@ msgstr "Speichern unter …"
 
 #: main_window.py:2023
 msgid "Revert to Saved…"
-msgstr ""
+msgstr "Auf gespeicherte Version zurücksetzen …"
 
 #: main_window.py:2027
 #: main_window.py:4869
@@ -1440,19 +1440,19 @@ msgstr "Zaps zu gleichen Teilen mit den Mitautoren teilen"
 
 #: main_window.py:4690
 msgid "Revert to the version on disk?"
-msgstr ""
+msgstr "Zur Version auf dem Datenträger zurückkehren?"
 
 #: main_window.py:4692
 msgid "Revert"
-msgstr ""
+msgstr "Zurücksetzen"
 
 #: main_window.py:4727
 msgid "Saving replaces the changes made there."
-msgstr ""
+msgstr "Beim Speichern werden die dort gemachten Änderungen ersetzt."
 
 #: main_window.py:4753
 msgid "It opens Markdown, HTML, plain text, R Markdown and PDF documents, and puts pictures into them."
-msgstr ""
+msgstr "Es öffnet Markdown-, HTML-, Text-, R-Markdown- und PDF-Dokumente und fügt Bilder in sie ein."
 
 #: main_window.py:4808
 msgid "Enter its password to recover the changes that were not saved."
@@ -1978,17 +1978,17 @@ msgstr "„{detail}“ kann nicht in der Datei gespeichert werden"
 #: main_window.py:4657
 #, python-brace-format
 msgid "“{name}” was updated from disk."
-msgstr ""
+msgstr "„{name}“ wurde vom Datenträger aktualisiert."
 
 #: main_window.py:4659
 msgid "It is no longer locked with a password."
-msgstr ""
+msgstr "Sie ist nicht mehr mit einem Passwort geschützt."
 
 #: main_window.py:4666
 #: main_window.py:4697
 #, python-brace-format
 msgid "“{name}” was changed in another app."
-msgstr ""
+msgstr "„{name}“ wurde in einer anderen App geändert."
 
 #: main_window.py:5375
 #, python-brace-format
@@ -2693,23 +2693,23 @@ msgstr "„{detail}“"
 #: main_window.py:4652
 #, python-brace-format
 msgid "“{name}” was moved or deleted."
-msgstr ""
+msgstr "„{name}“ wurde verschoben oder gelöscht."
 
 #: main_window.py:4667
 #: main_window.py:4728
 #: main_window.py:4698
 msgid "Revert…"
-msgstr ""
+msgstr "Zurücksetzen …"
 
 #: main_window.py:4691
 #, python-brace-format
 msgid "Your unsaved changes to “{name}” will be lost."
-msgstr ""
+msgstr "Deine nicht gespeicherten Änderungen an „{name}“ gehen verloren."
 
 #: main_window.py:4725
 #, python-brace-format
 msgid "“{name}” was changed in another app since you opened it."
-msgstr ""
+msgstr "„{name}“ wurde in einer anderen App geändert, seit du die Datei geöffnet hast."
 
 #: main_window.py:4730
 #: nostr/ui/draft_relays_sheet.py:618
@@ -2720,8 +2720,8 @@ msgstr "Trotzdem speichern"
 #, python-brace-format
 msgid "MyEditor can’t open “{name}”"
 msgid_plural "MyEditor can’t open {count} of these files"
-msgstr[0] ""
-msgstr[1] ""
+msgstr[0] "MyEditor kann „{name}“ nicht öffnen"
+msgstr[1] "MyEditor kann {count} dieser Dateien nicht öffnen"
 
 #: main_window.py:5364
 msgid "Couldn't print"
@@ -2943,11 +2943,11 @@ msgstr "Dieser Entwurf wurde zuletzt als {original} gespeichert, aber du bist al
 
 #: main_window.py:10780
 msgid "Replace this draft with the newer version?"
-msgstr ""
+msgstr "Diesen Entwurf durch die neuere Version ersetzen?"
 
 #: main_window.py:10781
 msgid "Your unsaved changes will be lost."
-msgstr ""
+msgstr "Deine nicht gespeicherten Änderungen gehen verloren."
 
 #: main_window.py:1749
 #, python-brace-format
@@ -2979,7 +2979,7 @@ msgstr "Zu Tab {number}"
 
 #: main_window.py:3334
 msgid "Open File"
-msgstr ""
+msgstr "Datei öffnen"
 
 #: main_window.py:3471
 #, python-brace-format
@@ -4565,7 +4565,7 @@ msgstr "Suchleiste schließen (Esc)"
 #: widgets.py:403
 #: widgets.py:410
 msgid "Update Available"
-msgstr ""
+msgstr "Update verfügbar"
 
 #: widgets.py:216
 #: widgets.py:277
