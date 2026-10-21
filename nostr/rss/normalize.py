@@ -86,7 +86,12 @@ _APPEARED_FIRST = re.compile(r"\s*\b(The post|Der Beitrag)\b.+\b(appeared first 
                              r"erschien zuerst auf)\b.*$", re.IGNORECASE)
 _MD_IMAGE = re.compile(r"!\[[^\]]*\]\([^)]*\)")
 _MD_LINK = re.compile(r"\[([^\]]*)\]\([^)]*\)")
-_MD_MARKS = re.compile(r"(^|\s)[#>]+\s|(?<!\\)[*_`~]+|<(https?://[^>]+)>")
+# A line's block marks (heading, quote, list item), emphasis, and an
+# autolink's brackets. A ">" in the middle of a sentence ("rocks > 5")
+# is a character.
+_MD_MARKS = re.compile(r"^[ \t]*(?:[#>]+|[-+]|\d+[.)])[ \t]+|(?<!\\)[*_`~]+|<(https?://[^>]+)>",
+                       re.MULTILINE)
+_BARE_URL = re.compile(r"https?://\S+")
 _MD_ESCAPE = re.compile(r"\\([\\`*_{}\[\]()#+\-.!<>|~])")
 
 
@@ -141,25 +146,45 @@ def plain_summary(summary_html: Optional[str]) -> str:
 
 def summary_from_body(markdown: str) -> str:
     """A summary made of the article's opening words, for a post whose
-    source gives none: what a reader sees first, cut at a word."""
+    source gives none: what a reader sees first, cut at a word. Code,
+    headings, tables and a line that is only an address are skipped."""
     paragraphs = []
-    in_code = False
-    for block in re.split(r"\n\s*\n", markdown or ""):
+    for block in re.split(r"\n\s*\n", _without_code(markdown or "")):
         stripped = block.strip()
-        if stripped.startswith("```"):
-            in_code = not in_code or stripped.count("```") > 1
+        if not stripped or stripped.startswith(("#", "|", "---", "*Originally")):
             continue
-        if in_code or not stripped or stripped.startswith(("#", "|", "---", "*Originally")):
-            continue
-        text = _MD_MARKS.sub(lambda m: m.group(1) or m.group(2) or "",
+        text = _MD_MARKS.sub(lambda m: m.group(1) or "",
                              _MD_LINK.sub(r"\1", _MD_IMAGE.sub(" ", stripped)))
         text = _MD_ESCAPE.sub(r"\1", text)
         text = _SPACE.sub(" ", text).strip()
+        if _BARE_URL.fullmatch(text):
+            continue  # a video's or a link's own line says nothing about the post
         if text:
             paragraphs.append(text)
         if sum(len(p) for p in paragraphs) >= _SUMMARY_CHARS // 2:
             break
     return _shorten(" ".join(paragraphs))
+
+
+_FENCE = re.compile(r"^ {0,3}(`{3,}|~{3,})")
+
+
+def _without_code(markdown: str) -> str:
+    """``markdown`` without its fenced code blocks (a blank line inside
+    one, or a whole one in a paragraph, is no paragraph of prose)."""
+    out, fence = [], ""
+    for line in markdown.split("\n"):
+        match = _FENCE.match(line)
+        if fence:
+            if match and match.group(1)[0] == fence[0] and len(match.group(1)) >= len(fence) \
+                    and not line.strip()[len(match.group(1)):].strip():
+                fence = ""
+            continue
+        if match:
+            fence = match.group(1)
+            continue
+        out.append(line)
+    return "\n".join(out)
 
 
 _TEASER_END = re.compile(

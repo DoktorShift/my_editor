@@ -61,6 +61,12 @@ class ReadTests(unittest.TestCase):
                               url=PAGE)
         self.assertEqual(meta.image, "")
 
+    def test_the_sites_default_preview_picture_is_no_cover(self) -> None:
+        for name in ("wordpress-default-ogimage.png", "og-default.jpg", "default-share.png"):
+            meta = read_page_meta(page(f'<meta property="og:image" content="/img/{name}">'),
+                                  url=PAGE)
+            self.assertEqual(meta.image, "", name)
+
     def test_an_unreadable_page_states_nothing(self) -> None:
         self.assertEqual(read_page_meta("", url=PAGE), PageMeta())
         self.assertEqual(read_page_meta(None, url=PAGE), PageMeta())

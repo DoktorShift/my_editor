@@ -182,6 +182,24 @@ class ArticleDetailTests(unittest.TestCase):
                                        '<a href="/x">linked</a> <strong>words</strong>.</p>'))
         self.assertEqual(template.summary, "First linked words.")
 
+    def test_a_line_that_is_only_an_address_is_no_summary(self) -> None:
+        template = item_to_article(_item(
+            summary=None, content_html='<p><a href="https://www.youtube.com/watch?v=x">'
+                                       'https://www.youtube.com/watch?v=x</a></p><p>What the '
+                                       'video is about.</p>'))
+        self.assertEqual(template.summary, "What the video is about.")
+
+    def test_code_is_no_summary(self) -> None:
+        from nostr.rss.normalize import summary_from_body
+        self.assertEqual(summary_from_body("```\ncode\n```\n\nHello"), "Hello")
+        self.assertEqual(summary_from_body("```\na\n\nb\n```\n\nAfter the fence."),
+                         "After the fence.")
+
+    def test_a_character_in_a_sentence_stays(self) -> None:
+        from nostr.rss.normalize import summary_from_body
+        self.assertEqual(summary_from_body("Rocks > 5 and a - b.\n\n> quoted\n- item"),
+                         "Rocks > 5 and a - b. quoted item")
+
     def test_hashtags_have_no_spaces(self) -> None:
         template = item_to_article(_item(categories=("Bitcoin Mining", "Self Custody")))
         self.assertEqual(template.hashtags, ("bitcoinmining", "selfcustody"))

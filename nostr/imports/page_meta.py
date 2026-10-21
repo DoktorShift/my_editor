@@ -20,6 +20,7 @@ itself wrote always wins. Pure (no Qt, no network).
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from typing import Any, Iterable, List, Optional, Tuple
@@ -32,6 +33,11 @@ from ..rss.parser import FeedItem
 _ARTICLE_TYPES = {"article", "blogposting", "newsarticle", "techarticle",
                   "report", "scholarlyarticle", "socialmediaposting", "webpage"}
 _MAX_TAGS = 12
+# A picture named as the site's default for link previews
+# ("default-ogimage.png", "og-default.jpg"): every post would share it.
+_SITE_DEFAULT = re.compile(r"(^|[/_-])(default[-_]?og|og[-_]?default|default[-_]?share|"
+                           r"share[-_]?default|default[-_]?(social|preview|image|cover))"
+                           r"[^/]*$", re.IGNORECASE)
 
 
 @dataclass(frozen=True)
@@ -70,6 +76,8 @@ def read_page_meta(html: str, *, url: Optional[str] = None) -> PageMeta:
                                                            "twitter:creator"))
     tags = _keywords(ld.get("keywords")) or tuple(meta.all("article:tag"))
 
+    if _SITE_DEFAULT.search(urlsplit(image).path):
+        image = ""  # the site's picture for every page, not this post's
     return PageMeta(
         title=title,
         description=description,
