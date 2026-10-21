@@ -19,8 +19,14 @@ full text), so each fix below helps every source at once:
 - what is page furniture rather than text (scripts, styles, forms,
   buttons, inline icons) is dropped, so its words do not leak into the
   article;
+- tracking pixels (WordPress.com stats, Medium's, FeedBurner's, any
+  1x1 image) are dropped, and WordPress's emoji pictures become the
+  emoji they show;
 - the "The post X appeared first on Y." line SEO plugins add to every
   feed item is dropped.
+
+:func:`first_image` finds a post's picture the same way, for a cover:
+the real one behind a lazy placeholder, never a pixel or an avatar.
 
 :func:`code_language` tells ``markdownify`` the language of a code
 block, so the fence keeps it (```` ```python ````).
@@ -46,6 +52,16 @@ _LAZY_SRC = ("data-src", "data-lazy-src", "data-original", "data-orig-file",
 _LAZY_SRCSET = ("data-srcset", "data-lazy-srcset", "srcset")
 _PLACEHOLDER = re.compile(r"(placeholder|blank\.gif|spacer\.gif|lazy[-_]?load|"
                           r"transparent\.(gif|png)|pixel\.gif)", re.IGNORECASE)
+
+# Images that are not pictures of the post: counters and pixels, and the
+# author's avatar (WordPress.com puts it in every item's media:content).
+_TRACKER = re.compile(
+    r"^https?://([^/]*\.)?(pixel\.wp\.com|stats\.wp\.com|stats\.wordpress\.com|"
+    r"pixel\.quantserve\.com|www\.google-analytics\.com|feeds\.feedburner\.com/~r/|"
+    r"feedproxy\.google\.com/~r/|medium\.com/_/stat|ad\.doubleclick\.net|"
+    r"pixel\.mailerlite\.com|substackcdn\.com/open)", re.IGNORECASE)
+_AVATAR = re.compile(r"^https?://([^/]*\.)?gravatar\.com/avatar/", re.IGNORECASE)
+_EMOJI = re.compile(r"^https?://s\.w\.org/images/core/emoji/", re.IGNORECASE)
 
 _SRCSET_SPLIT = re.compile(r",\s+")
 # Players whose embed is worth a link in the article. Anything else in an
@@ -87,6 +103,12 @@ def clean_html(html: str, *, base_url: Optional[str] = None) -> str:
 
     for img in soup.find_all("img"):
         _settle_image(img)
+    for img in soup.find_all("img"):
+        src = (img.get("src") or "").strip()
+        if _EMOJI.match(src) or "wp-smiley" in (img.get("class") or ()):
+            img.replace_with(img.get("alt") or "")
+        elif _is_pixel(img):
+            img.decompose()
     _settle_noscript(soup)
 
     for tag, attribute in (("a", "href"), ("img", "src"), ("iframe", "src"),
@@ -108,6 +130,27 @@ def clean_html(html: str, *, base_url: Optional[str] = None) -> str:
 
     _drop_appeared_first(soup)
     return str(soup)
+
+
+def first_image(html: str) -> Optional[str]:
+    """The first picture of a post's HTML, for its cover: the real one
+    behind a lazy placeholder, never a pixel, an emoji or an avatar."""
+    if not html or "<img" not in html.lower():
+        return None
+    soup = BeautifulSoup(html, "html.parser")
+    for img in soup.find_all("img"):
+        src = _real_src(img)
+        if src and is_cover_worthy(src) and "wp-smiley" not in (img.get("class") or ()) \
+                and not _is_pixel(img):
+            return src
+    return None
+
+
+def is_cover_worthy(url: str) -> bool:
+    """Whether an image address can be a post's cover: not a counter, a
+    pixel, an emoji or the author's avatar."""
+    url = (url or "").strip()
+    return bool(url) and not (_TRACKER.match(url) or _AVATAR.match(url) or _EMOJI.match(url))
 
 
 def code_language(pre: Tag) -> Optional[str]:
@@ -136,6 +179,17 @@ def code_language(pre: Tag) -> Optional[str]:
 # -- images ----------------------------------------------------------------- #
 
 def _settle_image(img: Tag) -> None:
+    src = _real_src(img)
+    if src:
+        img["src"] = src
+    else:
+        img.decompose()
+
+
+def _real_src(img: Tag) -> str:
+    """The picture an ``<img>`` shows once its page has loaded: ``src``,
+    unless that is a placeholder and a lazy-loading attribute or a
+    ``srcset`` names the real one. "" when there is nothing to show."""
     src = (img.get("src") or "").strip()
     if not src or src.startswith("data:") or _PLACEHOLDER.search(src):
         real = next((img.get(a).strip() for a in _LAZY_SRC
@@ -144,9 +198,18 @@ def _settle_image(img: Tag) -> None:
             real = next((best for best in (_largest(img.get(a)) for a in _LAZY_SRCSET)
                          if best), "")
         if real:
-            img["src"] = real
-        elif not src or src.startswith("data:"):
-            img.decompose()
+            return real
+        if not src or src.startswith("data:"):
+            return ""
+    return src
+
+
+def _is_pixel(img: Tag) -> bool:
+    src = (img.get("src") or "").strip()
+    if _TRACKER.match(src):
+        return True
+    return all((img.get(side) or "").strip() in ("0", "1", "1px")
+               for side in ("width", "height"))
 
 
 def _largest(srcset: Optional[str]) -> str:

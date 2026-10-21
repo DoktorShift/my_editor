@@ -21,10 +21,13 @@ import time
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
+from html import escape, unescape
 from typing import Any, Callable, List, Mapping, Optional, Sequence, Tuple
 from urllib.parse import urljoin, urlsplit
 
 import feedparser
+
+from .clean import first_image, is_cover_worthy
 
 
 FeedFormat = str  # one of: "rss", "atom", "jsonfeed"
@@ -130,15 +133,47 @@ class RssError(Exception):
 # Shared helpers                                                               #
 # --------------------------------------------------------------------------- #
 
-_IMG_SRC_RE = re.compile(r"""<img[^>]+src=["']([^"']+)["']""", re.IGNORECASE)
-
-
 def _first_image_from_html(html: str) -> Optional[str]:
-    """Return the ``src`` of the first ``<img>`` tag in ``html``, if any."""
-    if not html:
-        return None
-    match = _IMG_SRC_RE.search(html)
-    return match.group(1) if match else None
+    """The first real picture in ``html``, if any (clean.first_image: the
+    one behind a lazy placeholder, never a pixel or an avatar)."""
+    return first_image(html)
+
+
+_MARKUP = re.compile(r"<[A-Za-z!/][^>]*>")
+_TAGS = re.compile(r"<[^>]+>")
+_IMAGE_FILE = re.compile(r"\.(jpe?g|png|gif|webp|avif|svg)(\?|#|$)", re.IGNORECASE)
+
+
+def _text_to_html(text: str) -> str:
+    """Plain text as the HTML it means: blank lines part paragraphs, a
+    single line break stays one, and ``<`` or ``*`` stay characters."""
+    paragraphs = re.split(r"\n\s*\n", (text or "").strip())
+    return "".join(
+        "<p>" + "<br>".join(escape(line.strip()) for line in p.splitlines()) + "</p>"
+        for p in paragraphs if p.strip())
+
+
+def _as_html(value: str, kind: str) -> str:
+    """A body as HTML whatever it was written as. feedparser calls most
+    bodies HTML; one without any markup is text (a YouTube description,
+    a plain RSS description), whose line breaks would otherwise merge."""
+    if not value:
+        return ""
+    if "html" in (kind or "") and _MARKUP.search(value):
+        return value
+    if "html" in (kind or ""):
+        value = unescape(value)
+    return _text_to_html(value)
+
+
+def _plain_title(entry: Mapping[str, Any]) -> str:
+    """A title as plain text: one written as HTML (Atom ``type="html"``,
+    an RSS title in CDATA) loses its tags and entities."""
+    title = _clean_str(entry.get("title"))
+    kind = ((entry.get("title_detail") or {}).get("type") or "").lower()
+    if "html" in kind:
+        title = " ".join(unescape(_TAGS.sub("", title)).split())
+    return title
 
 
 def _struct_time_to_unix(st: Optional[time.struct_time]) -> Optional[int]:
@@ -193,26 +228,38 @@ def _clean_str(value: Any) -> str:
 # RSS 2.0                                                                      #
 # --------------------------------------------------------------------------- #
 
-def _rss_image(entry: Mapping[str, Any], content_html: str) -> Optional[str]:
-    """Image priority: image enclosure, media:content, media:thumbnail, body."""
+def _entry_image(entry: Mapping[str, Any], content_html: str) -> Optional[str]:
+    """Image priority: image enclosure, the episode's ``itunes:image``,
+    an image ``media:content``, ``media:thumbnail``, the body's first
+    picture. A ``media:content`` that is the episode's audio or video is
+    no cover, and neither is a counter or the author's avatar."""
+    candidates: List[str] = []
     for enc in entry.get("enclosures") or ():
         ctype = (enc.get("type") or "").lower()
         href = enc.get("href") or enc.get("url")
         if href and ctype.startswith("image/"):
-            return href
+            candidates.append(href)
 
-    media_content = entry.get("media_content") or ()
-    for mc in media_content:
-        url = mc.get("url") if isinstance(mc, Mapping) else None
-        if url:
-            return url
+    itunes = entry.get("image")
+    if isinstance(itunes, Mapping) and itunes.get("href"):
+        candidates.append(itunes["href"])
 
-    media_thumb = entry.get("media_thumbnail") or ()
-    for mt in media_thumb:
-        url = mt.get("url") if isinstance(mt, Mapping) else None
-        if url:
-            return url
+    for mc in entry.get("media_content") or ():
+        if not isinstance(mc, Mapping) or not mc.get("url"):
+            continue
+        medium = (mc.get("medium") or "").lower()
+        ctype = (mc.get("type") or "").lower()
+        if medium == "image" or ctype.startswith("image/") or (
+                not medium and not ctype and _IMAGE_FILE.search(mc["url"])):
+            candidates.append(mc["url"])
 
+    for mt in entry.get("media_thumbnail") or ():
+        if isinstance(mt, Mapping) and mt.get("url"):
+            candidates.append(mt["url"])
+
+    for url in candidates:
+        if is_cover_worthy(url):
+            return url.strip()
     return _first_image_from_html(content_html)
 
 
@@ -227,14 +274,25 @@ def _entry_categories(entry: Mapping[str, Any]) -> Tuple[str, ...]:
 
 
 def _content_html_from_entry(entry: Mapping[str, Any]) -> str:
-    """feedparser exposes ``content:encoded`` / ``<content>`` via ``content``."""
-    contents = entry.get("content") or ()
+    """feedparser exposes ``content:encoded`` / ``<content>`` via ``content``.
+
+    HTML content wins. Content that is only text is turned into the HTML
+    it means, unless the item's description is HTML: then the text is
+    ``itunes:summary`` (feedparser files it as content when it follows
+    the description), a cut, linkless copy of the show notes."""
+    contents = [c for c in entry.get("content") or ()
+                if isinstance(c, Mapping) and c.get("value")]
     for c in contents:
-        if isinstance(c, Mapping):
-            value = c.get("value")
-            if value:
-                return value
-    return ""
+        if "html" in (c.get("type") or "") and _MARKUP.search(c["value"]):
+            return c["value"]
+    if not contents:
+        return ""
+    summary = entry.get("summary") or ""
+    summary_kind = (entry.get("summary_detail") or {}).get("type") or ""
+    if "html" in summary_kind and _MARKUP.search(summary):
+        return summary
+    first = contents[0]
+    return _as_html(first["value"], first.get("type") or "")
 
 
 def _rss_author(entry: Mapping[str, Any]) -> Optional[str]:
@@ -256,16 +314,25 @@ def _entry_to_item(
     """
     content_html = _content_html_from_entry(entry)
     summary = _clean_str(entry.get("summary"))
+    summary_kind = (entry.get("summary_detail") or {}).get("type") or ""
+    video = _clean_str(entry.get("yt_videoid"))
     # ``description`` and ``content:encoded`` coincide when the feed only
     # ships a description. Don't duplicate it into the summary slot.
-    if not content_html:
-        content_html = summary
+    if video:
+        # A YouTube channel feed: the video is the post, its description
+        # (plain text) the words under it.
+        watch = f"https://www.youtube.com/watch?v={video}"
+        content_html = (f'<p><a href="{watch}">{watch}</a></p>'
+                        + _as_html(summary, "text/plain"))
         summary_for_item: Optional[str] = None
+    elif not content_html:
+        content_html = _as_html(summary, summary_kind)
+        summary_for_item = None
     else:
         summary_for_item = summary if summary and summary != content_html else None
 
     link = _clean_str(entry.get("link")) or None
-    title = _clean_str(entry.get("title"))
+    title = _plain_title(entry)
     guid = _clean_str(entry.get("id")) or link or title
 
     return FeedItem(
@@ -286,7 +353,7 @@ def _parse_rss(parsed: Any) -> Feed:
     items = [
         _entry_to_item(
             entry,
-            image_for=_rss_image,
+            image_for=_entry_image,
             # RSS 1.0 and many generators date an item only with
             # ``dc:date``, which feedparser files under "updated".
             published_for=lambda e: (
@@ -326,7 +393,7 @@ def _parse_atom(parsed: Any) -> Feed:
     items = [
         _entry_to_item(
             entry,
-            image_for=lambda _e, html: _first_image_from_html(html),
+            image_for=_entry_image,
             published_for=lambda e: (
                 e.get("published_parsed") or e.get("updated_parsed")
             ),
@@ -378,8 +445,8 @@ def _parse_json_feed(payload: Any) -> Feed:
             continue
         content_html = (
             _clean_str(it.get("content_html"))
-            or _clean_str(it.get("content_text"))
-            or _clean_str(it.get("summary"))
+            or _text_to_html(_clean_str(it.get("content_text")))
+            or _text_to_html(_clean_str(it.get("summary")))
         )
         title = _clean_str(it.get("title"))
         link = _clean_str(it.get("url")) or None

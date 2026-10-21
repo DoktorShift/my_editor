@@ -111,7 +111,8 @@ class RssParseTests(unittest.TestCase):
 
     def test_rss_falls_back_to_description_when_no_content(self) -> None:
         item = parse_feed(_wp_rss()).items[1]
-        self.assertEqual(item.content_html, "This post has no content:encoded.")
+        # A description without markup is text, made the HTML it means.
+        self.assertEqual(item.content_html, "<p>This post has no content:encoded.</p>")
         self.assertIsNone(item.summary)
 
     def test_rss_image_priority_enclosure(self) -> None:
@@ -337,6 +338,103 @@ class WholeCoverTests(unittest.TestCase):
             '</channel></rss>'), "https://blog.example/feed")
         self.assertEqual(feed.items[0].image, "https://blog.example/media/cover.jpg")
         self.assertEqual(feed.items[1].image, "https://cdn.example/q.jpg")
+
+
+def _rss(items: str, namespaces: str = "") -> str:
+    return ('<?xml version="1.0"?><rss version="2.0" '
+            'xmlns:content="http://purl.org/rss/1.0/modules/content/" '
+            'xmlns:media="http://search.yahoo.com/mrss/" '
+            'xmlns:itunes="http://www.itunes.com/dtds/podcast-1.0.dtd" '
+            f'{namespaces}><channel><title>T</title>{items}</channel></rss>')
+
+
+class CoverTests(unittest.TestCase):
+    def test_an_episode_audio_is_no_cover(self) -> None:
+        item = parse_feed(_rss(
+            '<item><title>Ep</title><guid>1</guid>'
+            '<media:content url="https://cdn.example/ep1.mp3" type="audio/mpeg"/>'
+            '<media:content url="https://cdn.example/ep1.mp4" medium="video"/>'
+            '<itunes:image href="https://cdn.example/ep1.jpg"/></item>')).items[0]
+        self.assertEqual(item.image, "https://cdn.example/ep1.jpg")
+
+    def test_the_author_avatar_and_pixels_are_no_cover(self) -> None:
+        item = parse_feed(_rss(
+            '<item><title>P</title><guid>1</guid>'
+            '<media:content url="https://0.gravatar.com/avatar/abc?s=96" medium="image"/>'
+            '<content:encoded><![CDATA[<img src="https://pixel.wp.com/b.gif?x=1">'
+            '<img src="https://s.w.org/images/core/emoji/15/svg/1f642.svg" class="wp-smiley">'
+            '<img src="https://b.example/tiny.gif" width="1" height="1">'
+            '<img src="data:image/gif;base64,R0lG" data-src="https://b.example/real.jpg">'
+            ']]></content:encoded></item>')).items[0]
+        self.assertEqual(item.image, "https://b.example/real.jpg")
+
+    def test_an_atom_entry_takes_its_media_thumbnail(self) -> None:
+        item = parse_feed(
+            '<?xml version="1.0"?><feed xmlns="http://www.w3.org/2005/Atom" '
+            'xmlns:media="http://search.yahoo.com/mrss/"><title>B</title>'
+            '<entry><id>1</id><title>P</title><content type="html">&lt;p&gt;x&lt;/p&gt;</content>'
+            '<media:thumbnail url="https://b.example/thumb.jpg"/></entry></feed>').items[0]
+        self.assertEqual(item.image, "https://b.example/thumb.jpg")
+
+
+class TextBodyTests(unittest.TestCase):
+    def test_atom_text_content_keeps_its_paragraphs_and_characters(self) -> None:
+        item = parse_feed(
+            '<?xml version="1.0"?><feed xmlns="http://www.w3.org/2005/Atom"><title>B</title>'
+            '<entry><id>1</id><title>P</title><content type="text">First line.\n'
+            'Second &lt;tag&gt; line.\n\nNew paragraph.</content></entry></feed>').items[0]
+        self.assertEqual(item.content_html,
+                         "<p>First line.<br>Second &lt;tag&gt; line.</p><p>New paragraph.</p>")
+
+    def test_json_feed_content_text_is_text(self) -> None:
+        item = parse_feed('{"version":"https://jsonfeed.org/version/1.1","title":"T",'
+                          '"items":[{"id":"1","content_text":"A <b> is no tag.\\n\\nTwo."}]}'
+                          ).items[0]
+        self.assertEqual(item.content_html, "<p>A &lt;b&gt; is no tag.</p><p>Two.</p>")
+
+    def test_html_show_notes_win_over_the_itunes_summary(self) -> None:
+        item = parse_feed(_rss(
+            '<item><title>Ep</title><guid>1</guid>'
+            '<description><![CDATA[<p>Notes with <a href="https://x.example">a link</a></p>]]>'
+            '</description><itunes:summary>Plain trimmed summary</itunes:summary></item>'
+        )).items[0]
+        self.assertIn('<a href="https://x.example">a link</a>', item.content_html)
+
+
+class TitleTests(unittest.TestCase):
+    def test_a_title_written_as_html_is_plain_text(self) -> None:
+        rss = parse_feed(_rss('<item><title><![CDATA[Joe&#8217;s <b>bold</b> post]]></title>'
+                              '<guid>1</guid></item>')).items[0]
+        self.assertEqual(rss.title, "Joe\u2019s bold post")
+        atom = parse_feed(
+            '<?xml version="1.0"?><feed xmlns="http://www.w3.org/2005/Atom"><title>B</title>'
+            '<entry><id>1</id><title type="html">Tom &amp;amp; Jerry &lt;em&gt;live&lt;/em&gt;'
+            '</title></entry><entry><id>2</id><title type="xhtml"><div '
+            'xmlns="http://www.w3.org/1999/xhtml">X<em>html</em> title</div></title></entry>'
+            '</feed>')
+        self.assertEqual([i.title for i in atom.items], ["Tom & Jerry live", "Xhtml title"])
+
+    def test_a_text_title_keeps_its_angle_brackets(self) -> None:
+        item = parse_feed(_rss('<item><title>Using &lt;div&gt; tags</title><guid>1</guid>'
+                               '</item>')).items[0]
+        self.assertEqual(item.title, "Using <div> tags")
+
+
+class YouTubeTests(unittest.TestCase):
+    def test_a_channel_video_is_its_watch_page_and_description(self) -> None:
+        item = parse_feed(
+            '<?xml version="1.0"?><feed xmlns="http://www.w3.org/2005/Atom" '
+            'xmlns:yt="http://www.youtube.com/xml/schemas/2015" '
+            'xmlns:media="http://search.yahoo.com/mrss/"><title>Channel</title>'
+            '<entry><id>yt:video:abc123XYZ</id><yt:videoId>abc123XYZ</yt:videoId>'
+            '<title>Video</title><link rel="alternate" href="https://www.youtube.com/watch?v=abc123XYZ"/>'
+            '<media:group><media:thumbnail url="https://i.ytimg.com/vi/abc123XYZ/hqdefault.jpg"/>'
+            '<media:description>Line one\nLine two\n\nPara two</media:description></media:group>'
+            '</entry></feed>').items[0]
+        self.assertTrue(item.content_html.startswith(
+            '<p><a href="https://www.youtube.com/watch?v=abc123XYZ">'))
+        self.assertIn("<p>Line one<br>Line two</p><p>Para two</p>", item.content_html)
+        self.assertEqual(item.image, "https://i.ytimg.com/vi/abc123XYZ/hqdefault.jpg")
 
 
 if __name__ == "__main__":
