@@ -117,7 +117,6 @@ class ItemToArticleTests(unittest.TestCase):
         self.assertIn("Originally published by Alice at", template.content)
 
 
-
 class RelativeAddressTests(unittest.TestCase):
     """CP1 review O3: relative links and images of a feed's body stayed
     relative, so they pointed nowhere in a draft or an article."""
@@ -170,6 +169,15 @@ class ArticleDetailTests(unittest.TestCase):
     def test_a_translated_read_on_link_ends_a_teaser(self) -> None:
         self.assertEqual(plain_summary("Mots ... Lire la suite"), "Mots…")
         self.assertEqual(plain_summary("Wörter … „Titel“ weiterlesen"), "Wörter…")
+
+    def test_an_ellipsis_inside_a_sentence_cuts_nothing(self) -> None:
+        for text in ("I waited... and then I decided to read more books this year.",
+                     "Er kam… und dann wollte ich weiterlesen, aber nicht heute."):
+            self.assertEqual(plain_summary(text), text)
+
+    def test_a_read_on_link_with_the_title_ends_a_teaser(self) -> None:
+        self.assertTrue(ends_as_teaser('Ende.\n\nContinue reading "My Post"'))
+        self.assertTrue(ends_as_teaser("Ende.\n\n„Titel“ weiterlesen"))
 
     def test_words_like_it_in_a_sentence_stay(self) -> None:
         self.assertEqual(plain_summary("Learn how to read more books."),

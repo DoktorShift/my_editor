@@ -24,7 +24,10 @@ import re
 from typing import Any, Dict, Iterable, List
 
 from ..rss.dtag import derive_identifier
+from ..rss.clean import first_image
+from ..rss.markdown import image_destinations
 from ..rss.normalize import html_to_markdown, plain_text
+from ..rss.urls import is_web
 from ..rss.parser import FeedItem
 from .constants import IDENTIFIER_PREFIX
 from .images import scan_markdown_images
@@ -34,8 +37,6 @@ EXCERPT_CHARS = 200
 
 _TAG = re.compile(r"<[^>]+>")
 _IMG = re.compile(r"<img\b", re.IGNORECASE)
-_IMG_SRC = re.compile(r"""<img[^>]+src=["']([^"']+)["']""", re.IGNORECASE)
-_SPACE = re.compile(r"\s+")
 # Markdown, read as words: images out, links as their text, marks out.
 _MD_IMAGE = re.compile(r"!\[[^\]]*\]\(\s*<?([^)\s>]+)>?(?:\s+\"[^\"]*\")?\s*\)")
 _MD_LINK = re.compile(r"\[([^\]]*)\]\([^)]*\)")
@@ -154,12 +155,13 @@ def has_images(item: FeedItem) -> bool:
 
 
 def cover(item: FeedItem) -> str:
-    """The post's picture: its own, else the first image of its HTML or
-    its Markdown."""
+    """The post's picture: its own, else the first real picture of its
+    HTML (clean.first_image: never a pixel or an avatar) or of its
+    Markdown."""
     if item.image:
         return item.image
-    match = _IMG_SRC.search(item.content_html or "")
-    if match:
-        return match.group(1)
-    match = _MD_IMAGE.search(item.content_markdown or "")
-    return match.group(1) if match else ""
+    found = first_image(item.content_html or "")
+    if found:
+        return found
+    return next((url for _start, _end, url in image_destinations(item.content_markdown or "")
+                 if is_web(url)), "")

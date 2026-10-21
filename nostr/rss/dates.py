@@ -36,6 +36,8 @@ def to_unix(value: Any) -> Optional[int]:
 
 
 def _read(text: str) -> Optional[datetime]:
+    if text[-1:] in ("Z", "z"):
+        text = text[:-1] + "+00:00"  # fromisoformat reads "Z" only since 3.11
     try:
         return datetime.fromisoformat(text)
     except ValueError:

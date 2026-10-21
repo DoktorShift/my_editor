@@ -62,6 +62,17 @@ class EmbedTests(unittest.TestCase):
                       md('<iframe src="https://www.youtube.com/embed/videoseries?list=PL123">'
                          '</iframe>'))
 
+    def test_a_lazily_loaded_player_is_its_watch_page(self) -> None:
+        self.assertIn("https://www.youtube.com/watch?v=abc123XYZ",
+                      md('<iframe src="" data-src="https://www.youtube.com/embed/abc123XYZ">'
+                         '</iframe>'))
+
+    def test_the_classic_flash_embed_code_is_its_watch_page(self) -> None:
+        out = md('<object width="425"><param name="movie" '
+                 'value="https://www.youtube.com/v/abc123XYZ"><embed '
+                 'src="https://www.youtube.com/v/abc123XYZ"></object>')
+        self.assertEqual(out.count("https://www.youtube.com/watch?v=abc123XYZ"), 1)
+
     def test_the_old_flash_player_is_its_watch_page(self) -> None:
         self.assertIn("https://www.youtube.com/watch?v=abc123XYZ",
                       md('<object data="https://www.youtube.com/v/abc123XYZ"></object>'))
@@ -138,6 +149,14 @@ class AddressPolicyTests(unittest.TestCase):
         out = md('<p>hi <a href="javascript:alert(1)">click</a> '
                  '<a href="data:text/html,x">d</a> <a href="vbscript:x">v</a></p>')
         self.assertEqual(out, "hi click d v")
+
+    def test_nostr_lightning_and_bitcoin_links_stay(self) -> None:
+        out = md('<a href="nostr:npub1abc">me</a> <a href="lightning:lnurl1x">zap</a> '
+                 '<a href="bitcoin:bc1q">pay</a>')
+        self.assertEqual(out, "[me](nostr:npub1abc) [zap](lightning:lnurl1x) [pay](bitcoin:bc1q)")
+
+    def test_an_address_no_parser_reads_does_not_stop_the_import(self) -> None:
+        self.assertIn("bad", md('<p><a href="http://[::1">bad</a></p>'))
 
     def test_web_mail_and_relative_links_stay(self) -> None:
         out = md('<p><a href="https://x.example">a</a> <a href="mailto:me@x.example">m</a> '

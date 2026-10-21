@@ -93,15 +93,17 @@ _CONTINUE = (r"continue reading|read more|weiterlesen|lire la suite|continuer la
              r"poursuivre la lecture|leer más|seguir leyendo|sigue leyendo|"
              r"continuar leyendo|continua a leggere|leggi tutto|lees verder|"
              r"continue lendo|leia mais|czytaj dalej")
-# In a summary: the ellipsis, and what follows it up to a "Continue
-# reading" ("… „Title“ weiterlesen").
-_READ_MORE = re.compile(r"\s*(?:%s)(?:[^\n]{0,120}?\b(?:%s)\b[^\n]*)?\s*$"
-                        % (_ELLIPSIS, _CONTINUE), re.IGNORECASE)
+# The post's title as a theme quotes it in its read-on link
+# ('Continue reading "Title"', German themes' '„Title“ weiterlesen').
+_QUOTED = r'(?:„[^“\n]*“|"[^"\n]*"|“[^”\n]*”|«[^»\n]*»)'
+_READ_ON = r"(?:%s\s*)?(?:%s)(?:\s*%s)?" % (_QUOTED, _CONTINUE, _QUOTED)
+# In a summary: the ellipsis at its end, with a read-on link after it.
+_READ_MORE = re.compile(r"\s*(?:%s)(?:\s*%s)?\W*$" % (_ELLIPSIS, _READ_ON), re.IGNORECASE)
 # At the end of a body: the ellipsis, a link that says to read on, or a
 # last line that says only that.
 _TEASER_END = re.compile(
-    r"(?:%s|\[[^\]\n]*\b(?:%s)\b[^\]\n]*\]\([^)]*\)|(?:^|\n)\W*(?:%s)\W*)\s*$"
-    % (_ELLIPSIS, _CONTINUE, _CONTINUE), re.IGNORECASE)
+    r"(?:%s|\[[^\]\n]*\b(?:%s)\b[^\]\n]*\]\([^)]*\)|(?:^|\n)\W*%s\W*)\s*$"
+    % (_ELLIPSIS, _CONTINUE, _READ_ON), re.IGNORECASE)
 
 _SUMMARY_CHARS = 280
 # A first paragraph shorter than this, before a longer one, is a kicker
@@ -225,8 +227,6 @@ def source_link_footer(link: str, author: Optional[str] = None) -> str:
         return (f"{_SOURCE_FOOTER_SEPARATOR}*Originally published by {credit} "
                 f"at [{link}]({link})*")
     return f"{_SOURCE_FOOTER_SEPARATOR}*Originally published at [{link}]({link})*"
-
-
 
 
 def item_to_article(

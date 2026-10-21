@@ -96,6 +96,7 @@ from ..rss.nostr_resolver import (
     extract_nostr_coord,
 )
 from ..rss.parser import FeedItem
+from ..rss.urls import is_web
 from . import workers
 from .constants import (
     BATCH_PACE_MS,
@@ -415,8 +416,10 @@ class ImportItemsJob(QObject):
                     notes=html_to_markdown(item.content_html or "",
                                            base_url=item.link).strip(),
                 ),
-                lambda markdown: self._publish_template_as_draft(
-                    self._remade(template, item, markdown)),
+                # The summary stays the one made of the show notes, not of
+                # the episode's player line.
+                lambda markdown: self._publish_template_as_draft(replace(
+                    self._remade(template, item, markdown), summary=template.summary)),
                 lambda _exc, t=template: self._publish_template_as_draft(t),
             )
 
@@ -524,7 +527,7 @@ class ImportItemsJob(QObject):
         wants_text = item.partial or (self._fetch_full_text and (
             len(template.body) < THIN_CONTENT_CHARS or ends_as_teaser(template.body)))
         wants_details = self._fetch_full_text and not template.image
-        if not ((wants_text or wants_details) and _is_http_url(item.link)):
+        if not ((wants_text or wants_details) and is_web(item.link)):
             self._without_page_text(item, template)
             return
         self.item_extracting.emit(self._index, title_for_ui)
@@ -856,14 +859,6 @@ def _media_records(outcome: MirrorOutcome) -> List[PublishedMedia]:
             size=image.size,
         ))
     return records
-
-
-def _is_http_url(link: Optional[str]) -> bool:
-    """``True`` for an http(s) web URL we can fetch an article page from."""
-    if not link:
-        return False
-    lowered = link.strip().lower()
-    return lowered.startswith("https://") or lowered.startswith("http://")
 
 
 def _relay_acceptance(results: object) -> Tuple[int, int]:

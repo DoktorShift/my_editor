@@ -322,6 +322,12 @@ class TestWxr(unittest.TestCase):
         self.assertIn("<code>[gallery]</code>", post_html("Write <code>[gallery]</code>."))
         self.assertIn("Write [e-mail] to me.", post_html("Write [e-mail] to me."))
 
+    def test_a_shortcode_written_as_text_reads_as_in_wordpress(self):
+        self.assertIn("<code>[gallery]</code>", post_html("<code>[[gallery]]</code>"))
+        out = post_html("[[<code>x</code>]]")
+        self.assertNotIn("\x00", out)
+        self.assertIn("[<code>x</code>]", out)
+
     def test_block_editor_posts_are_left_as_they_are(self):
         body = post_html("<!-- wp:paragraph -->\n<p>One</p>\n<!-- /wp:paragraph -->\n\n"
                          "<!-- wp:paragraph -->\n<p>Two</p>\n<!-- /wp:paragraph -->")
@@ -555,7 +561,6 @@ class TestSubstackAddress(unittest.TestCase):
             ['<a href="https://www.instagram.com/p/abc/">a post</a>'], []))
         self.assertEqual(_publication_address(
             ['<a href="https://mine.substack.com/p/x">x</a>'], []), "mine.substack.com")
-
 
 
 if __name__ == "__main__":

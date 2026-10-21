@@ -229,10 +229,10 @@ def post_html(raw: str, *, attachments: Optional[dict] = None) -> str:
         kept.append(text)
         return f"\x00K{len(kept) - 1}\x00"
 
-    text = _CODE.sub(lambda m: _aside(m.group(0)), raw)
-    # [[name]] is how WordPress writes a shortcode as text: it shows as
-    # written, less one pair of brackets.
-    text = re.sub(r"\[(\[[^\[\]]+\])\]", lambda m: _aside(m.group(1)), text)
+    # [[name]] is how WordPress writes a shortcode as text (in code too):
+    # it shows as written, less one pair of brackets.
+    text = re.sub(r"\[(\[[^\[\]]+\])\]", lambda m: _aside(m.group(1)), raw)
+    text = _CODE.sub(lambda m: _aside(m.group(0)), text)
     text = _CAPTION.sub(_caption, text)
     text = _EMBED.sub(lambda m: _link_line(m.group(1).strip()), text)
     text = _URL_SHORTCODE.sub(lambda m: _jetpack_embed(m) or _aside(m.group(0)), text)
@@ -240,7 +240,8 @@ def post_html(raw: str, *, attachments: Optional[dict] = None) -> str:
     text = _GALLERY.sub(lambda m: _gallery(m.group(1), attachments), text)
     closed = {m.group(1).lower() for m in re.finditer(r"\[/([A-Za-z][\w-]*)\]", text)}
     text = _SHORTCODE.sub(lambda m: _drop_shortcode(m, closed), text)
-    text = re.sub(r"\x00K(\d+)\x00", lambda m: kept[int(m.group(1))], text)
+    while "\x00K" in text:  # code kept aside holds a kept [[name]] too
+        text = re.sub(r"\x00K(\d+)\x00", lambda m: kept[int(m.group(1))], text)
     if "<!-- wp:" not in text:
         text = autop(text)
     return text.strip()

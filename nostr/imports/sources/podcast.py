@@ -421,9 +421,6 @@ def fetch_podcast_chapters(
     fetcher.fetch(url, on_success=_on_body, on_failure=lambda _e: _retry_embedded())
 
 
-
-
-
 def build_podcast_markdown(
     episode: PodcastEpisode,
     *,

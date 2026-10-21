@@ -244,6 +244,9 @@ class TestPipelineBranch(unittest.TestCase):
         self.assertIn("- **0:00** Intro", content)
         self.assertIn("Show notes for one.", content)
         self.assertIn("Originally published at", content)  # footer kept
+        # The summary is made of the show notes, not the player line.
+        summary = [t[1] for t in created[0].inner_event["tags"] if t[0] == "summary"]
+        self.assertEqual(summary, ["Show notes for one."])
         # The podcast branch precludes naddr/full-text recovery.
         self.assertEqual(long_form.calls, [])
         self.assertEqual(pages.calls,

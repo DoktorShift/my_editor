@@ -42,7 +42,10 @@ from urllib.parse import parse_qs, urlsplit
 
 from bs4 import BeautifulSoup, Comment, Tag
 
-from .urls import WEB_SCHEMES, is_web, whole_url
+from .urls import WEB_SCHEMES, is_web, scheme, whole_url
+
+# What a link may point at besides the web.
+_LINK_SCHEMES = (*WEB_SCHEMES, "mailto", "nostr", "lightning", "bitcoin", "tel")
 
 # Page furniture: its text is never part of the article.
 _DROP = ("script", "style", "template", "form", "button", "input", "select",
@@ -76,7 +79,7 @@ _SRCSET_SPLIT = re.compile(r",\s+")
 _PLAYERS = ("youtube.com", "youtube-nocookie.com", "player.vimeo.com",
             "open.spotify.com", "w.soundcloud.com", "rumble.com", "odysee.com",
             "dailymotion.com", "loom.com", "bandcamp.com", "embed.podcasts.apple.com",
-            "embed.music.apple.com", "player.twitch.tv", "codepen.io",
+            "embed.music.apple.com", "player.twitch.tv", "clips.twitch.tv", "codepen.io",
             "platform.twitter.com", "anchor.fm", "podbean.com", "buzzsprout.com",
             "simplecast.com", "player.fm")
 # A YouTube player (/embed/ID, and /v/ID of the old Flash <embed>).
@@ -125,8 +128,8 @@ def clean_html(html: str, *, base_url: Optional[str] = None) -> str:
             img["src"] = src
         else:
             img.decompose()
-    for frame in soup.find_all("iframe", src=False):
-        if frame.get("data-src"):
+    for frame in soup.find_all("iframe"):
+        if not (frame.get("src") or "").strip() and frame.get("data-src"):
             frame["src"] = frame["data-src"]  # a lazily loaded player
     _make_addresses_whole(soup, base_url)
     for img in soup.find_all("img"):
@@ -136,11 +139,14 @@ def clean_html(html: str, *, base_url: Optional[str] = None) -> str:
             img.decompose()
     _settle_noscript(soup)
 
+    for player in soup.find_all("object"):
+        # The old Flash player: its address is the object's data, or its
+        # "movie" parameter (with an <embed> of the same inside).
+        movie = player.find("param", attrs={"name": "movie"})
+        _replace_with_link(soup, player, _embed_address(
+            player.get("data") or (movie.get("value") if movie else "") or ""))
     for frame in soup.find_all(("iframe", "embed")):
         _replace_with_link(soup, frame, _embed_address(frame.get("src") or ""))
-    for player in soup.find_all("object"):
-        # The old Flash player: its address is the object's data.
-        _replace_with_link(soup, player, _embed_address(player.get("data") or ""))
     for media in soup.find_all(("video", "audio")):
         _replace_with_link(soup, media, _media_address(media))
     for anchor in soup.find_all("a"):
@@ -152,19 +158,20 @@ def clean_html(html: str, *, base_url: Optional[str] = None) -> str:
 
 
 def _make_addresses_whole(soup: BeautifulSoup, base_url: Optional[str]) -> None:
-    """Every address made whole against the post's page, and only web
-    addresses (and ``mailto:`` for a link) kept."""
+    """Every address made whole against the post's page. A link keeps a
+    web address or one of the schemes a Nostr post links with (mail,
+    Nostr, Lightning, Bitcoin, phone); a picture or player keeps only a
+    web address."""
     for anchor in soup.find_all("a", href=True):
         href = whole_url(anchor["href"], base_url).strip()
-        scheme = urlsplit(href).scheme.lower()
-        if scheme and scheme not in (*WEB_SCHEMES, "mailto"):
+        if scheme(href) and scheme(href) not in _LINK_SCHEMES:
             anchor.unwrap()
         else:
             anchor["href"] = href
     for element in soup.find_all(("img", "iframe", "embed", "video", "audio", "source"),
                                  src=True):
         src = whole_url(element["src"], base_url).strip()
-        if urlsplit(src).scheme and not is_web(src):
+        if scheme(src) and not is_web(src):
             if element.name == "img":
                 element.decompose()
             else:

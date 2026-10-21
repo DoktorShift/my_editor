@@ -68,13 +68,11 @@ def parse_bluesky_url(value: Optional[str]) -> Optional[dict]:
 # --------------------------------------------------------------------------- #
 
 # A post's "*" or "_" is a character the writer typed, not emphasis
-# (markdown.escape). What Markdown reads as syntax at the start of a line: a heading, a
-# quote, a list item, a rule or a heading underline.
+# (markdown.escape). At the start of a line Markdown also reads a
+# heading, a quote, a list item, a rule or a heading underline.
 _LINE_START_SPECIAL = re.compile(
     r"^([ \t]*)(?:(#{1,6}(?=[ \t]|$)|[>+-](?=[ \t]|$)|[=-]+[ \t]*$)|(\d+)([.)])(?=[ \t]|$))",
     re.MULTILINE)
-
-
 
 
 def _escape_line_starts(text: str) -> str:

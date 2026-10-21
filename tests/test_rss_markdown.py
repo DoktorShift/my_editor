@@ -35,13 +35,16 @@ class CodeTests(unittest.TestCase):
     def test_inline_code_does_not_cross_a_paragraph(self) -> None:
         self.assertEqual(code_spans("a `x\n\ny` b"), [])
 
-    def test_a_fence_indented_four_spaces_is_none_unless_nested(self) -> None:
-        md = "<Tabs>\n    ```js\n    x\n    ```\n</Tabs>"
-        self.assertEqual(code_block_spans(md), [])
-        self.assertEqual(len(code_block_spans(md, nested=True)), 1)
+    def test_a_fence_in_a_list_item_or_a_component_is_code(self) -> None:
+        for md in ("1. Install:\n\n    ```js\n    import x\n\n    <div>hi</div>\n    ```\n",
+                   "<Tabs>\n    ```js\n    x\n    ```\n</Tabs>"):
+            self.assertEqual(len(code_block_spans(md)), 1, md)
 
     def test_prose_keeps_inline_code_without_blocks(self) -> None:
         self.assertEqual(without_code_blocks("A `b` c.\n\n```\nx\n```\n").strip(), "A `b` c.")
+
+    def test_a_placeholder_nobody_set_aside_stays_as_it_is(self) -> None:
+        self.assertEqual(restore("a \ue0007\ue001 b", []), "a \ue0007\ue001 b")
 
     def test_protected_code_comes_back_as_it_was(self) -> None:
         md = "x `[[a]]` y\n\n```\n[[b]]\n```\n"

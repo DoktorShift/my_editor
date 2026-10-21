@@ -12,12 +12,18 @@ from urllib.parse import urljoin, urlsplit
 WEB_SCHEMES = ("http", "https")
 
 
+def scheme(url: Optional[str]) -> str:
+    """The scheme of ``url`` in lower case ("" for a relative address,
+    and for one no parser reads, such as ``http://[::1``)."""
+    try:
+        return urlsplit((url or "").strip()).scheme.lower()
+    except ValueError:
+        return ""
+
+
 def is_web(url: Optional[str]) -> bool:
     """Whether ``url`` is an http(s) address."""
-    try:
-        return urlsplit((url or "").strip()).scheme.lower() in WEB_SCHEMES
-    except ValueError:  # an address no parser reads ("http://[::1")
-        return False
+    return scheme(url) in WEB_SCHEMES
 
 
 def whole_url(url: Optional[str], base: Optional[str]) -> Optional[str]:
@@ -28,8 +34,11 @@ def whole_url(url: Optional[str], base: Optional[str]) -> Optional[str]:
     value = (url or "").strip()
     if not value or value.startswith("#") or not is_web(base):
         return url
-    if value.startswith("//") or not urlsplit(value).scheme:
-        return urljoin(base, value)
+    if value.startswith("//") or not scheme(value):
+        try:
+            return urljoin(base, value)
+        except ValueError:
+            return url
     return url
 
 

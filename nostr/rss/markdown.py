@@ -24,9 +24,9 @@ from typing import Iterable, List, Optional, Tuple
 # Code (fenced blocks and inline spans) is never read: an image there is
 # an example, and rewriting it corrupted code samples.
 
-_FENCE = re.compile(r"^ {0,3}(`{3,}|~{3,})")
-# In MDX a fence may sit indented inside a component, at any depth.
-_NESTED_FENCE = re.compile(r"^[ \t]*(`{3,}|~{3,})")
+# A fence at any depth: inside a list item (indented by the item) or an
+# MDX component.
+_FENCE = re.compile(r"^[ \t]*(`{3,}|~{3,})")
 _BLANK_LINE = re.compile(r"\n[ \t]*\n")
 _REF_DEFINITION = re.compile(
     r"^ {0,3}\[([^\]]+)\]:[ \t]*(<[^>\n]*>|\S+)", re.MULTILINE)
@@ -123,17 +123,15 @@ def _closing(text: str, index: int, opening: str, closing: str) -> Optional[int]
     return None
 
 
-def code_block_spans(markdown: str, *, nested: bool = False) -> List[Tuple[int, int]]:
+def code_block_spans(markdown: str) -> List[Tuple[int, int]]:
     """``(start, end)`` of every fenced code block: a fence of three or
-    more backticks or tildes, indented three spaces at most (at any
-    depth when ``nested``, as in MDX), closed by a fence of the same
-    character at least as long (an unclosed one runs to the end, as
-    CommonMark reads it)."""
-    fence_line = _NESTED_FENCE if nested else _FENCE
+    more backticks or tildes, closed by a fence of the same character at
+    least as long (an unclosed one runs to the end, as CommonMark reads
+    it)."""
     spans: List[Tuple[int, int]] = []
     offset, fence, fence_start = 0, "", 0
     for line in markdown.splitlines(keepends=True):
-        match = fence_line.match(line)
+        match = _FENCE.match(line)
         if fence:
             closing = match.group(1) if match else ""
             if closing and closing[0] == fence[0] and len(closing) >= len(fence) \
@@ -148,11 +146,11 @@ def code_block_spans(markdown: str, *, nested: bool = False) -> List[Tuple[int, 
     return spans
 
 
-def code_spans(markdown: str, *, nested: bool = False) -> List[Tuple[int, int]]:
+def code_spans(markdown: str) -> List[Tuple[int, int]]:
     """``(start, end)`` of every fenced code block and every inline code
     span (a run of backticks closed by a run of the same length, within
     one paragraph), in order."""
-    spans = code_block_spans(markdown, nested=nested)
+    spans = code_block_spans(markdown)
     blocks = list(spans)
     position = 0
     while True:
@@ -211,8 +209,15 @@ def protect(markdown: str, spans: Iterable[Tuple[int, int]],
 def restore(text: str, kept: List[str]) -> str:
     """The code :func:`protect` set aside, back in place (also code set
     aside inside code set aside later)."""
-    while _CODE_TOKEN.search(text):
-        text = _CODE_TOKEN.sub(lambda m: kept[int(m.group(1))], text)
+    def back(match: re.Match) -> str:
+        index = int(match.group(1))
+        return kept[index] if index < len(kept) else match.group(0)
+
+    for _round in range(len(kept) + 1):
+        restored = _CODE_TOKEN.sub(back, text)
+        if restored == text:
+            break
+        text = restored
     return text
 
 
@@ -230,5 +235,3 @@ def reference_label(text: str) -> str:
     """A reference label as Markdown matches it: case and runs of
     whitespace do not count."""
     return " ".join(text.split()).casefold()
-
-

@@ -85,7 +85,7 @@ def read_page_meta(html: str, *, url: Optional[str] = None) -> PageMeta:
         image=cover_address(image, url),
         published_at=published,
         author=author,
-        tags=tuple(t for t in tags if t)[:_MAX_TAGS],
+        tags=tuple(dict.fromkeys(t for t in tags if t))[:_MAX_TAGS],
     )
 
 
@@ -205,5 +205,3 @@ def _keywords(value: Any) -> Tuple[str, ...]:
     if isinstance(value, list):
         return tuple(k.strip() for k in value if isinstance(k, str) and k.strip())
     return ()
-
-

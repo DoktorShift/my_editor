@@ -327,6 +327,19 @@ class TestMdxConversion(unittest.TestCase):
         # In MDX, indentation nests components: no code block there.
         self.assertNotIn("<Tag", mdx_to_markdown(source, indented_code=False).markdown)
 
+    def test_documented_embed_attributes(self):
+        doc = mdx_to_markdown(
+            '<YouTube id="https://youtu.be/dQw4w9WgXcQ" />\n\n'
+            '<LiteYouTubeEmbed id="abc123XYZ" title="t" />\n\n'
+            '<Vimeo vimeoId="76979871" />\n\n<Tweet tweetLink="jack/status/20" />')
+        for address in ("https://youtu.be/dQw4w9WgXcQ", "https://www.youtube.com/watch?v=abc123XYZ",
+                        "https://vimeo.com/76979871", "https://twitter.com/jack/status/20"):
+            self.assertIn(address, doc.markdown)
+
+    def test_ananke_featured_image(self):
+        doc = mdx_to_markdown("---\ntitle: A\nfeatured_image: https://x.example/f.png\n---\nT")
+        self.assertEqual(doc.image, "https://x.example/f.png")
+
     def test_embed_components_become_links_and_images(self):
         doc = mdx_to_markdown(
             '<YouTube id="dQw4w9WgXcQ" />\n\n<Vimeo id="76979871" />\n\n'

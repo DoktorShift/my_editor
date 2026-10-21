@@ -75,13 +75,14 @@ def _split_frontmatter(raw: str) -> Tuple[Dict[str, str], Mapping[str, Any], str
 
 # The keys static site generators keep a post's details under, as their
 # documentation and starter blogs write them: Jekyll, Hugo (publishDate,
-# images, PaperMod's cover.image), Astro (pubDate, heroImage), Eleventy,
+# images, PaperMod's cover.image, Ananke's featured_image), Astro (pubDate, heroImage), Eleventy,
 # Gatsby, Next.js (coverImage, excerpt, author.name), Docusaurus
 # (keywords, inline authors), dev.to (cover_image). Best first.
 _DATE_KEYS = ("date", "pubDate", "publishDate")
 _TAG_KEYS = ("tags", "categories", "category")
 _SUMMARY_KEYS = ("description", "summary", "excerpt")
-_IMAGE_KEYS = ("image", "cover", "heroImage", "coverImage", "cover_image", "images")
+_IMAGE_KEYS = ("image", "cover", "heroImage", "coverImage", "cover_image", "featured_image",
+               "images")
 
 
 @dataclass(frozen=True)
@@ -256,11 +257,12 @@ def _embed_markdown(name: str, attrs: Mapping[str, str]) -> Optional[str]:
     """What an embed component becomes: a line with the video's or the
     tweet's address (a Nostr client shows a player for it), or a Markdown
     image. The attributes are the ones astro-embed (``id``: an id or an
-    address), mdx-embed (``youTubeId``, ``vimeoId``, ``tweetLink``) and
-    next/image (``src``, ``alt``) document. None for any other
+    address), mdx-embed (``youTubeId``, ``vimeoId``, ``tweetLink``),
+    react-lite-youtube-embed (``<LiteYouTubeEmbed id>``) and next/image
+    (``src``, ``alt``) document. None for any other
     component, which is stripped like the rest."""
     lowered = name.lower()
-    if lowered == "youtube":
+    if lowered in ("youtube", "liteyoutubeembed"):
         return _address_or(attrs.get("id") or attrs.get("youtubeid"),
                            "https://www.youtube.com/watch?v={}")
     if lowered == "vimeo":
@@ -433,10 +435,10 @@ def mdx_to_markdown(
     """
     values, mapping, body = _split_frontmatter(raw)
     details = _details(values, mapping)
-    # Code is kept from every rewrite below. MDX nests a fence inside a
-    # component at any depth; a plain Markdown file has indented code.
+    # Code is kept from every rewrite below; a plain Markdown file also
+    # has indented code.
     code: List[str] = []
-    text = protect(body, code_spans(body, nested=not indented_code), code)
+    text = protect(body, code_spans(body), code)
     if indented_code:
         text = protect(text, _indented_code_spans(text), code)
 
