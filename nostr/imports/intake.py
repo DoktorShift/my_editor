@@ -177,8 +177,9 @@ def read_export(path: str) -> Export:
 def markdown_item(text: str, label: str, data: bytes) -> FeedItem:
     """One post from a Markdown file. Its identity is its content: the
     same file imported again is found as imported already, an edited one
-    is a new post."""
-    doc = mdx_to_markdown(text)
+    is a new post. The details its front matter holds (date, tags,
+    description, cover, author) come along with the title."""
+    doc = mdx_to_markdown(text, indented_code=not label.lower().endswith(".mdx"))
     title, markdown = doc.title, doc.markdown
     if not title:
         # No title in its front matter: a first-level heading on the first
@@ -192,7 +193,8 @@ def markdown_item(text: str, label: str, data: bytes) -> FeedItem:
     return FeedItem(
         guid="file:" + hashlib.sha256(data).hexdigest()[:32],
         title=title, link="", summary=doc.summary or None, content_html="",
-        published_at=None, categories=(), image=None, author=None,
+        published_at=doc.published_at, categories=doc.categories,
+        image=doc.image or None, author=doc.author or None,
         content_markdown=markdown)
 
 

@@ -299,6 +299,15 @@ class TestDeriveSummary(unittest.TestCase):
     def test_falls_back_to_short_line(self):
         self.assertEqual(derive_summary("# T\n\nShort."), "Short.")
 
+    def test_no_markdown_syntax_in_the_summary(self):
+        md = ("![A chart](https://cdn.example/chart.png)\n\n"
+              "See [the docs](https://docs.example) for **more** about it.")
+        self.assertEqual(derive_summary(md), "See the docs for more about it.")
+
+    def test_code_is_not_the_summary(self):
+        md = "```\nrun()\n\nagain()\n```\n\nThe opening words of the article."
+        self.assertEqual(derive_summary(md), "The opening words of the article.")
+
     def test_empty(self):
         self.assertEqual(derive_summary(""), "")
         self.assertEqual(derive_summary("# only a heading"), "")

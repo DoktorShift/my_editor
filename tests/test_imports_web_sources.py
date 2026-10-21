@@ -255,6 +255,71 @@ class TestMdxConversion(unittest.TestCase):
         self.assertIn("import duties", doc.markdown)
 
 
+    def test_front_matter_details(self):
+        doc = mdx_to_markdown(
+            "---\ntitle: Hi\npubDate: 2024-03-05T10:00:00Z\n"
+            "categories: [Bitcoin, Lightning]\nexcerpt: In short.\n"
+            "heroImage: ./hero.png\nauthors: [Ann, Ben]\n---\nBody text.",
+            base_url="https://raw.githubusercontent.com/o/r/main/blog/hi.md")
+        self.assertEqual(doc.published_at, 1709632800)
+        self.assertEqual(doc.categories, ("Bitcoin", "Lightning"))
+        self.assertEqual(doc.summary, "In short.")
+        self.assertEqual(doc.image,
+                         "https://raw.githubusercontent.com/o/r/main/blog/hero.png")
+        self.assertEqual(doc.author, "Ann, Ben")
+
+    def test_hugo_cover_and_images_list(self):
+        papermod = mdx_to_markdown("---\ntitle: A\ncover:\n  image: https://x.example/c.png"
+                                   "\n  alt: c\n---\nText")
+        self.assertEqual(papermod.image, "https://x.example/c.png")
+        listed = mdx_to_markdown("---\ntitle: A\nimages:\n  - https://x.example/i.png\n---\nT")
+        self.assertEqual(listed.image, "https://x.example/i.png")
+        # A path from the site's root cannot be placed from a raw GitHub file.
+        rooted = mdx_to_markdown(
+            "---\nimage: /static/c.png\n---\nT",
+            base_url="https://raw.githubusercontent.com/o/r/main/c.md")
+        self.assertEqual(rooted.image, "")
+
+    def test_title_heading_not_repeated(self):
+        doc = mdx_to_markdown("---\ntitle: My Guide\n---\n# My Guide\n\nBody.")
+        self.assertEqual(doc.markdown, "Body.")
+
+    def test_inline_code_survives(self):
+        doc = mdx_to_markdown("Use `<Button>` with `List<String>` here.")
+        self.assertEqual(doc.markdown, "Use `<Button>` with `List<String>` here.")
+
+    def test_paragraph_opening_with_inline_html_keeps_its_markdown(self):
+        doc = mdx_to_markdown("<strong>Note:</strong> some **bold** and a [link](https://x.example).")
+        self.assertEqual(doc.markdown,
+                         "**Note:** some **bold** and a [link](https://x.example).")
+
+    def test_indented_code_kept_in_markdown_not_mdx(self):
+        source = "Code:\n\n    <div>kept</div>\n    <Tag />\n\nAfter."
+        self.assertIn("    <div>kept</div>\n    <Tag />", mdx_to_markdown(source).markdown)
+        # In MDX, indentation nests components: no code block there.
+        self.assertNotIn("<Tag", mdx_to_markdown(source, indented_code=False).markdown)
+
+    def test_embed_components_become_links_and_images(self):
+        doc = mdx_to_markdown(
+            '<YouTube id="dQw4w9WgXcQ" />\n\n<Vimeo id="76979871" />\n\n'
+            "<Tweet id={1234} />\n\n"
+            '<Image src="./diagram.png" alt="A diagram" />',
+            base_url="https://raw.githubusercontent.com/o/r/main/docs/a.mdx")
+        self.assertIn("https://www.youtube.com/watch?v=dQw4w9WgXcQ", doc.markdown)
+        self.assertIn("https://vimeo.com/76979871", doc.markdown)
+        self.assertIn("https://x.com/i/status/1234", doc.markdown)
+        self.assertIn("![A diagram](https://raw.githubusercontent.com/o/r/main/docs/diagram.png)",
+                      doc.markdown)
+
+    def test_relative_images_made_whole(self):
+        doc = mdx_to_markdown(
+            "![Flow](./img/flow chart.png)\n\n![Abs](https://cdn.example/a.png)",
+            base_url="https://raw.githubusercontent.com/o/r/main/docs/a.md")
+        self.assertIn("![Flow](https://raw.githubusercontent.com/o/r/main/docs/img/"
+                      "flow%20chart.png)", doc.markdown)
+        self.assertIn("![Abs](https://cdn.example/a.png)", doc.markdown)
+
+
 class TestGithubUrlParsing(unittest.TestCase):
     def test_tree(self):
         self.assertEqual(
@@ -276,6 +341,20 @@ class TestMdxResolver(unittest.TestCase):
         item = sink.result.feed.items[0]
         self.assertEqual(item.title, "Intro")
         self.assertEqual(item.content_markdown, "# Hello\n\nBody.")
+
+    def test_document_details_and_images_from_raw_address(self):
+        fetcher = FakeFetcher({
+            "https://raw.githubusercontent.com/o/r/main/docs/a.md":
+                ("ok", "---\ntitle: A\ndate: 2024-01-02\ntags: [x]\n"
+                       "image: ./cover.png\n---\n![d](./d.png)"),
+        })
+        sink = run("https://github.com/o/r/blob/main/docs/a.md", fetcher)
+        item = sink.result.feed.items[0]
+        self.assertEqual(item.published_at, 1704153600)
+        self.assertEqual(item.categories, ("x",))
+        self.assertEqual(item.image, "https://raw.githubusercontent.com/o/r/main/docs/cover.png")
+        self.assertEqual(item.content_markdown,
+                         "![d](https://raw.githubusercontent.com/o/r/main/docs/d.png)")
 
     def test_github_blob_rewritten_to_raw(self):
         fetcher = FakeFetcher({

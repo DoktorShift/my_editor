@@ -104,18 +104,25 @@ def _detect(input_: ResolveInput) -> bool:
     return bool(_MD_EXT_RE.search(_pathname(url)))
 
 
-def _doc_to_item(raw: str, *, fallback_name: str, link: str, guid: str) -> FeedItem:
-    doc = mdx_to_markdown(raw or "")
+def _doc_to_item(raw: str, *, fallback_name: str, link: str, guid: str,
+                 base: Optional[str] = None) -> FeedItem:
+    """One document as a post. ``base`` is the address it was read from
+    (its raw form on GitHub), where its relative images and cover live;
+    the details in its front matter (date, tags, description, cover,
+    author) come along."""
+    doc = mdx_to_markdown(
+        raw or "", base_url=base or link,
+        indented_code=not str(fallback_name or link).lower().endswith(".mdx"))
     return FeedItem(
         guid=guid or link,
         title=doc.title or _pretty_name(fallback_name),
         link=link,
         summary=doc.summary or None,
         content_html="",
-        published_at=None,
-        categories=(),
-        image=None,
-        author=None,
+        published_at=doc.published_at,
+        categories=doc.categories,
+        image=doc.image or None,
+        author=doc.author or None,
         content_markdown=doc.markdown,
     )
 
@@ -198,7 +205,8 @@ def _resolve_single(url: str, ctx: ResolveContext) -> None:
         ctx.stage("parsing", url, hostname=host)
         ctx.blocking(
             lambda: _doc_to_item(
-                body, fallback_name=_basename(url), link=url, guid=url),
+                body, fallback_name=_basename(url), link=url, guid=url,
+                base=fetch_url),
             lambda item: _deliver(item),
             lambda exc: ctx.on_failure(SourceError(
                 _("Could not read that document: {error}").format(error=exc),
@@ -287,6 +295,7 @@ def _resolve_folder(url: str, tree, ctx: ResolveContext) -> None:
                                  or meta.get("download_url") or ""),
                         guid=str(meta.get("path")
                                  or meta.get("download_url") or ""),
+                        base=str(meta.get("download_url") or "") or None,
                     ))
                 except Exception:  # noqa: BLE001, ditto
                     continue

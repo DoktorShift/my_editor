@@ -128,6 +128,22 @@ class TestReadingAFile:
         assert item.title == "From the matter"
         assert item.content_markdown.startswith("# A heading")
 
+    def test_a_markdown_files_front_matter_details_come_along(self, tmp_path):
+        path = self.write(tmp_path, "post.md", (
+            "---\ntitle: Sound money\ndate: 2024-03-05\n"
+            "tags: Bitcoin, Nostr\ndescription: Why it matters.\n"
+            "cover:\n  image: https://example.com/cover.png\n  alt: A coin\n"
+            "author: Jane Doe\n---\n# Sound money\n\nThe text.\n"))
+        (item,) = read_export(path).items
+        assert item.title == "Sound money"
+        # The title is not there twice: the heading repeating it is dropped.
+        assert item.content_markdown == "The text."
+        assert item.published_at == 1709596800
+        assert item.categories == ("Bitcoin", "Nostr")
+        assert item.summary == "Why it matters."
+        assert item.image == "https://example.com/cover.png"
+        assert item.author == "Jane Doe"
+
     def test_a_markdown_file_without_a_heading_is_named_by_the_file(self, tmp_path):
         (item,) = read_export(self.write(tmp_path, "notes_from-lisbon.md", "Just text.")).items
         assert item.title == "Notes from lisbon"
