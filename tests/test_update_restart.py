@@ -94,7 +94,7 @@ result = {
     "prepared": prepared,
     "tabs": tabs,
     "active": w2.tabs.currentIndex(),
-    "bar": "" if w2.update_bar.isHidden() else w2.update_bar._text.text(),
+    "bar": "" if w2.update_button.isHidden() else w2.update_button.toolTip(),
     "informed": informed,
     "record_left": os.path.exists(os.path.join(home, ".cache", "my_editor", "workspace.json")),
     "version": APP_VERSION,

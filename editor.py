@@ -222,6 +222,9 @@ class HtmlEditor(QTextEdit):
         # Who opens a link Command-clicked (Ctrl-clicked elsewhere): the
         # window, which knows where each kind of link goes.
         self._link_opener = None
+        # Whether a drop of files brings anything the window takes
+        # (set_drop_check); a drop of nothing usable is not accepted.
+        self._drop_check = lambda _urls: True
         # Whether a Nostr account is in use: Nostr shows up in the editor
         # only then (nostr/state.py).
         self._nostr_active = lambda: False
@@ -774,6 +777,18 @@ class HtmlEditor(QTextEdit):
 
     def highlights(self, layer: str) -> list:
         return list(self._highlights[layer])
+
+    def clear_highlights(self) -> None:
+        """No highlights, before the whole text is replaced (a file opened
+        or reloaded, a draft put in). Qt fills a document read from
+        Markdown or HTML in many steps, each a change; renewing highlights
+        at each one (_renew_highlights) sets selections into a document
+        still being built, and Qt crashes on it. Those who made them (the
+        spelling, a search) make them again from the new text."""
+        if any(self._highlights.values()):
+            for layer in self.HIGHLIGHT_LAYERS:
+                self._highlights[layer] = []
+            self.setExtraSelections([])
 
     def _renew_highlights(self, *_change) -> None:
         """Right after every change, every highlight gets a new cursor
@@ -1501,6 +1516,12 @@ class HtmlEditor(QTextEdit):
         """Install ``badge_of(name)``: the media_badge.Badge the object of
         the text named ``name`` wears, or None."""
         self._media_badge = badge_of
+
+    def set_drop_check(self, check) -> None:
+        """Install ``check(urls)``: whether dropping those files brings
+        anything to open or put in. Otherwise the pointer shows the drop
+        is not accepted, before it is let go."""
+        self._drop_check = check
 
     def set_link_opener(self, opener) -> None:
         """Install ``opener(href)``, which opens a Command-clicked link."""
@@ -2495,7 +2516,10 @@ class HtmlEditor(QTextEdit):
 
     def dragEnterEvent(self, event):
         if event.mimeData().hasUrls():
-            event.acceptProposedAction()
+            if self._drop_check(event.mimeData().urls()):
+                event.acceptProposedAction()
+            else:
+                event.ignore()
         else:
             super().dragEnterEvent(event)
 

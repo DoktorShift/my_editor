@@ -279,12 +279,14 @@ class _Status:
         self.messages.append(text)
 
 
-class _Bar:
+class _Cannot:
+    """What the window said it can't open (_say_cannot_open)."""
+
     def __init__(self):
         self.unsupported = []
 
-    def show_unsupported(self, names):
-        self.unsupported.append(names)
+    def __call__(self, names):
+        self.unsupported.append(", ".join(names))
 
 
 class _EntryWindow:
@@ -312,7 +314,8 @@ class _EntryWindow:
         self._profile_store = types.SimpleNamespace(default=lambda: profile)
         self.nostr_state = types.SimpleNamespace(active=profile is not None)
         self.status = _Status()
-        self.bar = _Bar()
+        self.bar = _Cannot()
+        self._say_cannot_open = self.bar
         self.editor = HtmlEditor()
         self.opened = []
         self.tabs = types.SimpleNamespace(currentWidget=lambda: None)
@@ -329,8 +332,6 @@ class _EntryWindow:
     def open_path(self, path):
         self.opened.append(path)
 
-    def _bar_from_widget(self, widget):
-        return self.bar
 
     # -- assertions ---------------------------------------------------------
 
@@ -527,6 +528,7 @@ def test_dropped_files_are_routed_by_extension(tmp_path):
 
     win._handle_dropped_urls([QUrl.fromLocalFile(p)
                               for p in (picture, vector, document)])
+    QApplication.processEvents()                 # said after the drop
 
     assert len(win.image_names()) == 1
     assert win.opened == [document]

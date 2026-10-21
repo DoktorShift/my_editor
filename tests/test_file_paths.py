@@ -190,16 +190,9 @@ class _OpenWindow:
 
     def __init__(self, paths):
         self.tabs = _Tabs(paths)
-        self.already_open = 0
 
     def _tab_file_path(self, widget):
         return widget
-
-    def _bar_from_widget(self, widget):
-        return SimpleNamespace(show_already_open=self._said_already_open)
-
-    def _said_already_open(self):
-        self.already_open += 1
 
     def _new_wired_editor(self):
         raise _OpensANewTab()
@@ -208,9 +201,9 @@ class _OpenWindow:
 def test_a_file_open_under_another_spelling_is_not_opened_again(note, tmp_path, monkeypatch):
     for spelled in spellings(note, monkeypatch):
         window = _OpenWindow([str(tmp_path / "other.md"), str(note)])
+        # Its tab comes forward, and that is all: nothing to warn about.
         assert window.open_path(spelled) is None, spelled
         assert window.tabs.current == 1
-        assert window.already_open == 1
 
 
 def test_on_a_disk_without_identities_another_file_opens_in_its_own_tab(chapters, monkeypatch):
@@ -218,7 +211,7 @@ def test_on_a_disk_without_identities_another_file_opens_in_its_own_tab(chapters
     window = _OpenWindow([chapters[0]])
     with pytest.raises(_OpensANewTab):
         window.open_path(chapters[1])
-    assert window.already_open == 0 and window.tabs.current is None
+    assert window.tabs.current is None
 
 
 # -- saving -------------------------------------------------------------------------------

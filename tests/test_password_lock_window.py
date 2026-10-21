@@ -13,9 +13,9 @@ What must hold, as Pages locks a document:
   locked. After a crash, its sealed backup is restored with its password,
   and left on the disk when none is given.
 
-  Locking is the app's own save, however long sealing takes: it never
-  shows the bar that says the file was changed outside MyEditor, and a
-  change made outside afterwards still does.
+  Locking is the app's own save, however long sealing takes: it is never
+  taken for a change made outside MyEditor, and a change made outside
+  afterwards is still followed (the document reloads, and says so).
 """
 
 from tests.app_process import run_window_script
@@ -208,18 +208,19 @@ def wait(done=lambda: False, seconds=10.0):
 w = main_window.MainWindow()
 w.show()
 w.open_path(diary)
-bar = w._bar_from_widget(w.tabs.currentWidget())
+notice = w._notice_from_widget(w.tabs.currentWidget())
 told = []
 w._watcher.fileChanged.connect(told.append)
 w.act_password.trigger()
 wait(lambda: told)                      # the watcher tells of the save
 wait(seconds=0.5)                       # and whatever more it reports of it
 r = {"told": bool(told), "locked": w.act_password.text() == "Change Password…",
-     "bar_after_locking": bar.isVisible()}
+     "notice_after_locking": notice.isVisible(),
+     "said_after_locking": w.status.currentMessage()}
 with open(diary, "w", encoding="utf-8") as f:
     f.write("Written in another app.")
-wait(bar.isVisible)
-r["bar_after_outside_change"] = bar.isVisible() and bar._text.text()
+wait(lambda: "from disk" in w.status.currentMessage())
+r["said_after_outside_change"] = w.status.currentMessage()
 for e in w._all_editors():
     e.document().setModified(False)
 w.close()
@@ -230,5 +231,7 @@ print("RESULT " + json.dumps(r))
 def test_locking_is_not_taken_for_a_change_made_outside(tmp_path):
     r = run_window_script(OWN_SAVE_SCRIPT, tmp_path)
     assert r["told"] and r["locked"]
-    assert r["bar_after_locking"] is False
-    assert r["bar_after_outside_change"] == "File was changed externally."
+    assert r["notice_after_locking"] is False and "from disk" not in r["said_after_locking"]
+    # Nothing unsaved: the document follows its file, and says so.
+    assert r["said_after_outside_change"] == ("“diary.md” was updated from disk. "
+                                              "It is no longer locked with a password.")

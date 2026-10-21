@@ -168,7 +168,7 @@ if banner is not None:
               "activates it)")
     window.tabs.setCurrentIndex(window.tabs.indexOf(ed.parent()) if window.tabs.indexOf(ed.parent()) >= 0
                                 else window.tabs.currentIndex())
-    banner.keep_mine.emit()
+    banner.closed.emit()
     nd.spin(200)
 for i in range(window.tabs.count()):
     if window._editor_from_widget(window.tabs.widget(i)) is ed:
