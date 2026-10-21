@@ -435,6 +435,8 @@ def test_the_caret_never_lands_inside_a_character_of_two_units(r):
     assert r["caret_in_emoji"] == 1
 
 
+@pytest.mark.skipif(sys.platform.startswith("linux"),
+                    reason="on Linux a name in another case is another file")
 def test_a_name_differing_only_in_case_is_the_same_file(r):
     assert r["case_asked"] == ["“A.md” was changed in another app since you opened it."]
 
