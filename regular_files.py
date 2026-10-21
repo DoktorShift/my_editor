@@ -11,16 +11,19 @@ then ``stat``) before opening it, opens it without waiting (a pipe put
 there in between does not block), and checks again what it opened.
 ``read_regular_file`` then reads at most a given number of bytes,
 counting what it reads rather than trusting the size the file system
-states.
+states. On Windows a file is opened the way macOS and Linux open every
+file: the person may rename, move or delete it while the app reads it.
 
 Nothing here needs Qt, so any module may use it.
 """
 
 from __future__ import annotations
 
+import ctypes
 import errno
 import os
 import stat
+import sys
 from typing import Optional
 
 
@@ -46,8 +49,11 @@ def open_regular_file(path: str):
     if not stat.S_ISREG(os.stat(real).st_mode):
         raise _not_regular(path)
     nonblocking = getattr(os, "O_NONBLOCK", 0)
-    flags = os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_CLOEXEC", 0) | nonblocking
-    fd = os.open(real, flags)
+    if sys.platform == "win32":
+        fd = _open_sharing_delete(real)
+    else:
+        flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | nonblocking
+        fd = os.open(real, flags)
     try:
         if not stat.S_ISREG(os.fstat(fd).st_mode):
             raise _not_regular(path)
@@ -56,6 +62,38 @@ def open_regular_file(path: str):
         return os.fdopen(fd, "rb")
     except BaseException:
         os.close(fd)
+        raise
+
+
+_GENERIC_READ = 0x80000000
+_FILE_SHARE_ALL = 0x1 | 0x2 | 0x4          # read, write and delete
+_OPEN_EXISTING = 3
+_FILE_ATTRIBUTE_NORMAL = 0x80
+_INVALID_HANDLE = ctypes.c_void_p(-1).value
+
+
+def _open_sharing_delete(path: str) -> int:
+    """On Windows, ``path`` opened for reading as a file descriptor that
+    lets others rename, move and delete the file meanwhile, as on macOS
+    and Linux. Python's own open lets nobody do that while it reads: a
+    picture still being read on a worker thread made the person's own
+    rename of it fail ("being used by another process")."""
+    from ctypes import wintypes
+    import msvcrt
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    create = kernel32.CreateFileW
+    create.argtypes = [wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD, ctypes.c_void_p,
+                       wintypes.DWORD, wintypes.DWORD, wintypes.HANDLE]
+    create.restype = wintypes.HANDLE
+    handle = create(path, _GENERIC_READ, _FILE_SHARE_ALL, None, _OPEN_EXISTING,
+                    _FILE_ATTRIBUTE_NORMAL, None)
+    if handle is None or handle == _INVALID_HANDLE:
+        error = ctypes.get_last_error()
+        raise OSError(None, ctypes.FormatError(error).strip(), path, error)
+    try:
+        return msvcrt.open_osfhandle(handle, os.O_RDONLY | getattr(os, "O_BINARY", 0))
+    except BaseException:
+        kernel32.CloseHandle(wintypes.HANDLE(handle))
         raise
 
 

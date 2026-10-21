@@ -198,6 +198,11 @@ def choose_files(parent: Optional[QWidget], start: str) -> List[str]:
     return list(paths)
 
 
+# What Windows answers when another app (or a reader) holds a file open:
+# a sharing or a lock violation, which Python reports as PermissionError.
+_WINDOWS_IN_USE = (32, 33)
+
+
 def error_message(error: BaseException) -> str:
     """What the disk said, as a sentence a person can act on; never the
     system's own wording or a list of paths."""
@@ -210,6 +215,9 @@ def error_message(error: BaseException) -> str:
         return (_("An item named “{name}” already exists in this location. "
                   "Choose a different name.").format(name=name) if name
                 else _("An item with this name already exists in this location."))
+    if getattr(error, "winerror", None) in _WINDOWS_IN_USE:
+        # Windows says "permission" for a file another app holds open.
+        return _("The item is in use by another app.")
     if isinstance(error, PermissionError):
         return _("You don't have permission to change this item.")
     if isinstance(error, FileNotFoundError):

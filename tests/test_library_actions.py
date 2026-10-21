@@ -62,6 +62,15 @@ def test_what_the_disk_says_is_told_in_words(error, words):
     assert "Errno" not in message and "/" not in message
 
 
+def test_a_file_windows_finds_in_use_is_said_to_be_in_use():
+    # Windows reports a sharing violation (32) and a lock violation (33) as
+    # "permission denied"; the person is told what really stands in the way.
+    for code in (32, 33):
+        error = PermissionError(errno.EACCES, "The process cannot access the file", "C:\\x")
+        error.winerror = code
+        assert library_actions.error_message(error) == "The item is in use by another app."
+
+
 def test_a_partial_move_names_what_stayed_and_why():
     stayed = PermissionError(errno.EACCES, "Permission denied", "/r/locked/b.md")
     error = MoveIncomplete(MoveResult({"/r/a.md": "/d/a.md"}), [("/r/locked/b.md", stayed)])

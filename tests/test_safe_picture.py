@@ -111,6 +111,23 @@ def test_a_folder_is_no_regular_file(tmp_path):
         regular_files.open_regular_file(str(tmp_path))
 
 
+def test_a_file_being_read_can_be_renamed_and_removed_meanwhile(tmp_path):
+    # As on every system: the app reading a picture on a worker thread
+    # never stands in the way of the person renaming or deleting it.
+    path = tmp_path / "photo.png"
+    path.write_bytes(b"x" * 10)
+    with regular_files.open_regular_file(str(path)) as stream:
+        os.rename(path, tmp_path / "beach.png")
+        assert stream.read() == b"x" * 10
+        os.remove(tmp_path / "beach.png")
+    assert os.listdir(tmp_path) == []
+
+
+def test_a_missing_file_is_said_to_be_missing(tmp_path):
+    with pytest.raises(FileNotFoundError):
+        regular_files.open_regular_file(str(tmp_path / "gone.png"))
+
+
 # --------------------------------------------------------------------------- #
 # Pictures                                                                    #
 # --------------------------------------------------------------------------- #
