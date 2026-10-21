@@ -56,6 +56,7 @@ from PySide6.QtCore import QFileSystemWatcher, QObject, QTimer, Signal
 import background
 import file_kinds
 import link_rewrite
+import regular_files
 from atomic_file import free_path
 from i18n import _
 
@@ -71,6 +72,9 @@ LISTINGS_KEPT = 16
 FULL_LOOK_SECONDS = 20.0
 # How long the watcher waits for a folder to settle before it says it changed.
 SETTLE_MS = 300
+# How long a folder's move waits for the app's own reads of files in it
+# to finish, on Windows (_let_go_of_folder).
+READS_WAIT_S = 3.0
 # A package's size is the sum of the files in it, counted over this many
 # of its entries (files and folders) at most.
 _PACKAGE_COUNT_LIMIT = file_kinds.PACKAGE_WALK_LIMIT
@@ -699,6 +703,7 @@ class FolderLibrary(QObject):
         folders = []
         for path in items:
             try:
+                _let_go_of_folder(path)
                 send2trash(path)
                 folders.append(os.path.dirname(path))
             except OSError as error:
@@ -903,6 +908,16 @@ def _native_rename_exclusive(old: str, new: str) -> bool:
     raise OSError(code, os.strerror(code), old, None, new)
 
 
+def _let_go_of_folder(path: str) -> None:
+    """On Windows, before a folder is moved, renamed or put in the
+    Recycle Bin: the app's own readers of files in it finish first,
+    since Windows does none of these while a file in the folder is open
+    (regular_files.wait_for_reads)."""
+    if sys.platform == "win32" and os.path.isdir(path) and not os.path.islink(path):
+        if not regular_files.wait_for_reads(path, READS_WAIT_S):
+            log.warning("Files in %s are still being read", path)
+
+
 def rename_exclusive(old: str, new: str) -> None:
     """Rename (or move on the same disk) ``old`` to ``new`` in one step
     that never replaces anything at ``new``: FileExistsError when
@@ -915,6 +930,7 @@ def rename_exclusive(old: str, new: str) -> None:
             return
         raise FileExistsError(errno.EEXIST, os.strerror(errno.EEXIST), new)
     if sys.platform == "win32":
+        _let_go_of_folder(old)
         os.rename(old, new)               # never replaces on Windows
         return
     if _native_rename_exclusive(old, new):

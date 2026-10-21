@@ -123,6 +123,31 @@ def test_a_file_being_read_can_be_renamed_and_removed_meanwhile(tmp_path):
     assert os.listdir(tmp_path) == []
 
 
+def test_a_folder_waits_only_for_the_reads_of_files_in_it(tmp_path):
+    (tmp_path / "Album" / "Trip").mkdir(parents=True)
+    (tmp_path / "Albums").mkdir()
+    inside = tmp_path / "Album" / "Trip" / "photo.png"
+    beside = tmp_path / "Albums" / "photo.png"
+    for path in (inside, beside):
+        path.write_bytes(b"x")
+    with regular_files.open_regular_file(str(beside)):
+        assert regular_files.wait_for_reads(str(tmp_path / "Album"), 0)
+        with regular_files.open_regular_file(str(inside)):
+            assert not regular_files.wait_for_reads(str(tmp_path / "Album"), 0.05)
+        assert regular_files.wait_for_reads(str(tmp_path / "Album"), 0)
+    closed = []
+
+    def close_soon(stream):
+        time.sleep(0.2)
+        closed.append(True)
+        stream.close()
+
+    stream = regular_files.open_regular_file(str(inside))
+    threading.Thread(target=close_soon, args=(stream,)).start()
+    assert regular_files.wait_for_reads(str(tmp_path / "Album"), 10)
+    assert closed == [True]
+
+
 def test_a_missing_file_is_said_to_be_missing(tmp_path):
     with pytest.raises(FileNotFoundError):
         regular_files.open_regular_file(str(tmp_path / "gone.png"))

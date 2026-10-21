@@ -712,6 +712,38 @@ def test_a_note_and_its_pictures_named_in_another_case_go_to_the_trash_once(tmp_
     assert os.listdir(tmp_path) == []
 
 
+def test_a_folder_moves_and_goes_to_the_trash_while_the_app_still_reads_a_file_in_it(
+        tmp_path, library, monkeypatch):
+    # A picture of the folder being read on a worker thread (a thumbnail,
+    # a viewer): on Windows, which moves no folder holding an open file,
+    # the move waits for the read.
+    import threading
+    import regular_files
+    import send2trash
+    album = tmp_path / "Album"
+    write(album / "photo.png", "pixels")
+    (tmp_path / "Trips").mkdir()
+
+    def read_for_a_moment(path):
+        stream = regular_files.open_regular_file(str(path))
+        threading.Thread(target=lambda: (time.sleep(0.3), stream.close())).start()
+
+    read_for_a_moment(album / "photo.png")
+    result = library.move([str(album)], str(tmp_path / "Trips"))
+    moved = tmp_path / "Trips" / "Album"
+    assert result.moved == {str(album): str(moved)}
+    assert (moved / "photo.png").read_text(encoding="utf-8") == "pixels"
+    trashed = []
+
+    def trash(path):
+        os.rename(path, tmp_path / "Trash")     # as the Recycle Bin takes it: a move
+        trashed.append(path)
+    monkeypatch.setattr(send2trash, "send2trash", trash)
+    read_for_a_moment(moved / "photo.png")
+    library.trash([str(moved)])
+    assert trashed == [str(moved)]
+
+
 def test_a_note_moves_with_its_pictures_folder_named_in_another_case_as_it_is(tmp_path,
                                                                              library):
     if not case_insensitive(tmp_path):

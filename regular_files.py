@@ -13,6 +13,9 @@ there in between does not block), and checks again what it opened.
 counting what it reads rather than trusting the size the file system
 states. On Windows a file is opened the way macOS and Linux open every
 file: the person may rename, move or delete it while the app reads it.
+A folder Windows still will not move while a file in it is open, so the
+files being read are counted, and ``wait_for_reads`` lets a move wait
+for the app's own readers in the folder.
 
 Nothing here needs Qt, so any module may use it.
 """
@@ -21,10 +24,13 @@ from __future__ import annotations
 
 import ctypes
 import errno
+import io
 import os
 import stat
 import sys
-from typing import Optional
+import threading
+import time
+from typing import Dict, Optional
 
 
 def is_regular_file(path: str) -> bool:
@@ -59,10 +65,61 @@ def open_regular_file(path: str):
             raise _not_regular(path)
         if nonblocking:
             os.set_blocking(fd, True)
-        return os.fdopen(fd, "rb")
+        raw = io.FileIO(fd, "rb")
     except BaseException:
         os.close(fd)
         raise
+    return _Reading(raw, os.path.normcase(real))
+
+
+# The files the app has open for reading through open_regular_file, by
+# their real path as the system compares it, each with how many times.
+_open_reads: Dict[str, int] = {}
+_reads_changed = threading.Condition()
+
+
+class _Reading(io.BufferedReader):
+    """A file open for reading, counted in _open_reads while it is open."""
+
+    def __init__(self, raw: io.FileIO, key: str) -> None:
+        super().__init__(raw)
+        self._key: Optional[str] = key
+        with _reads_changed:
+            _open_reads[key] = _open_reads.get(key, 0) + 1
+
+    def close(self) -> None:
+        try:
+            super().close()
+        finally:
+            key, self._key = self._key, None
+            if key is not None:
+                with _reads_changed:
+                    left = _open_reads.get(key, 1) - 1
+                    if left > 0:
+                        _open_reads[key] = left
+                    else:
+                        _open_reads.pop(key, None)
+                    _reads_changed.notify_all()
+
+
+def wait_for_reads(folder: str, timeout: float) -> bool:
+    """Wait, ``timeout`` seconds at most, until the app has no file in
+    ``folder`` (at any depth) open for reading; whether it has none.
+
+    Windows moves, renames and deletes no folder while a file in it is
+    open, also one opened to let others rename it: a picture of the
+    folder still being read on a worker thread would make the person's
+    own move fail. Every such read is short (it reads a bounded number of
+    bytes and closes the file before anything is done with them)."""
+    prefix = os.path.join(os.path.normcase(os.path.realpath(folder)), "")
+    deadline = time.monotonic() + timeout
+    with _reads_changed:
+        while any(key.startswith(prefix) for key in _open_reads):
+            left = deadline - time.monotonic()
+            if left <= 0:
+                return False
+            _reads_changed.wait(left)
+    return True
 
 
 _GENERIC_READ = 0x80000000

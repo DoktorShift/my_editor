@@ -248,7 +248,9 @@ def _read_stable(path: str) -> Tuple[bytes, tuple]:
     so the bytes and the stamp always belong to one version."""
     for _attempt in range(5):
         before = _disk_stamp(path)
-        with open(path, "rb") as f:
+        # As every reader of the person's files: on Windows the file may be
+        # renamed or moved meanwhile, and a folder's move waits for it.
+        with regular_files.open_regular_file(path) as f:
             data = f.read()
         if before is not None and _disk_stamp(path) == before:
             return data, before
@@ -763,7 +765,7 @@ class Workbook:
         if current is None or self._digest is None:
             return True
         try:
-            with open(self.path, "rb") as f:
+            with regular_files.open_regular_file(self.path) as f:
                 same = _digest(f.read()) == self._digest
         except OSError:
             return True
