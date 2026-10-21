@@ -182,6 +182,23 @@ def event_tag(event: dict, name: str) -> str:
     return ""
 
 
+def _seconds(value) -> Optional[int]:
+    """A Unix time as written in an event, or None for one that is not a
+    time after 1970 ("0", "", "soon", a negative number)."""
+    try:
+        seconds = int(float(str(value).strip()))
+    except (TypeError, ValueError, OverflowError):
+        return None
+    return seconds if seconds > 0 else None
+
+
+def published_time(event: dict) -> Optional[int]:
+    """When an article was first published: its ``published_at`` tag
+    (NIP-23), or when the event was made. A ``published_at`` of "0" or
+    one no clock can read is no date, not 1 January 1970."""
+    return _seconds(event_tag(event, "published_at")) or _seconds(event.get("created_at"))
+
+
 def _title_from_content(markdown: str, max_len: int = 90) -> str:
     """A title for events that carry none (e.g. a kind-1 note)."""
     return derive_title_from_markdown(markdown, max_len=max_len, fallback="")
@@ -206,13 +223,7 @@ def nostr_event_to_item(event: dict) -> FeedItem:
     else:
         bech = encode_nevent(str(event.get("id", "")), (), pubkey or None, kind)
 
-    published_raw = event_tag(event, "published_at")
-    try:
-        published = int(published_raw) if published_raw else None
-    except ValueError:
-        published = None
-    if published is None:
-        published = int(event.get("created_at", 0)) or None
+    published = published_time(event)
 
     body = normalize_wiki_content(event.get("content"))\
         if is_wiki else str(event.get("content") or "")

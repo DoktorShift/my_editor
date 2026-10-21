@@ -28,6 +28,7 @@ from nostr.bech32 import (
 from nostr.imports.constants import NOSTRHUB_NIP_KIND
 from nostr.imports.errors import ERROR_CODES
 from nostr.imports.registry import ResolveInput, detect_resolver, resolve_source
+from nostr.imports.resolvers.nostrhub import nip_event_to_item
 from nostr.imports.sources.mdx import derive_summary
 from nostr.imports.sources.nostr import (
     event_tag,
@@ -217,6 +218,17 @@ class TestEventNormalisation(unittest.TestCase):
         self.assertEqual(item.content_markdown, "# Hello\n\nBody.")
         self.assertEqual(item.content_html, "")
 
+    def test_zero_or_unreadable_published_at_is_no_date(self):
+        for written in ("0", "", "soon", "-5"):
+            item = nostr_event_to_item(article_event(tags=[["published_at", written]]))
+            # Not 1 January 1970: the event's own time stands in.
+            self.assertEqual(item.published_at, 1700000000, msg=written)
+
+    def test_nostrhub_nip_with_zero_published_at(self):
+        item = nip_event_to_item(article_event(kind=NOSTRHUB_NIP_KIND,
+                                               tags=[["published_at", "0"]]))
+        self.assertEqual(item.published_at, 1700000000)
+
     def test_untitled_note_derives_title_from_content(self):
         event = {"id": EVENT_ID, "kind": 1, "pubkey": PK,
                  "created_at": 1700000000,
@@ -286,6 +298,17 @@ class TestWikiNormalisation(unittest.TestCase):
 
     def test_fenced_code_protected(self):
         md = "```\n[[not a link]]\n== not a heading\n```"
+        self.assertEqual(normalize_wiki_content(md), md)
+
+
+    def test_collapsed_reference_link_with_a_definition_stays(self):
+        md = "Read [Bitcoin][] and [Nostr][].\n\n[bitcoin]: https://bitcoin.org"
+        self.assertEqual(
+            normalize_wiki_content(md),
+            "Read [Bitcoin][] and Nostr.\n\n[bitcoin]: https://bitcoin.org")
+
+    def test_inline_code_and_tilde_fences_protected(self):
+        md = "Write `[[Target]]` for a link.\n\n~~~\n[[raw]]\n== raw\n~~~"
         self.assertEqual(normalize_wiki_content(md), md)
 
 

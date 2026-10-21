@@ -32,6 +32,7 @@ from ..sources.nostr import (
     event_tag,
     extract_nostr_entity,
     fetch_author_name,
+    published_time,
 )
 from ...outbox.policy import dedupe_relays, public_relays
 from ...bech32 import encode_naddr
@@ -69,13 +70,7 @@ def nip_event_to_item(event: dict) -> FeedItem:
     pubkey = str(event.get("pubkey", ""))
     kind = int(event.get("kind", NOSTRHUB_NIP_KIND))
     title = event_tag(event, "title") or d_tag or "Untitled NIP"
-    published_raw = event_tag(event, "published_at")
-    try:
-        published = int(published_raw) if published_raw else None
-    except ValueError:
-        published = None
-    if published is None:
-        published = int(event.get("created_at", 0)) or None
+    published = published_time(event)
     naddr = encode_naddr(d_tag, pubkey, kind)
     body = str(event.get("content") or "")
     return FeedItem(
