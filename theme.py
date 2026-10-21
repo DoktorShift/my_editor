@@ -291,6 +291,33 @@ def list_selection_color(is_dark: bool) -> QColor:
     return QColor(DARK_SELECTION if is_dark else LIGHT_SELECTION)
 
 
+# Apple's system blue for each theme: the colour the Finder draws its
+# sidebar glyphs and folders in, bright enough on its pane to be seen.
+_ACCENT_ICON = {True: "#0A84FF", False: "#007AFF"}
+# Non-text contrast the guidelines ask of a glyph that tells something.
+ICON_CONTRAST = 3.0
+
+
+def contrast_ratio(first: QColor, second: QColor) -> float:
+    """The WCAG contrast ratio of two colours (1 to 21)."""
+    lighter, darker = sorted((_luminance(first), _luminance(second)), reverse=True)
+    return (lighter + 0.05) / (darker + 0.05)
+
+
+def accent_icon_color(is_dark: bool) -> QColor:
+    """The colour of a glyph in the accent colour on a pane (a sidebar's
+    row icons, a folder in a list): the system's accent colour where it
+    stands out at 3:1 from the panes of this theme, else Apple's system
+    blue for the theme. Not the selection fill, which is darker in the
+    dark theme so white text reads on it, and too dark for a glyph."""
+    panes = (DARK_BG, DARK_MENU_BG) if is_dark else (LIGHT_BG, LIGHT_MENU_BG)
+    system = _SYSTEM_HIGHLIGHT
+    if system is not None and system.isValid() and all(
+            contrast_ratio(system, QColor(p)) >= ICON_CONTRAST for p in panes):
+        return QColor(system)
+    return QColor(_ACCENT_ICON[is_dark])
+
+
 def inactive_selection_color(is_dark: bool) -> QColor:
     """A selected row's fill while its list does not have the focus: a
     quiet grey, as a Mac list shows it, so only one place on screen wears
