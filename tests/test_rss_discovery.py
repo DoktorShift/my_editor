@@ -266,6 +266,55 @@ class ExtractFeedsFromHtmlTests(unittest.TestCase):
         )
 
 
+    def test_page_without_a_head_tag(self) -> None:
+        # HTML lets a page leave <head> out; its links still lead.
+        html = (
+            "<!doctype html><title>Blog</title>"
+            "<link rel='alternate' type='application/rss+xml' href='/feed/'>"
+            "<p>Text</p>"
+            "<link rel='alternate' type='application/rss+xml' href='/late/feed/'>"
+        )
+        self.assertEqual(
+            [h.url for h in extract_feeds_from_html(html, base_url="https://example.com/")],
+            ["https://example.com/feed/"],
+        )
+
+    def test_category_page_prefers_its_own_feed(self) -> None:
+        html = textwrap.dedent("""\
+            <html><head>
+            <link rel="alternate" type="application/rss+xml"
+                  title="Blog &raquo; Feed" href="/feed/" />
+            <link rel="alternate" type="application/rss+xml"
+                  title="Blog &raquo; Comments Feed" href="/comments/feed/" />
+            <link rel="alternate" type="application/rss+xml"
+                  title="Blog &raquo; Bitcoin Category Feed"
+                  href="/category/bitcoin/feed/" />
+            </head><body></body></html>
+        """)
+        hints = extract_feeds_from_html(
+            html, base_url="https://example.com/category/bitcoin/")
+        self.assertEqual(
+            [h.url for h in hints],
+            [
+                "https://example.com/category/bitcoin/feed/",
+                "https://example.com/feed/",
+                "https://example.com/comments/feed/",
+            ],
+        )
+
+    def test_post_page_keeps_the_site_feed_first(self) -> None:
+        # A post's own feed under its path is its comments feed.
+        html = (
+            "<html><head>"
+            '<link rel="alternate" type="application/rss+xml" href="/feed/">'
+            '<link rel="alternate" type="application/rss+xml" '
+            'title="Hello Comments Feed" href="/2024/hello/feed/">'
+            "</head></html>"
+        )
+        hints = extract_feeds_from_html(html, base_url="https://example.com/2024/hello/")
+        self.assertEqual(hints[0].url, "https://example.com/feed/")
+
+
 class CandidateRootFeedTests(unittest.TestCase):
     def test_returns_feed_path_for_simple_url(self) -> None:
         self.assertEqual(

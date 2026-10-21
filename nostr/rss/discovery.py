@@ -188,11 +188,26 @@ def looks_like_html(body: str) -> bool:
 # <link rel="alternate"> extraction                                           #
 # --------------------------------------------------------------------------- #
 
+# What a head holds. Any other tag starts the body of a page that left
+# its <head> (and <body>) tags out.
+_HEAD_CONTENT = frozenset({"html", "title", "meta", "link", "style", "script",
+                           "base", "noscript", "template"})
+
+# A page listing one section of a site: a WordPress category, tag or
+# author archive (and the words other platforms use for the same).
+_SECTION_PAGE = re.compile(
+    r"/(?:category|categories|tag|tags|topic|topics|author|series|label|"
+    r"kategorie|schlagwort|categorie|categoria|etiqueta)/", re.IGNORECASE)
+_COMMENTS_FEED = re.compile(r"comment|kommentar", re.IGNORECASE)
+
+
 class _LinkRelExtractor(HTMLParser):
     """Pulls feed hints from ``<link rel="alternate">`` tags in ``<head>``.
 
     Conservative on purpose:
       - Only looks at tags before ``</head>`` (or before ``<body>``).
+        HTML lets a page leave ``<head>`` out: its head then runs until
+        the first tag that belongs in a body, as a browser reads it.
       - Only accepts ``rel`` values that contain the literal token
         ``alternate``.
       - Requires an explicit feed-shaped ``type`` (rss+xml, atom+xml,
@@ -206,6 +221,8 @@ class _LinkRelExtractor(HTMLParser):
         self.hints: List[FeedHint] = []
         self._in_head: bool = False
         self._head_closed: bool = False
+        # True while no <head> tag has been seen: the head is implied.
+        self._head_implied: bool = True
 
     def handle_starttag(self, tag: str, attrs) -> None:
         if self._head_closed:
@@ -213,12 +230,19 @@ class _LinkRelExtractor(HTMLParser):
         tag_lower = tag.lower()
         if tag_lower == "head":
             self._in_head = True
+            self._head_implied = False
             return
         if tag_lower == "body":
             # No </head> yet, but we're already inside the body. Stop.
             self._head_closed = True
             return
-        if tag_lower != "link" or not self._in_head:
+        if not self._in_head and self._head_implied:
+            if tag_lower not in _HEAD_CONTENT:
+                self._head_closed = True   # a body tag ends an implied head
+                return
+        elif not self._in_head:
+            return
+        if tag_lower != "link":
             return
 
         attr_map = {k.lower(): (v or "") for k, v in attrs}
@@ -257,7 +281,12 @@ def extract_feeds_from_html(
     """Return feed hints declared in an HTML page's ``<head>``.
 
     Relative ``href`` values are resolved against ``base_url``. Order is
-    preserved so callers can pick the first hint as a sensible default.
+    preserved so callers can pick the first hint as a sensible default,
+    with one exception: on a page of one section of a site (a WordPress
+    category or tag page), WordPress lists the site's whole feed first
+    and the section's own (``/category/x/feed/``) after it. Whoever
+    pasted the section's page wants the section, so a feed under the
+    page's own path comes first (never a comments feed).
     """
     if not html:
         return []
@@ -268,7 +297,7 @@ def extract_feeds_from_html(
     except Exception:  # noqa: BLE001, html.parser raises on truly broken input
         # Return whatever we managed to collect before the failure.
         pass
-    return [
+    hints = [
         FeedHint(
             url=urljoin(base_url, hint.url),
             title=hint.title,
@@ -276,6 +305,27 @@ def extract_feeds_from_html(
         )
         for hint in parser.hints
     ]
+    return _section_feed_first(hints, base_url)
+
+
+def _section_feed_first(hints: List[FeedHint], page_url: str) -> List[FeedHint]:
+    try:
+        page_path = urlparse(page_url).path
+    except ValueError:
+        return hints
+    if not _SECTION_PAGE.search(page_path + "/"):
+        return hints
+    prefix = page_path.rstrip("/") + "/"
+
+    def own(hint: FeedHint) -> bool:
+        try:
+            path = urlparse(hint.url).path
+        except ValueError:
+            return False
+        return (path.startswith(prefix) and path != prefix
+                and not _COMMENTS_FEED.search(f"{path} {hint.title or ''}"))
+
+    return sorted(hints, key=lambda hint: not own(hint))   # stable: order kept
 
 
 # --------------------------------------------------------------------------- #
