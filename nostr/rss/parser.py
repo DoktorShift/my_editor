@@ -14,6 +14,7 @@ derivation, NIP-23 mapping, source-link footer) lives in sibling modules.
 from __future__ import annotations
 
 import calendar
+import io
 import json
 import re
 import time
@@ -80,7 +81,11 @@ def with_whole_links(feed: Feed, address: Optional[str]) -> Feed:
     and images, its "Originally published at" line and Open Original
     pointing nowhere (CP3 review L8). An item without a guid keeps the
     link as written as its guid (the parser gives it one), so its draft
-    identifier stays what earlier imports gave (nostr/rss/dtag.py)."""
+    identifier stays what earlier imports gave (nostr/rss/dtag.py).
+
+    The cover is made whole too, against the post's own page: a cover
+    written as ``/media/a.jpg`` was refused when the article was signed,
+    and the draft lost it."""
     base = address if _is_web_address(address) else feed.link
     if not _is_web_address(base):
         return feed
@@ -89,8 +94,24 @@ def with_whole_links(feed: Feed, address: Optional[str]) -> Feed:
         link = (item.link or "").strip()
         if link and not link.startswith("#") and not urlsplit(link).scheme:
             item = replace(item, link=urljoin(base, link))
+        image = whole_url(item.image, item.link if _is_web_address(item.link) else base)
+        if image != item.image:
+            item = replace(item, image=image)
         items.append(item)
     return replace(feed, items=tuple(items))
+
+
+def whole_url(url: Optional[str], base: Optional[str]) -> Optional[str]:
+    """``url`` made whole against the web address ``base``: a relative
+    or protocol-relative address gets the page's scheme and host. Any
+    other address, and every address when ``base`` is not a web
+    address, is returned as it is."""
+    value = (url or "").strip()
+    if not value or not _is_web_address(base):
+        return url
+    if value.startswith("//") or not urlsplit(value).scheme:
+        return urljoin(base, value)
+    return url
 
 
 def _is_web_address(url: Optional[str]) -> bool:
@@ -266,7 +287,11 @@ def _parse_rss(parsed: Any) -> Feed:
         _entry_to_item(
             entry,
             image_for=_rss_image,
-            published_for=lambda e: e.get("published_parsed"),
+            # RSS 1.0 and many generators date an item only with
+            # ``dc:date``, which feedparser files under "updated".
+            published_for=lambda e: (
+                e.get("published_parsed") or e.get("updated_parsed")
+            ),
             author_for=_rss_author,
         )
         for entry in parsed.entries or ()
@@ -379,7 +404,8 @@ def _parse_json_feed(payload: Any) -> Feed:
                 link=link,
                 summary=_clean_str(it.get("summary")) or None,
                 content_html=content_html,
-                published_at=_parse_date_string(it.get("date_published")),
+                published_at=(_parse_date_string(it.get("date_published"))
+                              or _parse_date_string(it.get("date_modified"))),
                 categories=categories,
                 image=image if isinstance(image, str) else None,
                 author=_json_item_author(it),
@@ -399,6 +425,28 @@ def _parse_json_feed(payload: Any) -> Feed:
 # Public entry point                                                           #
 # --------------------------------------------------------------------------- #
 
+_XML_DECL_ENCODING = re.compile(
+    r"""^(\ufeff?\s*<\?xml[^>]*?\bencoding\s*=\s*)(["'])[^"']*\2""",
+    re.IGNORECASE)
+
+
+def _as_stream(text: str) -> io.BytesIO:
+    """``text`` as the stream feedparser reads.
+
+    Never the bare string: feedparser takes a string that reads as an
+    address (``http://``, ``file://``) or as a file name for something to
+    open, so a body that is only such an address would have it fetch
+    past the network guard, or read a file on this computer.
+
+    ``text`` is already decoded (fetch.py, or the file's reader). Its
+    XML declaration still names the encoding the bytes had on the wire,
+    and feedparser would decode the UTF-8 it is given with that one
+    again: a ``windows-1252`` feed came out as "GrÃ¼ÃŸe". The
+    declaration is made to say what the bytes now are."""
+    return io.BytesIO(
+        _XML_DECL_ENCODING.sub(r"\1\2utf-8\2", text, count=1).encode("utf-8"))
+
+
 def parse_feed(text: str) -> Feed:
     """Auto-detect and parse an RSS, Atom, or JSON Feed payload.
 
@@ -415,7 +463,7 @@ def parse_feed(text: str) -> Feed:
             raise RssError(f"Invalid JSON Feed: {exc}", "INVALID_JSONFEED") from exc
         return _parse_json_feed(payload)
 
-    parsed = feedparser.parse(text)
+    parsed = feedparser.parse(_as_stream(text), sanitize_html=False)
     version = (getattr(parsed, "version", "") or "").lower()
     if version.startswith("atom"):
         return _parse_atom(parsed)

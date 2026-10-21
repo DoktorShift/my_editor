@@ -251,5 +251,93 @@ class WholeLinkTests(unittest.TestCase):
         self.assertEqual(feed.items[0].link, "https://blog.example/2026/10/post")
 
 
+class StreamTests(unittest.TestCase):
+    """feedparser takes a string that reads as an address or a file name
+    for something to open. A body must only ever be parsed as a body."""
+
+    def setUp(self) -> None:
+        import feedparser.http
+        self._calls = []
+        original = feedparser.http.get
+        feedparser.http.get = lambda url, *a, **k: self._calls.append(url) or b""
+        self.addCleanup(setattr, feedparser.http, "get", original)
+
+    def test_a_body_that_is_an_address_is_never_fetched(self) -> None:
+        for body in ("http://127.0.0.1:9/feed", "https://169.254.169.254/latest",
+                     "file:///etc/hosts", "feed://example.com/rss"):
+            with self.assertRaises(RssError):
+                parse_feed(body)
+        self.assertEqual(self._calls, [])
+
+    def test_a_body_that_is_a_file_name_is_never_read(self) -> None:
+        import tempfile
+        with tempfile.NamedTemporaryFile("w", suffix=".xml", delete=False) as handle:
+            handle.write('<rss version="2.0"><channel><title>Secret</title>'
+                         '<item><title>Private</title></item></channel></rss>')
+        self.addCleanup(__import__("os").unlink, handle.name)
+        with self.assertRaises(RssError):
+            parse_feed(handle.name)
+
+
+class EncodingTests(unittest.TestCase):
+    """The text arrives decoded; the declaration names what the bytes were."""
+
+    def _feed(self, encoding: str) -> str:
+        return (f'<?xml version="1.0" encoding="{encoding}"?><rss version="2.0">'
+                '<channel><title>Grüße</title><item><title>Über uns – Café</title>'
+                '<guid>1</guid></item></channel></rss>')
+
+    def test_a_declared_single_byte_encoding_does_not_garble_the_text(self) -> None:
+        for encoding in ("windows-1252", "ISO-8859-1", "iso-8859-15", "UTF-8"):
+            feed = parse_feed(self._feed(encoding))
+            self.assertEqual(feed.title, "Grüße", encoding)
+            self.assertEqual(feed.items[0].title, "Über uns – Café", encoding)
+
+    def test_a_byte_order_mark_is_harmless(self) -> None:
+        self.assertEqual(parse_feed("\ufeff" + self._feed("windows-1252")).title, "Grüße")
+
+
+class DateTests(unittest.TestCase):
+    def test_an_rss_item_dated_only_by_dc_date_keeps_its_date(self) -> None:
+        feed = parse_feed(
+            '<?xml version="1.0"?><rss version="2.0" '
+            'xmlns:dc="http://purl.org/dc/elements/1.1/"><channel><title>T</title>'
+            '<item><title>P</title><guid>1</guid><dc:date>2024-01-02T10:00:00Z</dc:date>'
+            '</item></channel></rss>')
+        self.assertEqual(feed.items[0].published_at, 1704189600)
+
+    def test_a_json_feed_item_dated_only_by_its_change_keeps_a_date(self) -> None:
+        feed = parse_feed('{"version":"https://jsonfeed.org/version/1.1","title":"T",'
+                          '"items":[{"id":"1","content_text":"x",'
+                          '"date_modified":"2024-01-02T10:00:00Z"}]}')
+        self.assertEqual(feed.items[0].published_at, 1704189600)
+
+
+class EmbedTests(unittest.TestCase):
+    def test_a_video_embed_survives_parsing(self) -> None:
+        feed = parse_feed(
+            '<?xml version="1.0"?><rss version="2.0" '
+            'xmlns:content="http://purl.org/rss/1.0/modules/content/"><channel>'
+            '<title>T</title><item><title>P</title><guid>1</guid><content:encoded>'
+            '<![CDATA[<p>Watch:</p><iframe src="https://www.youtube.com/embed/abc123XYZ">'
+            '</iframe>]]></content:encoded></item></channel></rss>')
+        self.assertIn("youtube.com/embed/abc123XYZ", feed.items[0].content_html)
+
+
+class WholeCoverTests(unittest.TestCase):
+    def test_a_relative_cover_is_made_whole_against_the_post(self) -> None:
+        feed = with_whole_links(parse_feed(
+            '<?xml version="1.0"?><rss version="2.0" '
+            'xmlns:media="http://search.yahoo.com/mrss/"><channel><title>T</title>'
+            '<link>https://blog.example/</link><item><title>P</title>'
+            '<link>https://blog.example/2026/post</link>'
+            '<media:content url="/media/cover.jpg" medium="image"/></item>'
+            '<item><title>Q</title><link>https://blog.example/q</link>'
+            '<media:content url="//cdn.example/q.jpg" medium="image"/></item>'
+            '</channel></rss>'), "https://blog.example/feed")
+        self.assertEqual(feed.items[0].image, "https://blog.example/media/cover.jpg")
+        self.assertEqual(feed.items[1].image, "https://cdn.example/q.jpg")
+
+
 if __name__ == "__main__":
     unittest.main()
