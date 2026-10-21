@@ -600,11 +600,63 @@ class TestFullTextRecovery:
         factory, created = make_factory()
         pages = FakeFetcher({ARTICLE_URL: ("ok", ARTICLE_PAGE)})
         item = make_item("Thick", guid="t1", link=ARTICLE_URL,
-                         content_html=THICK_HTML)
+                         content_html=THICK_HTML, image="https://blog.example/c.jpg")
         job = make_job([item], factory=factory, page_fetcher=pages)
         job.start()
         settle()
         assert pages.calls == []
+
+    def test_a_summary_feed_teaser_is_read_from_its_page(self):
+        """WordPress's "Summary" feeds give 55 words ending on "[…]": long
+        enough not to look thin, and still only the start of the post."""
+        factory, created = make_factory()
+        pages = FakeFetcher({ARTICLE_URL: ("ok", ARTICLE_PAGE)})
+        teaser = "<p>" + "Opening words of the post " * 12 + "[&hellip;]</p>"
+        item = make_item("Teaser", guid="t1", link=ARTICLE_URL, content_html=teaser,
+                         image="https://blog.example/c.jpg")
+        job = make_job([item], factory=factory, page_fetcher=pages)
+        job.start()
+        settle()
+        assert pages.calls == [ARTICLE_URL]
+        assert "Paragraph 3" in created[0].inner_event["content"]
+
+    def test_a_post_without_a_cover_takes_the_details_its_page_states(self):
+        """The body stays the feed's (it is whole); what the post lacks is
+        filled from the page's Open Graph and JSON-LD, never what it has."""
+        factory, created = make_factory()
+        page = (
+            '<html><head><meta property="og:image" content="/media/cover.jpg">'
+            '<meta property="og:description" content="What the page says.">'
+            '<meta property="article:tag" content="Self Custody">'
+            '<script type="application/ld+json">{"@context":"https://schema.org",'
+            '"@graph":[{"@type":"BlogPosting","datePublished":"2024-01-02T10:00:00Z",'
+            '"author":{"@type":"Person","name":"Jane Doe"}}]}</script>'
+            "</head><body><article>" + ARTICLE_PAGE + "</article></body></html>")
+        pages = FakeFetcher({ARTICLE_URL: ("ok", page)})
+        item = make_item("Whole", guid="t1", link=ARTICLE_URL, content_html=THICK_HTML,
+                         categories=("bitcoin",))
+        job = make_job([item], factory=factory, page_fetcher=pages)
+        job.start()
+        settle()
+        event = created[0].inner_event
+        tags = event["tags"]
+        assert pages.calls == [ARTICLE_URL]
+        assert ["image", "https://blog.example/media/cover.jpg"] in tags
+        assert ["summary", "What the page says."] in tags
+        assert ["published_at", "1704189600"] in tags
+        assert ["t", "bitcoin"] in tags and ["t", "selfcustody"] not in tags
+        assert "long body text" in event["content"]
+        assert "Paragraph 3" not in event["content"]
+        assert "Originally published by Jane Doe at" in event["content"]
+
+    def test_a_page_that_states_nothing_leaves_the_post_as_it_was(self):
+        factory, created = make_factory()
+        pages = FakeFetcher({ARTICLE_URL: ("ok", "<html><body><p>x</p></body></html>")})
+        item = make_item("Whole", guid="t1", link=ARTICLE_URL, content_html=THICK_HTML)
+        job = make_job([item], factory=factory, page_fetcher=pages)
+        job.start()
+        settle()
+        assert "long body text" in created[0].inner_event["content"]
 
     def test_a_post_kept_only_in_part_is_read_from_its_page(self):
         """A post the inbox kept only in part (too long) is read from its

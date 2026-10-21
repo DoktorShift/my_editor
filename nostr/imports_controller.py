@@ -62,6 +62,7 @@ from .imports.constants import IDENTIFIER_PREFIX
 from .imports.errors import LOCAL_NETWORK_MESSAGE, SourceError, friendly_message
 from .imports.feed_list import source_key
 from .imports.fulltext import extract_readable_content
+from .imports.page_meta import fill_from_page, read_page_meta
 from .rss.parser import FeedItem
 from .imports.intake import FEED, is_whole_source, kind_of, post_at, same_page
 from .imports.sources.opml import OpmlFeed, write_opml
@@ -948,19 +949,24 @@ class ImportsController(QObject):
         Fetch the Full Article reads one)."""
         def read(html: str) -> None:
             self._run_blocking(
-                lambda: extract_readable_content(html, url=address),
-                lambda content: made(content),
+                lambda: (extract_readable_content(html, url=address),
+                         read_page_meta(html, url=address)),
+                lambda found: made(*found),
                 lambda exc: failed(str(exc)))
 
-        def made(content) -> None:
+        def made(content, page) -> None:
             if generation != self._generation:
                 return
             if content is None:
                 on_done(None, NOTHING_FOUND)
                 return
-            post = FeedItem(guid=address, title=content.title or address, link=address,
-                            summary=None, content_html=content.html, published_at=None,
-                            categories=(), image=None, author=None)
+            # The details the page states (cover, description, date, tags,
+            # author), as a feed would have given them.
+            post = fill_from_page(
+                FeedItem(guid=address, title=address, link=address,
+                         summary=None, content_html=content.html, published_at=None,
+                         categories=(), image=None, author=None, title_from_url=True),
+                page, page_title=content.title)
             on_done(self.open_posts(kind="link", label=post.title, items=[post],
                                     source_url=address), "")
 

@@ -160,6 +160,20 @@ def summary_from_body(markdown: str) -> str:
     return _shorten(" ".join(paragraphs))
 
 
+_TEASER_END = re.compile(
+    r"(\[(…|\.\.\.)\]|…|\.\.\.|\[?(continue reading|read more|read the full|"
+    r"weiterlesen|mehr lesen|lire la suite|leer más|seguir leyendo|"
+    r"continua a leggere|lees verder)[^\n]*?(\]\([^)]*\))?)\s*$",
+    re.IGNORECASE)
+
+
+def ends_as_teaser(markdown: str) -> bool:
+    """Whether a body ends the way a teaser does ("[…]", "…", "Continue
+    reading"): the post goes on on its page, however long the part in
+    the feed is (WordPress's "Summary" feeds give 55 words)."""
+    return bool(_TEASER_END.search((markdown or "").strip()))
+
+
 def _shorten(text: str) -> str:
     if len(text) <= _SUMMARY_CHARS:
         return text

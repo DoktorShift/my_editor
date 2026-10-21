@@ -9,6 +9,7 @@ import unittest
 from nostr.rss.normalize import (
     ArticleTemplate,
     author_name,
+    ends_as_teaser,
     html_to_markdown,
     item_to_article,
     plain_summary,
@@ -192,6 +193,19 @@ class ArticleDetailTests(unittest.TestCase):
 
     def test_a_cover_that_is_no_web_address_is_left_out(self) -> None:
         self.assertEqual(item_to_article(_item(image="data:image/png;base64,AA")).image, "")
+
+
+class TeaserTests(unittest.TestCase):
+    def test_a_teaser_ending_is_recognised(self) -> None:
+        for body in ("Words here […]", "Words [...]", "Words…",
+                     "Words [Continue reading →](https://b.example/p)",
+                     "Words.\n\n[Read more](https://b.example/p)",
+                     "Wörter. [Weiterlesen](https://b.example/p)"):
+            self.assertTrue(ends_as_teaser(body), body)
+
+    def test_an_ordinary_ending_is_none(self) -> None:
+        for body in ("A normal ending.", "Read more books.\n\nThe end.", ""):
+            self.assertFalse(ends_as_teaser(body), body)
 
 
 class AuthorCreditTests(unittest.TestCase):

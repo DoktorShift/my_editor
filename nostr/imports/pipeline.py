@@ -86,6 +86,7 @@ from ..relay import RelayPool
 from ..bunker import BunkerSessionPool
 from ..rss.normalize import (
     ArticleTemplate,
+    ends_as_teaser,
     html_to_markdown,
     item_to_article,
     source_link_footer,
@@ -106,6 +107,7 @@ from .constants import (
 )
 from .fetch import SourceFetcher
 from .fulltext import extract_readable_content
+from .page_meta import fill_from_page, read_page_meta
 from .images import MirrorOutcome, MirrorProgress, blossom_rehost, rehost_images
 from .sources.podcast import build_podcast_markdown, fetch_podcast_chapters
 
@@ -510,10 +512,13 @@ class ImportItemsJob(QObject):
         template: ArticleTemplate,
         title_for_ui: str,
     ) -> None:
-        """Fetch a thin item's own page and lift the article body.
+        """Fetch a post's own page for what the feed left out.
 
-        Runs only when enabled, the feed body is a teaser, and the link
-        is an ordinary web page. Best-effort at every step: any failure
+        Its text, when the feed body is a teaser (short, or ending on
+        "[…]" or "Continue reading"), and the details the page states
+        (cover, description, date, tags, author; page_meta.py) when the
+        post has no cover: both only when enabled and the link is an
+        ordinary web page. Best-effort at every step: any failure
         publishes the feed-provided template unchanged, except for a post
         kept only in part (``_without_page_text``).
         """
@@ -521,23 +526,38 @@ class ImportItemsJob(QObject):
             return
         # A post kept only in part (too long for the inbox) is read from its
         # page whatever the option: the part alone would be a cut draft.
-        if not (
-            (item.partial or (self._fetch_full_text and self._body_is_thin(template, item)))
-            and _is_http_url(item.link)
-        ):
+        wants_text = item.partial or (self._fetch_full_text and self._is_teaser(template, item))
+        wants_details = self._fetch_full_text and not template.image
+        if not ((wants_text or wants_details) and _is_http_url(item.link)):
             self._without_page_text(item, template)
             return
         self.item_extracting.emit(self._index, title_for_ui)
         self._emit_status(_("Fetching full text for '{title}'…").format(title=title_for_ui))
         self._fetcher.fetch(
             item.link,
-            on_success=lambda body, i=item, t=template: (
-                self._on_article_page(body, i, t)
+            on_success=lambda body, i=item, t=template, w=wants_text: (
+                self._on_article_page(body, i, t, w)
             ),
             on_failure=lambda _err, i=item, t=template: (
                 self._without_page_text(i, t)
             ),
         )
+
+    def _is_teaser(self, template: ArticleTemplate, item: FeedItem) -> bool:
+        return self._body_is_thin(template, item) or ends_as_teaser(
+            self._body_of(template, item))
+
+    def _body_of(self, template: ArticleTemplate, item: FeedItem) -> str:
+        """The template's Markdown without the attribution line."""
+        content = template.content
+        if self._append_source_link and item.link:
+            footer = source_link_footer(item.link, item.author).strip()
+            if content.endswith(footer):
+                content = content[: -len(footer)]
+                content = content.rstrip()
+                if content.endswith("---"):
+                    content = content[:-3]
+        return content.strip()
 
     def _without_page_text(self, item: FeedItem, template: ArticleTemplate) -> None:
         """The page gave nothing better than the feed's text: the draft is
@@ -556,44 +576,62 @@ class ImportItemsJob(QObject):
         body: str,
         item: FeedItem,
         template: ArticleTemplate,
+        wants_text: bool = True,
     ) -> None:
         if self._cancelled:
             return
         feed_body_len = self._feed_body_length(template, item)
 
         def _extract():
-            content = extract_readable_content(body, url=item.link)
+            page = read_page_meta(body, url=item.link)
+            content = extract_readable_content(body, url=item.link) if wants_text else None
             if content is None:
-                return None
+                return None, page, ""
             # The page's own relative links and images, made whole
             # against the page (CP1 review O3).
             markdown = html_to_markdown(content.html, base_url=item.link).strip()
-            return (markdown, content.title) if markdown else None
+            return markdown, page, content.title
 
         def _done(result) -> None:
             if self._cancelled:
                 return
-            if result is not None:
-                markdown, page_title = result
+            markdown, page, page_title = result
+            whole = fill_from_page(item, page, page_title=page_title)
+            text = None
+            if markdown:
                 # Adopt only on a clear win over the summary we already
                 # have; a bad extraction is usually shorter, not longer.
                 # For a post kept only in part, any more text is a win.
                 needed = feed_body_len if item.partial else max(THIN_CONTENT_CHARS,
                                                                  feed_body_len * 2)
                 if len(markdown) > needed:
-                    updated = replace(
-                        template, content=self._with_footer(markdown, item))
-                    if item.title_from_url and page_title:
-                        updated = replace(updated, title=page_title)
-                    self._publish_template_as_draft(updated)
-                    return
-            self._without_page_text(item, template)
+                    text = markdown
+            if text is None and item.partial:
+                self._without_page_text(item, template)
+                return
+            if text is None and whole is item:
+                self._without_page_text(item, template)
+                return
+            self._publish_template_as_draft(self._remade(
+                template, whole, text if text is not None else self._body_of(template, item)))
 
         self._run_blocking(
             _extract,
             _done,
             lambda _exc, i=item, t=template: self._without_page_text(i, t),
         )
+
+    def _remade(self, template: ArticleTemplate, item: FeedItem, body: str) -> ArticleTemplate:
+        """``template`` made again for ``item`` (now with what its page
+        added) and ``body``: its details, and the attribution line. The
+        identifier stays the one already checked."""
+        remade = item_to_article(
+            replace(item, content_markdown=body),
+            hashtags=self._extra_hashtags,
+            identifier_prefix=self._identifier_prefix,
+            append_source_link=self._append_source_link,
+        )
+        return replace(remade, slug=template.slug)
 
     # -- image rehosting ---------------------------------------------------
 
