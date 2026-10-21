@@ -429,6 +429,34 @@ def from_tsv(text: str) -> List[List[str]]:
 # Undo                                                                        #
 # --------------------------------------------------------------------------- #
 
+# How long Python lets the worker hold the interpreter before the window's
+# thread may have it, while a job runs. Each time Qt calls into Python
+# (a timer, an event, a cell to paint) the window's thread waits for the
+# interpreter, and Python makes a waiting thread wait one switch interval
+# (5 ms by default) before it asks the holder to let go. On a slow
+# machine those waits added up to most of the job: inserting a row into
+# 50 000 formulas held the window for 0.8 s although its own work took
+# 16 ms. Asked after 0.2 ms, the window gets its turns; the worker takes
+# as long as before.
+_JOB_SWITCH_INTERVAL = 0.0002
+_switch_holders = 0
+_switch_before = 0.005
+
+
+def _quick_switching(on: bool) -> None:
+    """Shorten the switch interval while any job runs (on the GUI thread)."""
+    global _switch_holders, _switch_before
+    if on:
+        if _switch_holders == 0:
+            _switch_before = sys.getswitchinterval()
+            sys.setswitchinterval(min(_switch_before, _JOB_SWITCH_INTERVAL))
+        _switch_holders += 1
+        return
+    _switch_holders -= 1
+    if _switch_holders == 0:
+        sys.setswitchinterval(_switch_before)
+
+
 class _Job:
     """Work a tab hands to a worker thread (SheetTab._run_job). The tab
     does not own it: it outlives a tab closed while it runs, and hears
@@ -445,6 +473,7 @@ class _Job:
     def start(self, work) -> None:
         """``work(progress)`` on a thread of its own, which never holds up
         quitting the app."""
+        _quick_switching(True)
         background.run(work, self._succeeded, self._failed, progress=self._progressed,
                        daemon=True, name="sheet-work")
 
@@ -458,6 +487,7 @@ class _Job:
 
     def _finished(self) -> None:
         self.done = True
+        _quick_switching(False)
         if shiboken6.isValid(self.tab):
             self.tab._leave_job(self)
         for loop in self.loops:

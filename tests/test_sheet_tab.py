@@ -1183,3 +1183,27 @@ def test_column_widths_keep_the_files_unit_exactly(budget):
     finally:
         again.release()
         again.deleteLater()
+
+
+def test_while_a_large_change_runs_the_window_gets_its_turns_quickly(tab, every_change_is_large,
+                                                                    monkeypatch):
+    # The window's thread waits for the interpreter whenever Qt calls into
+    # Python, and Python asks the worker to let go only after a switch
+    # interval. Kept short while a job runs, the window stays responsive
+    # on a slow machine too; afterwards the interval is as it was.
+    import sys
+    before = sys.getswitchinterval()
+    type_into(tab, "A1", "3")
+    during = []
+    release = threading.Event()
+    save = tab.book.save
+    monkeypatch.setattr(tab.book, "save", lambda *a, **k: release.wait(5) and save(*a, **k))
+
+    def look():
+        during.append(sys.getswitchinterval())
+        release.set()
+
+    QTimer.singleShot(30, look)
+    assert tab.save().ok
+    assert during and during[0] <= 0.0002 < before
+    assert sys.getswitchinterval() == before
