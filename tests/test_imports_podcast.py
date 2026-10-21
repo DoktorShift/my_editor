@@ -203,6 +203,24 @@ class TestMarkdown(unittest.TestCase):
             markdown, "[Listen to the episode](https://cdn.example/e.mp3)")
 
 
+    def test_audio_address_with_spaces_and_parentheses(self):
+        markdown = build_podcast_markdown(
+            PodcastEpisode(audio="https://cdn.example/Episode 1 (final).mp3"))
+        self.assertEqual(
+            markdown,
+            "[Listen to the episode](https://cdn.example/Episode%201%20%28final%29.mp3)")
+
+
+class TestShowName(unittest.TestCase):
+    def test_numeric_entities_read(self):
+        xml = ("<rss><channel><title>Joe&#8217;s Show &amp; Friends</title>"
+               "<item><title>E1</title><guid>e1</guid>"
+               '<enclosure url="https://cdn.example/e1.mp3" type="audio/mpeg"/>'
+               "</item></channel></rss>")
+        channel, _items = extract_podcast_feed(xml)
+        self.assertEqual(channel["title"], "Joe\u2019s Show & Friends")
+
+
 class TestPipelineBranch(unittest.TestCase):
     def test_podcast_item_renders_episode_body(self):
         from tests.imports_fakes import (

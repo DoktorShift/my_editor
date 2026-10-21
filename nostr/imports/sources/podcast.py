@@ -36,6 +36,7 @@ and are skipped.
 
 from __future__ import annotations
 
+import html
 import json
 import re
 from dataclasses import dataclass, replace
@@ -105,11 +106,9 @@ class Chapter:
 # --------------------------------------------------------------------------- #
 
 def _decode_entities(value: str) -> str:
-    return (
-        str(value)
-        .replace("&amp;", "&").replace("&lt;", "<").replace("&gt;", ">")
-        .replace("&quot;", '"').replace("&#039;", "'").replace("&apos;", "'")
-    )
+    """Every entity read once, numeric ones too: a show called
+    ``Joe&#8217;s`` is "Joe’s"."""
+    return html.unescape(str(value))
 
 
 def _tag_text(xml: str, tag: str) -> str:
@@ -421,6 +420,13 @@ def fetch_podcast_chapters(
     fetcher.fetch(url, on_success=_on_body, on_failure=lambda _e: _retry_embedded())
 
 
+def _link_target(url: str) -> str:
+    """An address as a Markdown link target: a space or a parenthesis in
+    a file name would end the link early, so those are encoded."""
+    return (str(url or "").strip().replace(" ", "%20").replace("(", "%28")
+            .replace(")", "%29").replace("<", "%3C").replace(">", "%3E"))
+
+
 def build_podcast_markdown(
     episode: PodcastEpisode,
     *,
@@ -448,7 +454,7 @@ def build_podcast_markdown(
     if meta_parts:
         lines.append("🎧 " + " · ".join(meta_parts))
         lines.append("")
-    lines.append(f"[Listen to the episode]({episode.audio})")
+    lines.append(f"[Listen to the episode]({_link_target(episode.audio)})")
     if chapters:
         lines.append("")
         lines.append("## Chapters")
@@ -458,7 +464,7 @@ def build_podcast_markdown(
                 f"- **{format_duration(chapter.start)}** {chapter.title}")
     if episode.transcript:
         lines.append("")
-        lines.append(f"[Transcript]({episode.transcript})")
+        lines.append(f"[Transcript]({_link_target(episode.transcript)})")
     if notes.strip():
         lines.append("")
         lines.append("---")
