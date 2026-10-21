@@ -396,7 +396,9 @@ def test_duplicate_makes_a_finder_named_copy_and_chooses_it(tmp_path, libraries,
 def test_a_drag_carries_the_real_files_and_the_apps_own_paths(tmp_path):
     paths = [str(tmp_path / "a.png"), str(tmp_path / "b c.md")]
     mime = library_actions.mime_for(paths)
-    assert [u.toLocalFile() for u in mime.urls()] == paths
+    # The files themselves, as URLs (Qt spells a Windows path in one with
+    # "/"; the app's own spelling comes back from dropped).
+    assert mime.urls() == [QUrl.fromLocalFile(p) for p in paths]
     assert library_actions.dropped(mime) == (paths, [])
     finder = QMimeData()
     finder.setUrls([QUrl.fromLocalFile(paths[0]), QUrl("https://example.com")])

@@ -247,16 +247,25 @@ def test_linux_lists_the_apps_for_the_type(linux_desktop):
                        AppChoice("Calligra Sheets", "kde-calligra.desktop")]
 
 
+def home_file(name):
+    """A file in /home/a, spelled as this computer spells an absolute path
+    (the tests run the Linux branch on every system; on Windows a path
+    from the root has a drive)."""
+    return os.path.join(os.path.abspath(os.sep), "home", "a", name)
+
+
 def test_linux_opens_with_the_desktop_files_command(linux_desktop, monkeypatch):
     started = []
     monkeypatch.setattr(default_apps, "_start",
                         lambda command, wait=False: started.append(command) or True)
-    assert default_apps.open_with("/home/a/My Table.csv",
-                                  AppChoice("Gnumeric", "gnumeric.desktop"))
-    assert default_apps.open_with("/home/a/My Table.csv",
-                                  AppChoice("LibreOffice Calc", "libreoffice-calc.desktop"))
-    assert started == [["gnumeric", "/home/a/My Table.csv"],
-                       ["libreoffice", "--calc", "file:///home/a/My%20Table.csv"]]
+    table = home_file("My Table.csv")
+    assert default_apps.open_with(table, AppChoice("Gnumeric", "gnumeric.desktop"))
+    assert default_apps.open_with(table, AppChoice("LibreOffice Calc", "libreoffice-calc.desktop"))
+    # %f gets the path, %U the file's URL, its space encoded: on Linux
+    # "file:///home/a/My%20Table.csv".
+    url = "file://" + ("" if table.startswith("/") else "/") \
+        + table.replace(os.sep, "/").replace(" ", "%20")
+    assert started == [["gnumeric", table], ["libreoffice", "--calc", url]]
     assert not default_apps.open_with("/x.csv", AppChoice("Gone", "gone.desktop"))
 
 
@@ -265,11 +274,12 @@ def test_linux_reveal_falls_back_to_opening_the_folder(monkeypatch):
     monkeypatch.setattr(default_apps, "_linux_show_items", lambda path: False)
     opened = []
     monkeypatch.setattr(default_apps, "open_with_default", lambda path: opened.append(path) or True)
-    assert default_apps.reveal("/home/a/Table.csv")
-    assert opened == ["/home/a"]
+    table = home_file("Table.csv")
+    assert default_apps.reveal(table)
+    assert opened == [os.path.dirname(table)]
     monkeypatch.setattr(default_apps, "_linux_show_items", lambda path: True)
-    assert default_apps.reveal("/home/a/Table.csv")
-    assert opened == ["/home/a"]
+    assert default_apps.reveal(table)
+    assert opened == [os.path.dirname(table)]
 
 
 def test_linux_choose_without_a_portal_opens_nothing(monkeypatch):

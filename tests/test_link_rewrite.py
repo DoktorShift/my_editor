@@ -354,7 +354,9 @@ def test_a_note_that_changed_meanwhile_is_not_written_over(tmp_path, monkeypatch
 
     def read_then_the_editor_saves(path):
         found = real_read(path)
-        note.write_text("![](a.png) and a new sentence\n", encoding="utf-8")
+        # The editor saves the note as it was written, with its own line
+        # endings (bytes: text mode would write Windows' on Windows).
+        write(note, "![](a.png) and a new sentence\n")
         return found
 
     monkeypatch.setattr(link_rewrite, "_read_note", read_then_the_editor_saves)

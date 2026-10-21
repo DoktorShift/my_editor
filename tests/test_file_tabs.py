@@ -88,7 +88,7 @@ def test_a_viewer_tab_is_read_only_like_the_pdf_reader(window, tmp_path):
     assert wait_until(lambda: not viewer.is_loading())
     window._edit_focused("copy")
     data = QApplication.clipboard().mimeData()
-    assert [url.toLocalFile() for url in data.urls()] == [picture]
+    assert data.urls() == [QUrl.fromLocalFile(picture)]
     assert data.hasImage()
     QApplication.clipboard().clear()
 
