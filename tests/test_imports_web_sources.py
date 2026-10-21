@@ -22,6 +22,7 @@ from nostr.imports.resolvers.mdx import parse_github_tree
 from nostr.imports.sources.bluesky import (
     apply_facets,
     collect_self_thread,
+    derive_thread_title,
     parse_bluesky_url,
     post_to_markdown,
 )
@@ -475,6 +476,34 @@ class TestBlueskyPure(unittest.TestCase):
         self.assertEqual(post_to_markdown(post),
                          "look\n\n![a pic](https://cdn.example/i.jpg)")
 
+    def test_post_text_is_escaped_and_keeps_its_line_breaks(self):
+        post = bsky_post("a", "# not a heading\n*stars* and snake_case\n1. not a list")
+        self.assertEqual(
+            post_to_markdown(post),
+            "\\# not a heading  \n\\*stars\\* and snake\\_case  \n1\\. not a list")
+        # The title is plain text, without the escapes.
+        self.assertEqual(derive_thread_title(post_to_markdown(post)), "# not a heading")
+
+    def test_link_text_escaped_inside_the_link(self):
+        text = "see my_page"
+        facets = [{
+            "index": {"byteStart": 4, "byteEnd": 11},
+            "features": [{"$type": "app.bsky.richtext.facet#link",
+                          "uri": "https://x.example/a_(b)"}],
+        }]
+        self.assertEqual(apply_facets(text, facets),
+                         "see [my\\_page](https://x.example/a_%28b%29)")
+
+    def test_video_embed_links_to_the_post(self):
+        post = bsky_post("a", "watch", embed={
+            "$type": "app.bsky.embed.video#view",
+            "playlist": "https://video.bsky.app/watch/a/playlist.m3u8",
+            "alt": "A cat",
+        })
+        self.assertEqual(
+            post_to_markdown(post),
+            "watch\n\n[Video: A cat](https://bsky.app/profile/alice.bsky.social/post/a)")
+
     def test_collect_self_thread_walks_up_and_down(self):
         root = bsky_post("1", "first")
         middle = bsky_post("2", "second")
@@ -533,6 +562,22 @@ class TestBlueskyResolver(unittest.TestCase):
         self.assertIn("first post of the thread", item.content_markdown)
         self.assertIn("second post continues", item.content_markdown)
         self.assertEqual(item.categories, ("bluesky",))
+
+    def test_thread_hashtags_become_categories(self):
+        tagged = bsky_post("xyz", "about #Bitcoin today", facets=[{
+            "index": {"byteStart": 6, "byteEnd": 14},
+            "features": [{"$type": "app.bsky.richtext.facet#tag", "tag": "Bitcoin"}],
+        }])
+        thread = {"post": tagged, "replies": [{
+            "post": bsky_post("r2", "more #bitcoin", facets=[{
+                "index": {"byteStart": 5, "byteEnd": 13},
+                "features": [{"$type": "app.bsky.richtext.facet#tag", "tag": "bitcoin"}],
+            }]),
+            "replies": [],
+        }]}
+        sink = run("https://bsky.app/profile/alice.bsky.social/post/xyz",
+                   self._fetcher_for_thread(thread))
+        self.assertEqual(sink.result.feed.items[0].categories, ("Bitcoin", "bluesky"))
 
     def test_single_post_rejected(self):
         thread = {"post": bsky_post("xyz", "just one"), "replies": []}

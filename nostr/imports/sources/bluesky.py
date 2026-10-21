@@ -16,7 +16,8 @@ Facts (per the public appview, ``public.api.bsky.app``, no auth):
   (``index.byteStart/byteEnd``), so slicing must happen on the encoded
   bytes, never the Python string;
 - image embeds expose a ``fullsize`` URL + ``alt``; external embeds a
-  ``uri`` + ``title``.
+  ``uri`` + ``title``; video embeds a ``playlist`` (HLS) + ``alt``;
+- a hashtag is a facet whose feature is ``#tag`` with the ``tag``.
 
 Only the author's own posts are followed: a stranger's reply is never
 pulled into the article. The pasted post may sit anywhere in the
@@ -65,17 +66,51 @@ def parse_bluesky_url(value: Optional[str]) -> Optional[dict]:
 # Rich text + embeds (pure)                                                   #
 # --------------------------------------------------------------------------- #
 
+# What Markdown reads as syntax wherever it stands: a post's "*" or "_"
+# is a character the writer typed, not emphasis.
+_INLINE_SPECIAL = re.compile(r"([\\`*_\[\]<~])")
+# What Markdown reads as syntax at the start of a line: a heading, a
+# quote, a list item, a rule or a heading underline.
+_LINE_START_SPECIAL = re.compile(
+    r"^([ \t]*)(?:(#{1,6}(?=[ \t]|$)|[>+-](?=[ \t]|$)|[=-]+[ \t]*$)|(\d+)([.)])(?=[ \t]|$))",
+    re.MULTILINE)
+
+
+_ESCAPED = re.compile(r"\\([\\`*_\[\]<~#>+=.)-])")
+
+
+def escape_markdown(text: str) -> str:
+    """Plain post text as Markdown that reads back as the same text."""
+    return _INLINE_SPECIAL.sub(r"\\\1", text)
+
+
+def _escape_line_starts(text: str) -> str:
+    def _escape(match: re.Match) -> str:
+        if match.group(3):             # "1." starts a list: the dot is escaped
+            return f"{match.group(1)}{match.group(3)}\\{match.group(4)}"
+        return f"{match.group(1)}\\{match.group(2)}"
+    return _LINE_START_SPECIAL.sub(_escape, text)
+
+
+def _hard_breaks(text: str) -> str:
+    """A post's single line breaks are the writer's: Markdown would join
+    the lines into one, so each becomes a hard break (two spaces, as the
+    editor writes one)."""
+    return re.sub(r"[ \t]*(?<!\n)\n(?!\n)", "  \n", text)
+
+
 def apply_facets(text: str, facets) -> str:
     """Apply rich-text facets, producing Markdown.
 
     Facet ranges are UTF-8 **byte** offsets: slice the encoded bytes and
     decode each run, wrapping link facets as ``[text](uri)`` and leaving
     mentions/tags as their literal text. Overlapping or out-of-range
-    facets are skipped.
+    facets are skipped. The text around and inside the facets is
+    escaped, so what the writer typed is read as text, not as Markdown.
     """
     source = str(text or "")
     if not isinstance(facets, list) or not facets:
-        return source
+        return _escape_line_starts(escape_markdown(source))
     data = source.encode("utf-8")
     usable = sorted(
         (f for f in facets
@@ -94,8 +129,8 @@ def apply_facets(text: str, facets) -> str:
             continue
         if start < cursor or end > len(data) or end <= start:
             continue
-        out.append(data[cursor:start].decode("utf-8", errors="replace"))
-        run = data[start:end].decode("utf-8", errors="replace")
+        out.append(escape_markdown(data[cursor:start].decode("utf-8", errors="replace")))
+        run = escape_markdown(data[start:end].decode("utf-8", errors="replace"))
         link = next(
             (x for x in facet["features"]
              if isinstance(x, dict)
@@ -103,18 +138,48 @@ def apply_facets(text: str, facets) -> str:
              and x.get("uri")),
             None,
         )
-        out.append(f"[{run}]({link['uri']})" if link else run)
+        out.append(f"[{run}]({_link_target(str(link['uri']))})" if link else run)
         cursor = end
-    out.append(data[cursor:].decode("utf-8", errors="replace"))
-    return "".join(out)
+    out.append(escape_markdown(data[cursor:].decode("utf-8", errors="replace")))
+    return _escape_line_starts("".join(out))
 
 
-def _render_embed(embed) -> str:
+def _link_target(url: str) -> str:
+    """An address as a Markdown link target; spaces and parentheses in
+    it would end the link early."""
+    return (url.strip().replace(" ", "%20").replace("(", "%28").replace(")", "%29"))
+
+
+def facet_tags(record) -> List[str]:
+    """The hashtags a post's facets carry (``#tag`` features), as the
+    writer tagged them."""
+    tags: List[str] = []
+    facets = (record or {}).get("facets") if isinstance(record, dict) else None
+    for facet in facets if isinstance(facets, list) else []:
+        features = facet.get("features") if isinstance(facet, dict) else None
+        for feature in features if isinstance(features, list) else []:
+            if isinstance(feature, dict) \
+                    and feature.get("$type") == "app.bsky.richtext.facet#tag" \
+                    and str(feature.get("tag") or "").strip():
+                tags.append(str(feature["tag"]).strip().lstrip("#"))
+    return tags
+
+
+def post_url(post: dict) -> str:
+    """The post's page on bsky.app, from its at:// address and author."""
+    uri = str((post or {}).get("uri") or "")
+    author = (post or {}).get("author") or {}
+    actor = str(author.get("handle") or author.get("did") or "")
+    rkey = uri.rsplit("/", 1)[-1] if "/app.bsky.feed.post/" in uri else ""
+    return f"https://bsky.app/profile/{actor}/post/{rkey}" if actor and rkey else ""
+
+
+def _render_embed(embed, page: str = "") -> str:
     if not isinstance(embed, dict):
         return ""
     embed_type = str(embed.get("$type") or "")
     if "recordWithMedia" in embed_type:
-        return _render_embed(embed.get("media"))
+        return _render_embed(embed.get("media"), page)
     if "images" in embed_type and isinstance(embed.get("images"), list):
         parts = []
         for image in embed["images"]:
@@ -123,23 +188,31 @@ def _render_embed(embed) -> str:
             url = str(image.get("fullsize") or image.get("thumb") or "")
             if not url.lower().startswith(("http://", "https://")):
                 continue
-            alt = re.sub(r"\s+", " ", str(image.get("alt") or "")).strip()
+            alt = escape_markdown(re.sub(r"\s+", " ", str(image.get("alt") or "")).strip())
             parts.append(f"![{alt}]({url})")
         return "\n\n".join(parts)
+    if "video" in embed_type:
+        # A video is streamed as a playlist no browser opens as a page:
+        # the link goes to the post, where it plays, when that is known.
+        target = page or str(embed.get("playlist") or "")
+        if not target.lower().startswith(("http://", "https://")):
+            return ""
+        alt = escape_markdown(re.sub(r"\s+", " ", str(embed.get("alt") or "")).strip())
+        return f"[{'Video: ' + alt if alt else 'Watch the video'}]({target})"
     if "external" in embed_type and isinstance(embed.get("external"), dict):
         external = embed["external"]
         uri = external.get("uri")
         if uri:
-            title = str(external.get("title") or uri).strip()
-            return f"[{title}]({uri})"
+            title = escape_markdown(str(external.get("title") or uri).strip())
+            return f"[{title}]({_link_target(str(uri))})"
     return ""  # quote-posts (record) are not inlined into the body
 
 
 def post_to_markdown(post: dict) -> str:
     """One post -> a Markdown block (rich text + image/link embeds)."""
     record = (post or {}).get("record") or {}
-    text = apply_facets(record.get("text") or "", record.get("facets")).strip()
-    media = _render_embed((post or {}).get("embed"))
+    text = _hard_breaks(apply_facets(record.get("text") or "", record.get("facets")).strip())
+    media = _render_embed((post or {}).get("embed"), post_url(post))
     return "\n\n".join(p for p in (text, media) if p)
 
 
@@ -223,9 +296,11 @@ def derive_thread_title(markdown: str, max_len: int = 80) -> str:
     the line, which turned "Great day #nostr" into "Great day nostr",
     and on Bluesky a hashtag is a word people mean to read.
     """
-    return derive_title_from_markdown(
+    title = derive_title_from_markdown(
         markdown, max_len=max_len, fallback="Bluesky thread",
     )
+    # The post's text is escaped for Markdown; a title is plain text.
+    return _ESCAPED.sub(r"\1", title)
 
 
 def _get_json(fetcher, method: str, params: dict, on_done, on_error) -> None:
@@ -291,6 +366,12 @@ def resolve_bluesky_thread(
         root_rkey = str(root.get("uri") or "").rsplit("/", 1)[-1] or ref["rkey"]
         markdown = "\n\n".join(
             p for p in (post_to_markdown(post) for post in posts) if p)
+        # The thread's own hashtags, then where it came from.
+        tags: List[str] = []
+        for tag in [*(t for post in posts for t in facet_tags(post.get("record"))),
+                    "bluesky"]:
+            if tag.lower() not in (seen.lower() for seen in tags):
+                tags.append(tag)
         item = FeedItem(
             guid=str(root.get("uri") or ""),
             title=derive_thread_title(markdown),
@@ -299,7 +380,7 @@ def resolve_bluesky_thread(
             content_html="",
             published_at=_to_unix(
                 (root.get("record") or {}).get("createdAt")),
-            categories=("bluesky",),
+            categories=tuple(tags),
             image=None,
             author=handle or None,
             content_markdown=markdown,
