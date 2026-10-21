@@ -320,6 +320,38 @@ class TestFile:
         QTest.keyClick(QApplication.focusWidget() or sheet, Qt.Key.Key_Return)
         assert lists == [(len(parse_opml(OPML).feeds), 0, 0)]
 
+    def test_a_ghost_export_asks_where_the_blog_lives(self, controller, tmp_path):
+        from tests.test_imports_files import GHOST_4
+        sheet = FileSheet(controller)
+        sheet.show()
+        opened = []
+        sheet.opened.connect(opened.append)
+        sheet.read(self.write(tmp_path, "ghost.json", GHOST_4))
+        settle()
+        assert not sheet.site.isHidden()
+        assert buttons(sheet) == (["Continue Without Address", "Cancel", "Continue"],
+                                  "Continue")
+        assert not enabled(sheet, "continue")
+        sheet.site_address.setText("blog.example")
+        assert enabled(sheet, "continue")
+        sheet.buttons["continue"].click()
+        settle()
+        post = controller.collection(opened[0]).items[0]
+        assert post.link == "https://blog.example/first-post/"
+        assert post.image == "https://blog.example/content/images/hero.jpg"
+
+    def test_a_ghost_export_opens_without_an_address_too(self, controller, tmp_path):
+        from tests.test_imports_files import GHOST_4
+        sheet = FileSheet(controller)
+        sheet.show()
+        opened = []
+        sheet.opened.connect(opened.append)
+        sheet.read(self.write(tmp_path, "ghost.json", GHOST_4))
+        settle()
+        sheet.buttons["without"].click()
+        settle()
+        assert len(opened) == 1
+
     def test_a_file_that_is_nothing_to_import(self, controller, tmp_path):
         sheet = FileSheet(controller)
         sheet.show()
@@ -351,7 +383,7 @@ class TestFile:
         (tmp_path / "sub").mkdir()
         path = self.write(tmp_path, "blog.xml", WXR)
         asked = []
-        monkeypatch.setattr(controller, "read_file", lambda p, on_done: asked.append(p))
+        monkeypatch.setattr(controller, "read_file", lambda p, **_kw: asked.append(p))
         FileSheet(controller).read((tmp_path / "sub").as_posix() + "/../blog.xml")
         assert asked == [path]
 

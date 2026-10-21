@@ -41,6 +41,7 @@ from __future__ import annotations
 
 import os
 from typing import List, Optional
+from urllib.parse import urlsplit
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QFontDatabase
@@ -74,6 +75,7 @@ from ..imports.intake import (
     opml_titles,
 )
 from ..imports.registry import can_resolve_source
+from ..rss.discovery import normalize_user_url
 from ..imports.sources.opml import OpmlDocument, is_opml, parse_opml
 from ..imports.workspace import date_text
 from ..imports_controller import NO_SOURCES_IN_LIST, NOTHING_FOUND
@@ -616,6 +618,9 @@ class FileSheet(_Sheet):
         super().__init__(controller, _("Import a File"), dark=dark, parent=parent)
         self._document: Optional[OpmlDocument] = None
         self._dialog = None
+        # The file whose blog address is asked for (a Ghost export that
+        # writes it as a placeholder), while it is.
+        self._site_path = ""
         self.column.addWidget(text_label(_("A blog export, a feed or a Markdown file. Its "
                                            "posts open in Imports, and you choose which "
                                            "become drafts.")))
@@ -639,11 +644,40 @@ class FileSheet(_Sheet):
         self.sources = text_label("", "muted")
         self.sources.hide()
         self.column.addWidget(self.sources)
+        self._add_site()
         self._add_error()
         self._finish()
 
+    def _add_site(self) -> None:
+        self.site = QWidget()
+        column = QVBoxLayout(self.site)
+        column.setContentsMargins(0, 0, 0, 0)
+        column.setSpacing(6)
+        column.addWidget(text_label(_("This Ghost export doesn't say where the blog lives. "
+                                      "With its address, the posts keep their pictures "
+                                      "and links.")))
+        label = text_label(_("Blog address"))
+        self.site_address = QLineEdit()
+        self.site_address.setObjectName("imports_site")
+        self.site_address.setPlaceholderText(_("yourblog.com"))
+        self.site_address.setClearButtonEnabled(True)
+        self.site_address.setAccessibleName(_("Blog address"))
+        label.setBuddy(self.site_address)
+        self.site_address.textChanged.connect(lambda _text: self._update_buttons())
+        self.site_address.returnPressed.connect(self._continue_with_site)
+        column.addWidget(label)
+        column.addWidget(self.site_address)
+        self.site.hide()
+        self.column.addWidget(self.site)
+
     def _buttons(self) -> list:
         cancel = ("cancel", _("Cancel"), NORMAL, self.reject, True)
+        if self._site_path:
+            return [("without", _("Continue Without Address"), LEADING,
+                     lambda: self._read_with_site(""), not self._waiting()),
+                    cancel,
+                    ("continue", _("Continue"), DEFAULT, self._continue_with_site,
+                     bool(self._site()) and not self._waiting())]
         if self._document is not None:
             return [("choose", _("Choose Another File…"), LEADING, self.choose,
                      not self._waiting()),
@@ -676,12 +710,46 @@ class FileSheet(_Sheet):
         # slashes, also on Windows): the app's one spelling either way.
         path = file_paths.normalize(path)
         self._document = None
+        self._site_path = ""
+        self.site.hide()
         self.note.hide()
         self.sources.hide()
         generation = self._wait(_("Reading “{file}”…").format(
             file=os.path.basename(path)))
         self._controller.read_file(path, on_done=lambda collection, document, error: (
-            self._read(generation, collection, document, error)))
+            self._read(generation, collection, document, error)),
+            on_site_needed=lambda: self._ask_site(generation, path))
+
+    def _ask_site(self, generation: int, path: str) -> None:
+        """The export writes its blog's address as a placeholder: ask for
+        the address once, here, before its posts open."""
+        if not self._current(generation):
+            return
+        self._site_path = path
+        self.site.show()
+        self._update_buttons()
+        self.site_address.setFocus()
+
+    def _site(self) -> str:
+        """The typed blog address made whole, or "" while it is none."""
+        address = normalize_user_url(self.site_address.text().strip())
+        parts = urlsplit(address)
+        if parts.scheme in ("http", "https") and "." in (parts.hostname or ""):
+            return address.rstrip("/")
+        return ""
+
+    def _continue_with_site(self) -> None:
+        if self._site() and not self._waiting():
+            self._read_with_site(self._site())
+
+    def _read_with_site(self, site: str) -> None:
+        path = self._site_path
+        if not path or self._waiting():
+            return
+        generation = self._wait(_("Reading “{file}”…").format(
+            file=os.path.basename(path)))
+        self._controller.read_file(path, site_url=site, on_done=lambda collection, document,
+                                   error: self._read(generation, collection, document, error))
 
     def _read(self, generation: int, collection, document, error: str) -> None:
         if not self._current(generation):

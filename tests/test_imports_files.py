@@ -21,7 +21,11 @@ from nostr.imports.sources.archive import (
     extract_archive,
     looks_like_zip,
 )
-from nostr.imports.sources.ghost import is_ghost_export, parse_ghost_export
+from nostr.imports.sources.ghost import (
+    is_ghost_export,
+    needs_site_address,
+    parse_ghost_export,
+)
 from nostr.imports.sources.opml import is_opml, parse_opml
 from nostr.imports.sources.wxr import is_wxr, parse_wxr, post_html
 
@@ -270,6 +274,22 @@ class TestWxr(unittest.TestCase):
 # Ghost                                                                       #
 # --------------------------------------------------------------------------- #
 
+GHOST_4 = json.dumps({"db": [{"meta": {"version": "5.80.0"}, "data": {
+    "posts": [{"id": "p1", "title": "First", "slug": "first-post", "status": "published",
+               "html": '<p>Body <img src="__GHOST_URL__/content/images/in.jpg"></p>',
+               "feature_image": "__GHOST_URL__/content/images/hero.jpg",
+               "published_at": "2024-01-01T10:00:00.000Z"}],
+    "posts_meta": [{"post_id": "p1", "meta_description": "Meta description"}],
+    "tags": [{"id": "t1", "name": "Bitcoin"}, {"id": "t2", "name": "#hidden"},
+             {"id": "t3", "name": "Self Custody"}],
+    "posts_tags": [{"post_id": "p1", "tag_id": "t3", "sort_order": 2},
+                   {"post_id": "p1", "tag_id": "t1", "sort_order": 0},
+                   {"post_id": "p1", "tag_id": "t2", "sort_order": 1}],
+    "users": [{"id": "u1", "name": "Jane Doe"}],
+    "posts_authors": [{"post_id": "p1", "author_id": "u1", "sort_order": 0}],
+}}]})
+
+
 class TestGhost(unittest.TestCase):
     def test_detection(self):
         self.assertTrue(is_ghost_export(GHOST))
@@ -284,6 +304,22 @@ class TestGhost(unittest.TestCase):
         self.assertEqual(post.summary, "An excerpt")
         self.assertEqual(post.image, "https://g.example/hero.png")
         self.assertEqual(post.published_at, 1704103200)
+
+    def test_a_ghost_4_export_takes_the_blog_address(self):
+        self.assertTrue(needs_site_address(GHOST_4))
+        self.assertFalse(needs_site_address(GHOST))
+        post = parse_ghost_export(GHOST_4, site_url="https://blog.example/").items[0]
+        self.assertEqual(post.image, "https://blog.example/content/images/hero.jpg")
+        self.assertIn('src="https://blog.example/content/images/in.jpg"', post.content_html)
+        self.assertEqual(post.link, "https://blog.example/first-post/")
+        self.assertEqual(post.categories, ("Bitcoin", "Self Custody"))
+        self.assertEqual(post.author, "Jane Doe")
+        self.assertEqual(post.summary, "Meta description")
+
+    def test_without_an_address_nothing_points_at_the_placeholder(self):
+        post = parse_ghost_export(GHOST_4).items[0]
+        self.assertNotIn("__GHOST_URL__", post.content_html + (post.image or ""))
+        self.assertIsNone(post.link)
 
     def test_garbage_never_throws(self):
         self.assertEqual(parse_ghost_export("not json").items, ())

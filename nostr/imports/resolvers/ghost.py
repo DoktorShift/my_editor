@@ -47,7 +47,9 @@ def _resolve(input_: ResolveInput, ctx: ResolveContext) -> None:
         ctx.on_success(ResolveResult(url=url, feed=feed))
 
     ctx.blocking(
-        lambda: parse_ghost_export(input_.pasted_body or ""),
+        # The address the person gave for the blog, when the export
+        # writes it as a placeholder (sources/ghost.py).
+        lambda: parse_ghost_export(input_.pasted_body or "", site_url=url),
         _deliver,
         lambda exc: ctx.on_failure(SourceError(
             _("Could not read that Ghost export: {error}").format(error=exc),

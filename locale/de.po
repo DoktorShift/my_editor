@@ -758,7 +758,7 @@ msgstr "Bild einfügen"
 #: update_flow.py:152
 #: update_flow.py:171
 #: update_flow.py:178
-#: nostr/ui/imports_sheets.py:759
+#: nostr/ui/imports_sheets.py:827
 msgid "Open"
 msgstr "Öffnen"
 
@@ -5024,72 +5024,72 @@ msgstr "Ein lesbarer, verifizierter Nostr-Name wie du@{domain}, den andere erken
 msgid "{total} in total, up to {per_file} per file."
 msgstr "{total} Speicher, höchstens {per_file} pro Datei."
 
-#: nostr/imports_controller.py:103
+#: nostr/imports_controller.py:105
 msgid "The account changed. Resume when you're signed in to that account again."
 msgstr "Das Konto wurde gewechselt. Setze den Import fort, wenn du wieder mit diesem Konto angemeldet bist."
 
-#: nostr/imports_controller.py:105
+#: nostr/imports_controller.py:107
 msgid "MyEditor was closed during the import. Resume it to go on."
 msgstr "MyEditor wurde während des Imports geschlossen. Setze ihn fort, um weiterzumachen."
 
-#: nostr/imports_controller.py:106
+#: nostr/imports_controller.py:108
 msgid "Imports are checked in another MyEditor window. This one only shows them."
 msgstr "Importe werden in einem anderen MyEditor-Fenster geprüft. Dieses zeigt sie nur an."
 
-#: nostr/imports_controller.py:107
+#: nostr/imports_controller.py:109
 msgid "Couldn't show this post."
 msgstr "Dieser Beitrag konnte nicht angezeigt werden."
 
-#: nostr/imports_controller.py:112
+#: nostr/imports_controller.py:114
 #, python-brace-format
 msgid "MyEditor can't write to the folder where it keeps imports ({folder}). Check that you can write to it, then choose Nostr > Imports again. Your sources are kept."
 msgstr "MyEditor kann nicht in den Ordner schreiben, in dem es Importe speichert ({folder}). Prüfe, ob du dort schreiben darfst, und wähle dann erneut Nostr > Importe. Deine Quellen bleiben erhalten."
 
-#: nostr/imports_controller.py:115
+#: nostr/imports_controller.py:117
 msgid "The disk is full, so MyEditor can't keep imports on this computer. Free some space, then choose Nostr > Imports again. Your sources are kept."
 msgstr "Der Speicher ist voll, darum kann MyEditor Importe auf diesem Computer nicht speichern. Gib etwas Platz frei und wähle dann erneut Nostr > Importe. Deine Quellen bleiben erhalten."
 
-#: nostr/imports_controller.py:117
+#: nostr/imports_controller.py:119
 msgid "Another program is using the imports kept on this computer. Choose Nostr > Imports again in a moment."
 msgstr "Ein anderes Programm verwendet gerade die Importe auf diesem Computer. Wähle gleich noch einmal Nostr > Importe."
 
-#: nostr/imports_controller.py:119
+#: nostr/imports_controller.py:121
 msgid "The file that keeps imports on this computer is damaged, and MyEditor is open a second time. Quit the other MyEditor, then choose Nostr > Imports again."
 msgstr "Die Datei, in der MyEditor Importe auf diesem Computer speichert, ist beschädigt, und MyEditor ist ein zweites Mal geöffnet. Beende das andere MyEditor und wähle dann erneut Nostr > Importe."
 
-#: nostr/imports_controller.py:122
+#: nostr/imports_controller.py:124
 msgid "The file that keeps imports on this computer is damaged, and another program is using it, so MyEditor can't set it aside. Quit programs that might use it, such as a backup or sync app, then choose Nostr > Imports again."
 msgstr "Die Datei, in der MyEditor Importe auf diesem Computer speichert, ist beschädigt, und ein anderes Programm verwendet sie, darum kann MyEditor sie nicht beiseitelegen. Beende Programme, die sie verwenden könnten, etwa eine Backup- oder Sync-App, und wähle dann erneut Nostr > Importe."
 
-#: nostr/imports_controller.py:125
+#: nostr/imports_controller.py:127
 msgid "MyEditor can't open the imports kept on this computer. Choose Nostr > Imports again to try once more. Your sources are kept."
 msgstr "MyEditor kann die Importe auf diesem Computer nicht öffnen. Wähle erneut Nostr > Importe, um es noch einmal zu versuchen. Deine Quellen bleiben erhalten."
 
-#: nostr/imports_controller.py:127
+#: nostr/imports_controller.py:129
 msgid "The file that keeps imports on this computer was damaged, so MyEditor set it aside and started a new one. Your sources are kept; posts you had skipped show again."
 msgstr "Die Datei, in der MyEditor Importe auf diesem Computer speichert, war beschädigt. MyEditor hat sie beiseitegelegt und eine neue angelegt. Deine Quellen bleiben erhalten; übersprungene Beiträge erscheinen wieder."
 
-#: nostr/imports_controller.py:130
+#: nostr/imports_controller.py:132
 msgid "No sources were found in that list. Is it a subscription export from a feed reader?"
 msgstr "In dieser Liste wurden keine Quellen gefunden. Ist es ein Abo-Export aus einem Feedreader?"
 
-#: nostr/imports_controller.py:132
+#: nostr/imports_controller.py:134
 msgid "Nothing to import was found at that address."
 msgstr "Unter dieser Adresse wurde nichts zum Importieren gefunden."
 
-#: nostr/imports_controller.py:133
+#: nostr/imports_controller.py:135
 msgid "This post is longer than MyEditor keeps here. Open Original reads all of it, and a draft made of it gets the whole post from its page."
 msgstr "Dieser Beitrag ist länger, als MyEditor hier aufbewahrt. „Original öffnen“ zeigt ihn ganz, und ein Entwurf daraus holt den ganzen Beitrag von seiner Seite."
 
-#: nostr/imports_controller.py:135
+#: nostr/imports_controller.py:137
 msgid "MyEditor no longer keeps the text of this post here. Open Original reads it, and a draft made of it gets the post from its page."
 msgstr "MyEditor bewahrt den Text dieses Beitrags hier nicht mehr auf. „Original öffnen“ zeigt ihn, und ein Entwurf daraus holt den Beitrag von seiner Seite."
 
-#: nostr/imports_controller.py:137
+#: nostr/imports_controller.py:139
 msgid "Couldn't read the images of these posts."
 msgstr "Die Bilder dieser Beiträge konnten nicht gelesen werden."
 
-#: nostr/imports_controller.py:634
+#: nostr/imports_controller.py:636
 msgid "MyEditor Sources"
 msgstr "MyEditor-Quellen"
 
@@ -5770,7 +5770,7 @@ msgstr "Die Feed-Adresse muss mit http oder https beginnen"
 msgid "Could not download the image"
 msgstr "Bild konnte nicht heruntergeladen werden"
 
-#: nostr/imports/images.py:273
+#: nostr/imports/images.py:411
 msgid "Empty mirror response"
 msgstr "Leere Antwort beim Kopieren"
 
@@ -5824,57 +5824,57 @@ msgstr "sie leitet zu oft weiter"
 msgid "the request could not be made"
 msgstr "die Anfrage konnte nicht gestellt werden"
 
-#: nostr/imports/pipeline.py:299
+#: nostr/imports/pipeline.py:301
 msgid "(untitled)"
 msgstr "(ohne Titel)"
 
-#: nostr/imports/pipeline.py:549
+#: nostr/imports/pipeline.py:569
 msgid "Couldn't read this post's page, and its full text isn't kept here."
 msgstr "Die Seite dieses Beitrags konnte nicht gelesen werden, und sein vollständiger Text ist hier nicht gespeichert."
 
-#: nostr/imports/pipeline.py:632
+#: nostr/imports/pipeline.py:670
 #, python-brace-format
 msgid "{failed} of {total} image(s) couldn't be mirrored; originals kept."
 msgid_plural "{failed} of {total} image(s) couldn't be mirrored; originals kept."
 msgstr[0] "{failed} von {total} Bild nicht kopiert, das Original bleibt verlinkt."
 msgstr[1] "{failed} von {total} Bildern nicht kopiert, die Originale bleiben verlinkt."
 
-#: nostr/imports/pipeline.py:301
+#: nostr/imports/pipeline.py:303
 #, python-brace-format
 msgid "Item {n}/{total}: {title}"
 msgstr "Beitrag {n}/{total}: {title}"
 
-#: nostr/imports/pipeline.py:321
+#: nostr/imports/pipeline.py:323
 #, python-brace-format
 msgid "Could not normalise item: {error}"
 msgstr "Beitrag konnte nicht aufbereitet werden: {error}"
 
-#: nostr/imports/pipeline.py:408
+#: nostr/imports/pipeline.py:410
 #, python-brace-format
 msgid "Fetching chapters for '{title}'…"
 msgstr "Kapitel für „{title}“ werden geladen …"
 
-#: nostr/imports/pipeline.py:446
+#: nostr/imports/pipeline.py:448
 #, python-brace-format
 msgid "Resolving '{title}' from Nostr…"
 msgstr "„{title}“ wird aus Nostr geladen …"
 
-#: nostr/imports/pipeline.py:531
+#: nostr/imports/pipeline.py:535
 #, python-brace-format
 msgid "Fetching full text for '{title}'…"
 msgstr "Volltext für „{title}“ wird geladen …"
 
-#: nostr/imports/pipeline.py:622
+#: nostr/imports/pipeline.py:660
 #, python-brace-format
 msgid "Mirroring images {n}/{total}…"
 msgstr "Bild {n} von {total} wird kopiert …"
 
-#: nostr/imports/pipeline.py:699
+#: nostr/imports/pipeline.py:737
 #, python-brace-format
 msgid "Could not build article: {error}"
 msgstr "Artikel konnte nicht erstellt werden: {error}"
 
-#: nostr/imports/pipeline.py:717
+#: nostr/imports/pipeline.py:755
 #, python-brace-format
 msgid "Could not start draft job: {error}"
 msgstr "Entwurf konnte nicht gespeichert werden: {error}"
@@ -5945,7 +5945,7 @@ msgid "Failed"
 msgstr "Fehlgeschlagen"
 
 #: nostr/imports/workspace.py:254
-#: nostr/ui/imports_sheets.py:510
+#: nostr/ui/imports_sheets.py:512
 msgid "MyEditor reads this source when you open it."
 msgstr "MyEditor liest diese Quelle, wenn du sie öffnest."
 
@@ -6039,11 +6039,11 @@ msgstr[0] "Bluesky-Thread von {name} ({n} Beitrag)"
 msgstr[1] "Bluesky-Thread von {name} ({n} Beiträge)"
 
 #: nostr/imports/resolvers/ghost.py:41
-#: nostr/imports/sources/ghost.py:110
+#: nostr/imports/sources/ghost.py:156
 msgid "Ghost export"
 msgstr "Ghost-Export"
 
-#: nostr/imports/resolvers/ghost.py:53
+#: nostr/imports/resolvers/ghost.py:55
 #, python-brace-format
 msgid "Could not read that Ghost export: {error}"
 msgstr "Dieser Ghost-Export konnte nicht gelesen werden: {error}"
@@ -6548,8 +6548,8 @@ msgstr "Zurück"
 #: nostr/ui/account_windows.py:677
 #: nostr/ui/account_windows.py:841
 #: nostr/ui/account_windows.py:918
-#: nostr/ui/imports_sheets.py:392
-#: nostr/ui/membership_window.py:329
+#: nostr/ui/imports_sheets.py:679
+#: nostr/ui/imports_sheets.py:394
 msgid "Continue"
 msgstr "Weiter"
 
@@ -7864,7 +7864,7 @@ msgid "“{title}”: {reason}"
 msgstr "„{title}“: {reason}"
 
 #: nostr/ui/imports_activity.py:307
-#: nostr/ui/imports_sheets.py:147
+#: nostr/ui/imports_sheets.py:149
 #, python-brace-format
 msgid "and {count} more"
 msgid_plural "and {count} more"
@@ -7923,256 +7923,274 @@ msgid_plural "{n} images"
 msgstr[0] "{n} Bild"
 msgstr[1] "{n} Bilder"
 
-#: nostr/ui/imports_sheets.py:99
+#: nostr/ui/imports_sheets.py:101
 msgid "That doesn't look like the address of a website, a feed or a Nostr author."
 msgstr "Das sieht nicht nach der Adresse einer Website, eines Feeds oder eines Nostr-Autors aus."
 
-#: nostr/ui/imports_sheets.py:101
+#: nostr/ui/imports_sheets.py:103
 msgid "Add the feed's address above as well, so the links in it work."
 msgstr "Gib oben auch die Adresse des Feeds ein, damit die Links darin funktionieren."
 
-#: nostr/ui/imports_sheets.py:102
+#: nostr/ui/imports_sheets.py:104
 msgid "This address can't be followed."
 msgstr "Dieser Adresse kann nicht gefolgt werden."
 
-#: nostr/ui/imports_sheets.py:127
+#: nostr/ui/imports_sheets.py:129
 msgid "Exports and feeds (*.zip *.xml *.json *.opml *.md *.mdx *.markdown *.rss *.atom);;All files (*)"
 msgstr "Exporte und Feeds (*.zip *.xml *.json *.opml *.md *.mdx *.markdown *.rss *.atom);;Alle Dateien (*)"
 
-#: nostr/ui/imports_sheets.py:106
+#: nostr/ui/imports_sheets.py:108
 msgid "A website or a blog: example.com (MyEditor finds its feed)"
 msgstr "Eine Website oder ein Blog: example.com (MyEditor findet den Feed)"
 
-#: nostr/ui/imports_sheets.py:107
+#: nostr/ui/imports_sheets.py:109
 msgid "WordPress: example.com/feed/"
 msgstr "WordPress: example.com/feed/"
 
-#: nostr/ui/imports_sheets.py:108
+#: nostr/ui/imports_sheets.py:110
 msgid "Substack: name.substack.com/feed"
 msgstr "Substack: name.substack.com/feed"
 
-#: nostr/ui/imports_sheets.py:109
+#: nostr/ui/imports_sheets.py:111
 msgid "Ghost: example.com/rss/"
 msgstr "Ghost: example.com/rss/"
 
-#: nostr/ui/imports_sheets.py:110
+#: nostr/ui/imports_sheets.py:112
 msgid "Medium: medium.com/feed/@name"
 msgstr "Medium: medium.com/feed/@name"
 
-#: nostr/ui/imports_sheets.py:111
+#: nostr/ui/imports_sheets.py:113
 msgid "Hugo: example.com/index.xml"
 msgstr "Hugo: example.com/index.xml"
 
-#: nostr/ui/imports_sheets.py:112
+#: nostr/ui/imports_sheets.py:114
 msgid "A podcast's or a YouTube channel's feed"
 msgstr "Der Feed eines Podcasts oder eines YouTube-Kanals"
 
-#: nostr/ui/imports_sheets.py:113
+#: nostr/ui/imports_sheets.py:115
 msgid "A Nostr author: name@example.com, or a link to their profile"
 msgstr "Ein Nostr-Autor: name@example.com oder ein Link zu seinem Profil"
 
-#: nostr/ui/imports_sheets.py:114
+#: nostr/ui/imports_sheets.py:116
 msgid "A sitemap: example.com/sitemap.xml"
 msgstr "Eine Sitemap: example.com/sitemap.xml"
 
-#: nostr/ui/imports_sheets.py:115
+#: nostr/ui/imports_sheets.py:117
 msgid "A GitHub folder of Markdown files"
 msgstr "Ein GitHub-Ordner mit Markdown-Dateien"
 
-#: nostr/ui/imports_sheets.py:116
+#: nostr/ui/imports_sheets.py:118
 msgid "A list of sources: an address ending in .opml"
 msgstr "Eine Liste von Quellen: eine Adresse, die auf .opml endet"
 
-#: nostr/ui/imports_sheets.py:121
+#: nostr/ui/imports_sheets.py:123
 msgid "WordPress: Tools > Export, then choose the .xml file here."
 msgstr "WordPress: Werkzeuge > Daten exportieren, dann hier die .xml-Datei auswählen."
 
-#: nostr/ui/imports_sheets.py:122
+#: nostr/ui/imports_sheets.py:124
 msgid "Ghost: Settings > Import/Export > Export, then choose the .json file here."
 msgstr "Ghost: Settings > Import/Export > Export, dann hier die .json-Datei auswählen."
 
-#: nostr/ui/imports_sheets.py:123
+#: nostr/ui/imports_sheets.py:125
 msgid "Medium: Settings > Download your information. The .zip comes by email."
 msgstr "Medium: Settings > Download your information. Die .zip-Datei kommt per E-Mail."
 
-#: nostr/ui/imports_sheets.py:124
+#: nostr/ui/imports_sheets.py:126
 msgid "Substack: Settings > Exports > New export, then choose the .zip file here."
 msgstr "Substack: Settings > Exports > New export, dann hier die .zip-Datei auswählen."
 
-#: nostr/ui/imports_sheets.py:139
+#: nostr/ui/imports_sheets.py:141
 #, python-brace-format
 msgid "{count} post found"
 msgid_plural "{count} posts found"
 msgstr[0] "{count} Beitrag gefunden"
 msgstr[1] "{count} Beiträge gefunden"
 
-#: nostr/ui/imports_sheets.py:152
+#: nostr/ui/imports_sheets.py:154
 msgid "Follow It"
 msgid_plural "Follow All {count}"
 msgstr[0] "Folgen"
 msgstr[1] "Allen {count} folgen"
 
-#: nostr/ui/imports_sheets.py:156
+#: nostr/ui/imports_sheets.py:158
 #, python-brace-format
 msgid "This list holds {count} source."
 msgid_plural "This list holds {count} sources."
 msgstr[0] "Diese Liste enthält {count} Quelle."
 msgstr[1] "Diese Liste enthält {count} Quellen."
 
-#: nostr/ui/imports_sheets.py:304
+#: nostr/ui/imports_sheets.py:306
 msgid "Follow a Website"
 msgstr "Einer Website folgen"
 
-#: nostr/ui/imports_sheets.py:311
-#: nostr/ui/imports_sheets.py:317
+#: nostr/ui/imports_sheets.py:313
+#: nostr/ui/imports_sheets.py:319
 msgid "Website, feed or Nostr address"
 msgstr "Website, Feed oder Nostr-Adresse"
 
-#: nostr/ui/imports_sheets.py:314
+#: nostr/ui/imports_sheets.py:316
 msgid "example.com  ·  example.com/feed  ·  name@example.com"
 msgstr "example.com  ·  example.com/feed  ·  name@example.com"
 
-#: nostr/ui/imports_sheets.py:325
-#: nostr/ui/imports_sheets.py:421
+#: nostr/ui/imports_sheets.py:327
+#: nostr/ui/imports_sheets.py:423
 msgid "Show What Works Here"
 msgstr "Beispiele zeigen"
 
-#: nostr/ui/imports_sheets.py:336
-#: nostr/ui/imports_sheets.py:339
+#: nostr/ui/imports_sheets.py:338
+#: nostr/ui/imports_sheets.py:341
 msgid "Feed XML or JSON"
 msgstr "Feed als XML oder JSON"
 
-#: nostr/ui/imports_sheets.py:367
+#: nostr/ui/imports_sheets.py:369
 msgid "Paste the Feed Instead"
 msgstr "Stattdessen den Feed einfügen"
 
-#: nostr/ui/imports_sheets.py:578
+#: nostr/ui/imports_sheets.py:580
 msgid "Drop a file here"
 msgstr "Datei hier ablegen"
 
-#: nostr/ui/imports_sheets.py:616
-#: nostr/ui/imports_sheets.py:665
+#: nostr/ui/imports_sheets.py:618
+#: nostr/ui/imports_sheets.py:699
 msgid "Import a File"
 msgstr "Datei importieren"
 
-#: nostr/ui/imports_sheets.py:628
-#: nostr/ui/imports_sheets.py:660
+#: nostr/ui/imports_sheets.py:633
+#: nostr/ui/imports_sheets.py:694
 msgid "Show Where to Find Your Export"
 msgstr "Zeigen, wo du deinen Export findest"
 
-#: nostr/ui/imports_sheets.py:725
+#: nostr/ui/imports_sheets.py:659
+#: nostr/ui/imports_sheets.py:664
+msgid "Blog address"
+msgstr "Adresse des Blogs"
+
+#: nostr/ui/imports_sheets.py:662
+msgid "yourblog.com"
+msgstr "deinblog.de"
+
+#: nostr/ui/imports_sheets.py:793
 msgid "Import a Link"
 msgstr "Link importieren"
 
-#: nostr/ui/imports_sheets.py:726
-#: nostr/ui/imports_sheets.py:732
+#: nostr/ui/imports_sheets.py:794
+#: nostr/ui/imports_sheets.py:800
 msgid "Link to a post, a thread or a file"
 msgstr "Link zu einem Beitrag, einem Thread oder einer Datei"
 
-#: nostr/ui/imports_sheets.py:729
+#: nostr/ui/imports_sheets.py:797
 msgid "example.com/my-post  ·  a Bluesky or Nostr link  ·  notes.md"
 msgstr "example.com/mein-beitrag  ·  ein Bluesky- oder Nostr-Link  ·  notizen.md"
 
-#: nostr/ui/imports_sheets.py:746
+#: nostr/ui/imports_sheets.py:814
 msgid "Follow…"
 msgstr "Folgen …"
 
-#: nostr/ui/imports_sheets.py:137
+#: nostr/ui/imports_sheets.py:139
 #, python-brace-format
 msgid "{count} post found, from {when}"
 msgid_plural "{count} posts found, newest {when}"
 msgstr[0] "{count} Beitrag gefunden, von {when}"
 msgstr[1] "{count} Beiträge gefunden, neuester {when}"
 
-#: nostr/ui/imports_sheets.py:322
+#: nostr/ui/imports_sheets.py:324
 msgid "New posts wait in Imports. Nothing is published."
 msgstr "Neue Beiträge warten in den Importen. Es wird nichts veröffentlicht."
 
-#: nostr/ui/imports_sheets.py:347
+#: nostr/ui/imports_sheets.py:349
 msgid "Open the feed's address in your browser, show the page source, copy all of it and paste it here. For an XML feed, the address above is needed as well."
 msgstr "Öffne die Adresse des Feeds in deinem Browser, lass dir den Seitenquelltext anzeigen, kopiere alles und füge es hier ein. Bei einem XML-Feed brauchst du zusätzlich die Adresse oben."
 
-#: nostr/ui/imports_sheets.py:351
+#: nostr/ui/imports_sheets.py:353
 msgid "Use an Address Instead"
 msgstr "Stattdessen eine Adresse verwenden"
 
-#: nostr/ui/imports_sheets.py:383
+#: nostr/ui/imports_sheets.py:385
 msgid "Follow"
 msgstr "Folgen"
 
-#: nostr/ui/imports_sheets.py:420
+#: nostr/ui/imports_sheets.py:422
 msgid "Hide What Works Here"
 msgstr "Beispiele ausblenden"
 
-#: nostr/ui/imports_sheets.py:451
+#: nostr/ui/imports_sheets.py:453
 msgid "Reading the pasted feed…"
 msgstr "Eingefügter Feed wird gelesen …"
 
-#: nostr/ui/imports_sheets.py:501
+#: nostr/ui/imports_sheets.py:503
 msgid "You already follow this source."
 msgstr "Du folgst dieser Quelle bereits."
 
-#: nostr/ui/imports_sheets.py:619
+#: nostr/ui/imports_sheets.py:624
 msgid "A blog export, a feed or a Markdown file. Its posts open in Imports, and you choose which become drafts."
 msgstr "Ein Blog-Export, ein Feed oder eine Markdown-Datei. Die Beiträge öffnen sich in den Importen, und du wählst, welche zu Entwürfen werden."
 
-#: nostr/ui/imports_sheets.py:622
+#: nostr/ui/imports_sheets.py:627
 msgid "ZIP from Medium or Substack, WordPress XML, Ghost JSON, RSS, Atom or JSON Feed, Markdown, or a list of sources (OPML)."
 msgstr "ZIP von Medium oder Substack, WordPress-XML, Ghost-JSON, RSS, Atom oder JSON Feed, Markdown oder eine Liste von Quellen (OPML)."
 
-#: nostr/ui/imports_sheets.py:653
+#: nostr/ui/imports_sheets.py:656
+msgid "This Ghost export doesn't say where the blog lives. With its address, the posts keep their pictures and links."
+msgstr "Dieser Ghost-Export sagt nicht, wo der Blog zu finden ist. Mit seiner Adresse behalten die Beiträge ihre Bilder und Links."
+
+#: nostr/ui/imports_sheets.py:687
 msgid "Choose File…"
 msgstr "Datei auswählen …"
 
-#: nostr/ui/imports_sheets.py:659
+#: nostr/ui/imports_sheets.py:693
 msgid "Hide Where to Find Your Export"
 msgstr "Ausblenden, wo du deinen Export findest"
 
-#: nostr/ui/imports_sheets.py:704
+#: nostr/ui/imports_sheets.py:772
 msgid "Couldn't read that file."
 msgstr "Diese Datei konnte nicht gelesen werden."
 
-#: nostr/ui/imports_sheets.py:737
+#: nostr/ui/imports_sheets.py:805
 msgid "It is imported once, as a private draft, and not kept as a source."
 msgstr "Er wird einmal als privater Entwurf importiert und nicht als Quelle behalten."
 
-#: nostr/ui/imports_sheets.py:744
+#: nostr/ui/imports_sheets.py:812
 msgid "This looks like a whole source. Follow it to get its new posts too."
 msgstr "Das sieht nach einer ganzen Quelle aus. Folge ihr, um auch ihre neuen Beiträge zu bekommen."
 
-#: nostr/ui/imports_sheets.py:385
+#: nostr/ui/imports_sheets.py:387
 msgid "Show Source"
 msgstr "Quelle zeigen"
 
-#: nostr/ui/imports_sheets.py:464
-#: nostr/ui/imports_sheets.py:457
+#: nostr/ui/imports_sheets.py:466
+#: nostr/ui/imports_sheets.py:459
 #, python-brace-format
 msgid "Looking at {address}…"
 msgstr "{address} wird geprüft …"
 
-#: nostr/ui/imports_sheets.py:504
+#: nostr/ui/imports_sheets.py:506
 msgid "This is a single post. It is imported once and not kept as a source."
 msgstr "Das ist ein einzelner Beitrag. Er wird einmal importiert und nicht als Quelle behalten."
 
-#: nostr/ui/imports_sheets.py:648
+#: nostr/ui/imports_sheets.py:676
+msgid "Continue Without Address"
+msgstr "Ohne Adresse weiter"
+
+#: nostr/ui/imports_sheets.py:682
 msgid "Choose Another File…"
 msgstr "Andere Datei auswählen …"
 
-#: nostr/ui/imports_sheets.py:681
+#: nostr/ui/imports_sheets.py:717
+#: nostr/ui/imports_sheets.py:749
 #, python-brace-format
 msgid "Reading “{file}”…"
 msgstr "„{file}“ wird gelesen …"
 
-#: nostr/ui/imports_sheets.py:779
+#: nostr/ui/imports_sheets.py:847
 #, python-brace-format
 msgid "Opening {address}…"
 msgstr "{address} wird geöffnet …"
 
-#: nostr/ui/imports_sheets.py:387
+#: nostr/ui/imports_sheets.py:389
 msgid "Import Once"
 msgstr "Einmal importieren"
 
-#: nostr/ui/imports_sheets.py:508
+#: nostr/ui/imports_sheets.py:510
 msgid "MyEditor checks this feed for new posts while it's open."
 msgstr "MyEditor prüft diesen Feed auf neue Beiträge, solange es geöffnet ist."
 

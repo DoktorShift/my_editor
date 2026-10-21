@@ -63,6 +63,7 @@ from .imports.errors import LOCAL_NETWORK_MESSAGE, SourceError, friendly_message
 from .imports.feed_list import source_key
 from .imports.fulltext import extract_readable_content
 from .imports.page_meta import fill_from_page, read_page_meta
+from .imports.sources.ghost import needs_site_address
 from .rss.parser import FeedItem
 from .imports.intake import FEED, is_whole_source, kind_of, post_at, same_page
 from .imports.sources.opml import OpmlFeed, write_opml
@@ -988,11 +989,19 @@ class ImportsController(QObject):
         return collection
 
     def read_file(self, path: str, *,
-                  on_done: Callable[[Optional[Collection], Optional[object], str], None]
+                  on_done: Callable[[Optional[Collection], Optional[object], str], None],
+                  site_url: Optional[str] = None,
+                  on_site_needed: Optional[Callable[[], None]] = None,
                   ) -> None:
         """Read an export file: ``on_done(collection, None, "")`` with its
         posts, ``on_done(None, opml_document, "")`` for a list of sources,
-        or ``on_done(None, None, words for the person)``."""
+        or ``on_done(None, None, words for the person)``.
+
+        An export that writes its blog's address as a placeholder (Ghost's
+        ``__GHOST_URL__``) needs the real one for its pictures and links:
+        without ``site_url``, ``on_site_needed()`` is called instead, and
+        the file is read again with the address the person gives ("" for
+        none)."""
         generation = self._generation
 
         def read(export) -> None:
@@ -1003,8 +1012,11 @@ class ImportsController(QObject):
             elif export.items:
                 on_done(self.open_posts(kind="file", label=export.label, items=export.items,
                                         source_url=export.label), None, "")
+            elif site_url is None and on_site_needed is not None \
+                    and needs_site_address(export.text):
+                on_site_needed()
             else:
-                self.look_up_paste(export.text, "", on_done=lambda result, error: (
+                self.look_up_paste(export.text, site_url or "", on_done=lambda result, error: (
                     on_done(self.open_posts(kind="file", label=export.label,
                                             items=result.feed.items, source_url=export.label),
                             None, "") if result is not None else on_done(None, None, error)))
