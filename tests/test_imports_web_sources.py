@@ -29,6 +29,7 @@ from nostr.imports.sources.bluesky import (
 from nostr.imports.sources.mdx import mdx_to_markdown, parse_frontmatter
 from nostr.imports.sources.sitemap import (
     SITEMAP_MAX_URLS,
+    entries_to_items,
     filter_entries,
     is_article_url,
     is_sitemap,
@@ -102,6 +103,27 @@ class TestSitemapParsing(unittest.TestCase):
         urls, subs = parse_sitemap(sitemap_index(["https://x.example/s1.xml"]))
         self.assertEqual(urls, [])
         self.assertEqual([s.loc for s in subs], ["https://x.example/s1.xml"])
+
+    def test_cdata_and_entities_in_loc(self):
+        urls, _ = parse_sitemap(
+            "<urlset><url><loc><![CDATA[https://x.example/a?b=1&c=2]]></loc></url>"
+            "<url><loc>https://x.example/caf&#233;?a=1&amp;b=2</loc></url></urlset>")
+        self.assertEqual([u.loc for u in urls],
+                         ["https://x.example/a?b=1&c=2", "https://x.example/café?a=1&b=2"])
+
+    def test_publication_date_is_the_date_lastmod_is_not(self):
+        urls, _ = parse_sitemap(
+            '<urlset xmlns:news="http://www.google.com/schemas/sitemap-news/0.9">'
+            "<url><loc>https://x.example/news-post</loc><lastmod>2026-02-01</lastmod>"
+            "<news:news><news:publication_date>2025-12-24T08:00:00Z"
+            "</news:publication_date></news:news></url>"
+            "<url><loc>https://x.example/edited-post</loc>"
+            "<lastmod>2026-02-01</lastmod></url></urlset>")
+        news, edited = entries_to_items(urls)
+        self.assertEqual(news.published_at, 1766563200)
+        # A lastmod is when the page changed: the page itself tells the
+        # date when the post is imported.
+        self.assertIsNone(edited.published_at)
 
     def test_article_url_filter(self):
         self.assertTrue(is_article_url("https://x.example/2026/my-post"))

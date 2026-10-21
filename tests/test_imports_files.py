@@ -490,6 +490,22 @@ class TestOpml(unittest.TestCase):
         self.assertEqual(doc.feeds[0].title, "Blog A")
         self.assertEqual(doc.feeds[0].html_url, "https://a.example")
 
+    def test_angle_bracket_in_an_attribute_keeps_the_feed(self):
+        doc = parse_opml(
+            '<opml><body><outline text="News > Tech" title="News > Tech" '
+            'xmlUrl="https://a.example/feed"/></body></opml>')
+        self.assertEqual([(f.title, f.xml_url) for f in doc.feeds],
+                         [("News > Tech", "https://a.example/feed")])
+
+    def test_numeric_entities_read_in_titles_and_addresses(self):
+        doc = parse_opml(
+            '<opml><head><title>Joe&#8217;s list</title></head><body>'
+            '<outline text="Joe&#8217;s Blog" '
+            'xmlUrl="https://b.example/caf&#233;/feed?a=1&amp;b=2"/></body></opml>')
+        self.assertEqual(doc.title, "Joe\u2019s list")
+        self.assertEqual(doc.feeds[0].title, "Joe\u2019s Blog")
+        self.assertEqual(doc.feeds[0].xml_url, "https://b.example/caf\u00e9/feed?a=1&b=2")
+
     def test_garbage_never_throws(self):
         self.assertEqual(parse_opml("<opml><outline text='x'>").feeds, ())
         self.assertEqual(parse_opml("").feeds, ())

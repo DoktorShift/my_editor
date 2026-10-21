@@ -11,6 +11,13 @@ Shapes handled:
 - ``<urlset>`` of ``<url><loc>..</loc><lastmod>..</lastmod></url>``
 - a sitemap *index* ``<sitemapindex>`` pointing at sub-sitemaps
 - referenced from ``robots.txt`` via ``Sitemap: <url>`` lines
+- a Google News sitemap's ``<news:publication_date>``
+
+A ``<lastmod>`` is when a page last changed (a fixed typo, a new
+comment, a theme update), not when it was published, so it never
+becomes an article's date: only a News sitemap's publication date does.
+A post without one has no date yet; importing it reads its own page,
+whose published time (page_meta) fills it in.
 
 Parsed with tolerant regex: a malformed sitemap yields fewer entries,
 never an exception. Gzipped ``.xml.gz`` sitemaps are out of scope (rare
@@ -18,12 +25,14 @@ for blogs; the plain ``/sitemap.xml`` a homepage serves is what the
 fallback fetches).
 
 To keep imports sane, entries are filtered to article-like URLs (media,
-feeds, and taxonomy/pagination paths dropped), sorted newest-first by
-``lastmod``, and capped, so a 10k-URL sitemap never floods the preview.
+feeds, and taxonomy/pagination paths dropped), sorted newest-first (by
+publication date, else ``lastmod``), and capped, so a 10k-URL sitemap
+never floods the preview.
 """
 
 from __future__ import annotations
 
+import html
 import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -58,6 +67,9 @@ _SKIP_PATH_RE = re.compile(
 class SitemapEntry:
     loc: str
     lastmod: str = ""
+    # A News sitemap's <news:publication_date>: the one date in a
+    # sitemap that says when the article was published.
+    published: str = ""
 
 
 def is_sitemap(text: Optional[str]) -> bool:
@@ -65,18 +77,19 @@ def is_sitemap(text: Optional[str]) -> bool:
         _SITEMAP_ROOT_RE.search(text[:4000]))
 
 
-def _decode(value: str) -> str:
-    return (
-        str(value)
-        .replace("&lt;", "<").replace("&gt;", ">").replace("&quot;", '"')
-        .replace("&#039;", "'").replace("&apos;", "'").replace("&amp;", "&")
-    )
+_CDATA_RE = re.compile(r"^<!\[CDATA\[([\s\S]*?)\]\]>$")
 
 
 def _tag(block: str, name: str) -> str:
+    """The text of the first ``<name>`` in ``block``: a CDATA section as
+    written, anything else with its entities (named or numeric) read."""
     match = re.search(
         rf"<{name}\b[^>]*>([\s\S]*?)</{name}>", block, re.IGNORECASE)
-    return _decode(match.group(1).strip()) if match else ""
+    if not match:
+        return ""
+    inner = match.group(1).strip()
+    cdata = _CDATA_RE.match(inner)
+    return (cdata.group(1) if cdata else html.unescape(inner)).strip()
 
 
 def parse_sitemap(text: str) -> Tuple[List[SitemapEntry], List[SitemapEntry]]:
@@ -87,7 +100,8 @@ def parse_sitemap(text: str) -> Tuple[List[SitemapEntry], List[SitemapEntry]]:
     for match in _URL_BLOCK_RE.finditer(src):
         loc = _tag(match.group(1), "loc")
         if loc:
-            urls.append(SitemapEntry(loc, _tag(match.group(1), "lastmod")))
+            urls.append(SitemapEntry(loc, _tag(match.group(1), "lastmod"),
+                                     _tag(match.group(1), "news:publication_date")))
     for match in _SUB_BLOCK_RE.finditer(src):
         loc = _tag(match.group(1), "loc")
         if loc:
@@ -163,9 +177,13 @@ def title_from_url(loc: str) -> str:
 
 
 def filter_entries(entries: List[SitemapEntry]) -> List[SitemapEntry]:
-    """Article-like only, newest first by lastmod, capped."""
+    """Article-like only, newest first, capped. Which posts are newest
+    goes by the publication date where the sitemap gives one and by the
+    last change otherwise: picking the 200 to show, a recent change is
+    the best hint there is."""
     kept = [e for e in entries if is_article_url(e.loc)]
-    kept.sort(key=lambda e: _lastmod_seconds(e.lastmod), reverse=True)
+    kept.sort(key=lambda e: _lastmod_seconds(e.published) or _lastmod_seconds(e.lastmod),
+              reverse=True)
     return kept[:SITEMAP_MAX_URLS]
 
 
@@ -174,7 +192,10 @@ def entries_to_items(entries: List[SitemapEntry]) -> List[FeedItem]:
 
     Bodies are empty on purpose: every item is "thin", so the pipeline's
     full-text recovery reads the actual page at import time and also
-    upgrades the slug placeholder title (``title_from_url=True``).
+    upgrades the slug placeholder title (``title_from_url=True``). The
+    date is the publication date of a News sitemap, or none: a
+    ``lastmod`` is when the page last changed, and reading the page
+    fills in when it was published.
     """
     return [
         FeedItem(
@@ -183,7 +204,7 @@ def entries_to_items(entries: List[SitemapEntry]) -> List[FeedItem]:
             link=e.loc,
             summary=None,
             content_html="",
-            published_at=_lastmod_seconds(e.lastmod) or None,
+            published_at=_lastmod_seconds(e.published) or None,
             categories=(),
             image=None,
             author=None,

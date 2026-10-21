@@ -14,11 +14,14 @@ children. The display name is ``title`` or ``text``.
 
 Parsed with a tolerant regex scan on purpose: a hand-edited or
 vendor-quirky export must never throw. Unknown shapes just yield fewer
-feeds, never an exception.
+feeds, never an exception. A quoted attribute may hold a ``>`` (a title
+like "News > Tech"), and entities, named or numeric (``&#8217;``), are
+read in names and addresses alike.
 """
 
 from __future__ import annotations
 
+import html
 import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -26,7 +29,12 @@ from email.utils import format_datetime
 from typing import List, Optional, Sequence, Tuple
 
 
-_OUTLINE_RE = re.compile(r"<outline\b([^>]*)>", re.IGNORECASE | re.DOTALL)
+# An outline's tag runs to the first ">" outside a quoted value. A value
+# never holds a "<" (XML writes it "&lt;"), so a quote left open ends at
+# the next tag; such a broken tag is read up to its first ">" instead.
+_OUTLINE_RE = re.compile(
+    r"<outline\b((?:[^<>\"']|\"[^<\"]*\"|'[^<']*')*)>|<outline\b([^>]*)>",
+    re.IGNORECASE | re.DOTALL)
 _ATTR_RE = re.compile(
     r"([A-Za-z_:][\w:.-]*)\s*=\s*\"([^\"]*)\"|([A-Za-z_:][\w:.-]*)\s*=\s*'([^']*)'"
 )
@@ -34,15 +42,9 @@ _TITLE_RE = re.compile(r"<title\b[^>]*>([^<]*)</title>", re.IGNORECASE)
 
 
 def _decode_entities(value: str) -> str:
-    return (
-        str(value)
-        .replace("&lt;", "<")
-        .replace("&gt;", ">")
-        .replace("&quot;", '"')
-        .replace("&#039;", "'")
-        .replace("&apos;", "'")
-        .replace("&amp;", "&")  # last, so "&amp;lt;" is not double-decoded
-    )
+    """The text an attribute or the title holds: every entity read once
+    (``&amp;lt;`` is "&lt;", never "<")."""
+    return html.unescape(str(value))
 
 
 @dataclass(frozen=True)
@@ -64,7 +66,7 @@ def is_opml(text: Optional[str]) -> bool:
         return False
     head = text[:8000]
     return "<opml" in head.lower() or bool(
-        re.search(r"<outline\b[^>]*\bxmlurl\s*=", head, re.IGNORECASE))
+        re.search(r"<outline\b[^<]*\bxmlurl\s*=", head, re.IGNORECASE))
 
 
 def _attrs(tag_body: str) -> dict:
@@ -82,7 +84,7 @@ def parse_opml(text: str) -> OpmlDocument:
     feeds: List[OpmlFeed] = []
     seen: set = set()
     for match in _OUTLINE_RE.finditer(src):
-        attrs = _attrs(match.group(1))
+        attrs = _attrs(match.group(1) if match.group(1) is not None else match.group(2))
         xml_url = attrs.get("xmlurl", "").strip()
         if not xml_url:
             continue  # a category / grouping node
