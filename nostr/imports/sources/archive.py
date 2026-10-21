@@ -217,10 +217,13 @@ def _extract_medium(zf: zipfile.ZipFile) -> List[FeedItem]:
 # the "get the app" box. Matched as the start of a class name.
 _SUBSTACK_FURNITURE = ("subscription-widget", "subscribe-widget", "button-wrapper",
                        "captioned-button-wrap", "install-substack-app", "share-dialog")
-# A link to a post or to the subscribe page names the publication's
-# own address (a custom domain included).
-_SUBSTACK_OWN_LINK = re.compile(
-    r"""href=["']https?://([a-z0-9.-]+)/(?:subscribe|p/)""", re.IGNORECASE)
+# A link to the subscribe page names the publication's own address (a
+# custom domain included); a link to a post does too, unless it is to
+# another publication's, so those only count when no subscribe link does.
+_SUBSTACK_SUBSCRIBE_LINK = re.compile(
+    r"""href=["']https?://([a-z0-9.-]+)/subscribe""", re.IGNORECASE)
+_SUBSTACK_POST_LINK = re.compile(
+    r"""href=["']https?://([a-z0-9.-]+)/p/""", re.IGNORECASE)
 _NOT_A_PUBLICATION = frozenset({"substack.com", "www.substack.com", "open.substack.com"})
 _EMAIL_LIST = re.compile(r"(?:^|/)email_list\.([a-z0-9-]+)\.csv$", re.IGNORECASE)
 
@@ -244,13 +247,16 @@ def _without_substack_furniture(html: str) -> Tuple[str, Optional[str]]:
 
 def _publication_address(bodies: Iterable[str], names: Iterable[str]) -> Optional[str]:
     """The publication's own host, where its posts live: the one its
-    bodies link to for posts and subscribing most often, or else the
+    bodies link to for subscribing most often (for posts, when none
+    links to subscribing), or else the
     ``<name>.substack.com`` its subscriber list is named after."""
-    hosts = Counter(
-        host.lower() for body in bodies for host in _SUBSTACK_OWN_LINK.findall(body)
-        if host.lower() not in _NOT_A_PUBLICATION)
-    if hosts:
-        return hosts.most_common(1)[0][0]
+    bodies = list(bodies)
+    for pattern in (_SUBSTACK_SUBSCRIBE_LINK, _SUBSTACK_POST_LINK):
+        hosts = Counter(
+            host.lower() for body in bodies for host in pattern.findall(body)
+            if host.lower() not in _NOT_A_PUBLICATION)
+        if hosts:
+            return hosts.most_common(1)[0][0]
     for name in names:
         found = _EMAIL_LIST.search(name)
         if found:

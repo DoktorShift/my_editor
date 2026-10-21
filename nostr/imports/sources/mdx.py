@@ -236,7 +236,7 @@ _FENCE_OPEN_RE = re.compile(r"^(\s*)(```+|~~~+)(.*)$")
 _FENCE_CLOSE_RE = re.compile(r"^(\s*)(```+|~~~+)\s*$")
 # A placeholder for protected code: private-use characters, which no
 # document writes and which the HTML converter passes through untouched.
-_CODE_TOKEN_RE = re.compile("(\\d+)")
+_CODE_TOKEN_RE = re.compile("\\ue000(\\d+)\\ue001")
 # An inline code span: a run of backticks, its text on one paragraph,
 # then the same run again (CommonMark lets ``` `` `a` `` ``` hold one).
 _INLINE_CODE_RE = re.compile(r"(?<!`)(`+)(?!`)((?:(?!\n[ \t]*\n)[\s\S])+?)(?<!`)\1(?!`)")
@@ -246,7 +246,7 @@ _LIST_ITEM_RE = re.compile(r"^\s*(?:[-*+]|\d+[.)])\s")
 
 def _token(blocks: List[str], code: str) -> str:
     blocks.append(code)
-    return f"{len(blocks) - 1}"
+    return f"\ue000{len(blocks) - 1}\ue001"
 
 
 def _protect_fences(text: str, blocks: List[str]) -> str:

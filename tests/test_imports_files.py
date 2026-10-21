@@ -511,5 +511,20 @@ class TestOpml(unittest.TestCase):
         self.assertEqual(parse_opml("").feeds, ())
 
 
+class TestSubstackAddress(unittest.TestCase):
+    def test_the_subscribe_links_name_the_publication(self):
+        from nostr.imports.sources.archive import _publication_address
+        bodies = ['<a href="https://mine.example/subscribe">Subscribe</a>',
+                  '<a href="https://other.substack.com/p/a">a</a>'
+                  '<a href="https://other.substack.com/p/b">b</a>']
+        self.assertEqual(_publication_address(bodies, []), "mine.example")
+
+    def test_post_links_count_when_no_subscribe_link_does(self):
+        from nostr.imports.sources.archive import _publication_address
+        self.assertEqual(_publication_address(['<a href="https://mine.example/p/x">x</a>'], []),
+                         "mine.example")
+
+
+
 if __name__ == "__main__":
     unittest.main()
