@@ -165,15 +165,16 @@ sent = []
 w._media_store.upload_bytes = lambda body, name, mime_type: sent.append((name, mime_type, len(body)))
 w.nostr_state._active = True
 w._update_nostr_commands()
+w._upload_choice = lambda: "now"                    # Settings: Upload Right Away
 ed = w.new_tab()
 ed.setFocus()
 r = {}
 QTest.keyClicks(ed, "Listen:")
 w._upload_limit = lambda: 100
-w._upload_into(ed, big)
+w._add_media_file(ed, big)
 r["too_large"] = told[-1] if told else ""
 w._upload_limit = lambda: 10**9
-w._upload_into(ed, path)
+w._add_media_file(ed, path)
 doc = ed.document()
 blocks = []
 b = doc.begin()
@@ -182,7 +183,7 @@ while b.isValid():
 r["blocks"] = blocks
 r["media_block"] = ed.is_media_block(doc.findBlockByNumber(1))
 r["sent"] = sent
-w._upload_into(ed, path)                 # the same file again: one upload
+w._add_media_file(ed, path)                 # the same file again: one upload
 r["sent_twice"] = len(sent)
 ed.undo()
 w._refresh_asset_in_documents(sha)
@@ -198,8 +199,10 @@ r["note_pending"] = w._publish_text(ed, "note")
 r["plain_pending"] = serialize_plain_with_images(doc, lambda fmt: None)
 r["html_pending"] = "Uploading" in document_to_html(
     doc, asset_resolver=w._asset_manager.export_view)
-r["gate_pending"] = w._confirm_images_uploaded(ed)
-r["gate_said"] = told[-1]
+gate, told_before = [], len(told)
+w._after_uploads(ed, lambda: gate.append(True))
+r["gate_pending"] = bool(gate)
+r["gate_said"] = told[told_before:]
 snapshot = doc.toHtml()
 r["crash_keeps_object"] = f"myeditor-asset:{sha}" in snapshot and "Uploading" not in snapshot
 # Closing while it uploads asks, Cancel the default (the stand-in answers Cancel).
@@ -228,7 +231,8 @@ content, records = w._publish_payload(ed, "markdown")
 r["published"] = content
 r["published note"] = w._publish_text(ed, "note")
 r["imeta"] = build_imeta_tags(records, content)
-r["gate_done"] = w._confirm_images_uploaded(ed)
+app.processEvents()                         # what waits is told from the event loop
+r["gate_done"] = bool(gate)                 # publishing went on by itself
 # Undo takes back the person's typing, not the finished upload.
 ed.undo()
 r["after_undo"] = [doc.findBlockByNumber(i).text() for i in range(doc.blockCount())]
@@ -268,7 +272,8 @@ def test_audio_in_the_window(tmp_path):
         assert SHA not in r[written] and "Uploading" not in r[written]  # M3
         assert "Notes" in r[written]
     assert r["html_pending"] is False and r["crash_keeps_object"] is True
-    assert r["gate_pending"] is False and r["gate_said"] == "Audio or video is still uploading"
+    # Publishing waits for the upload already on its way, asking nothing.
+    assert r["gate_pending"] is False and r["gate_said"] == []
     # Closing a changed document while its audio uploads: one question,
     # the save one, saying what happens to the upload (L4, review).
     [close] = r["close_asked"]
@@ -311,12 +316,13 @@ w.show()
 w._media_store.upload_bytes = lambda body, name, mime_type: None
 w.nostr_state._active = True
 w._update_nostr_commands()
+w._upload_choice = lambda: "now"                    # Settings: Upload Right Away
 w._upload_limit = lambda: 10**9
 r = {}
 ed = w.new_tab()
 ed.setFocus()
 QTest.keyClicks(ed, "Before.")
-w._upload_into(ed, song)
+w._add_media_file(ed, song)
 QTest.keyClicks(ed, "After.")
 w._save_to(os.path.join(folder, "during.rmd"))
 r["during"] = open(os.path.join(folder, "during.rmd"), encoding="utf-8").read()
@@ -358,7 +364,7 @@ app = QApplication(sys.argv[:1])
 import main_window
 from nostr.blossom.store import MediaFile
 
-song, sha, folder = sys.argv[2], sys.argv[3], sys.argv[4]
+song, sha, folder, ext = sys.argv[2], sys.argv[3], sys.argv[4], sys.argv[5]
 asked = []
 main_window._ask_save_changes = lambda parent, title, **kw: (asked.append(title), "cancel")[1]
 w = main_window.MainWindow()
@@ -366,16 +372,17 @@ w.show()
 w._media_store.upload_bytes = lambda body, name, mime_type: None
 w.nostr_state._active = True
 w._update_nostr_commands()
+w._upload_choice = lambda: "now"                    # Settings: Upload Right Away
 w._upload_limit = lambda: 10**9
 r = {}
 ed = w.new_tab()
 ed.setFocus()
 QTest.keyClicks(ed, "Before.")
-w._upload_into(ed, song)
+w._add_media_file(ed, song)
 QTest.keyClicks(ed, "After.")
-path = os.path.join(folder, "doc.md")
+path = os.path.join(folder, "doc" + ext)
 w._save_to(path)
-r["saved during"] = open(path, encoding="utf-8").read()
+r["saved during"] = open(path, encoding="utf-8").read() if ext == ".md" else ""
 r["modified after save"] = ed.document().isModified()
 r["said at save"] = w.status.currentMessage()
 url = f"https://cdn.example/{sha}"
@@ -389,7 +396,7 @@ r["said after upload"] = w.status.currentMessage()
 w.close_tab(w.tabs.currentIndex())
 r["close asked"] = len(asked)
 w._save_to(path)
-r["saved after"] = open(path, encoding="utf-8").read()
+r["saved after"] = open(path, encoding="utf-8").read() if ext == ".md" else ""
 r["modified after second save"] = ed.document().isModified()
 ed.document().setModified(False)
 w.close()
@@ -397,22 +404,33 @@ print("RESULT " + json.dumps(r))
 """
 
 
-def test_a_document_saved_while_its_audio_uploads_is_edited_again_when_it_is_done(tmp_path):
+def test_a_pdf_saved_while_its_audio_uploads_is_edited_again_when_it_is_done(tmp_path):
     """Review N1, as Pages does when an inserted item finishes loading after
-    a save: the save writes what it can, says the file goes in once
-    uploaded, and the document is edited again when it is, so Close and
-    Quit ask."""
+    a save: a PDF links to the file once it is on a media server, so the
+    save says it goes in once uploaded, and the document is edited again
+    when it is, so Close and Quit ask."""
     song = tmp_path / "song.mp3"
     song.write_bytes(BODY)
-    r = run_window_script(SAVED_DURING_SCRIPT, tmp_path, str(song), SHA, str(tmp_path))
-    assert r["saved during"] == "Before.\n\nAfter.\n" and SHA not in r["saved during"]
+    r = run_window_script(SAVED_DURING_SCRIPT, tmp_path, str(song), SHA, str(tmp_path), ".pdf")
     assert r["modified after save"] is False
     assert "“song.mp3” goes into the file once it is uploaded" in r["said at save"]
     assert r["modified after upload"] is True
     assert r["said after upload"] == "“song.mp3” is uploaded. Save the document to put it in."
     assert r["close asked"] == 1
-    assert f"Before.\n\n{URL}.mp3\n\nAfter." in r["saved after"]
     assert r["modified after second save"] is False
+
+
+def test_a_markdown_file_saved_while_its_audio_uploads_holds_it_at_once(tmp_path):
+    """A .md file carries the file as a copy beside itself, as it does a
+    picture: nothing is left out, so nothing is to be saved again later."""
+    song = tmp_path / "song.mp3"
+    song.write_bytes(BODY)
+    r = run_window_script(SAVED_DURING_SCRIPT, tmp_path, str(song), SHA, str(tmp_path), ".md")
+    assert r["saved during"] == f"Before.\n\n[song.mp3](doc_media/{SHA}.mp3)\n\nAfter.\n"
+    assert (tmp_path / "doc_media" / f"{SHA}.mp3").read_bytes() == BODY
+    assert r["said at save"].startswith("Saved: ")
+    assert r["modified after upload"] is False
+    assert r["close asked"] == 0
 
 
 def _exported(asset, alt="song.mp3"):
@@ -505,12 +523,13 @@ w.show()
 w._media_store.upload_bytes = lambda body, name, mime_type: None
 w.nostr_state._active = True
 w._update_nostr_commands()
+w._upload_choice = lambda: "now"                    # Settings: Upload Right Away
 w._upload_limit = lambda: 10**9
 url = f"https://cdn.example/{sha}"
 r = {}
 source = w.new_tab()
 source.setFocus()
-w._upload_into(source, song)
+w._add_media_file(source, song)
 w._media_store.upload_status.emit(f"myeditor-asset:{sha}", "uploading")
 w._media_store.upload_finished.emit(f"myeditor-asset:{sha}", MediaFile(
     hash=sha, url=url, mime_type="audio/mpeg", size=1,
@@ -593,7 +612,7 @@ w.nostr_state._active = True
 w._update_nostr_commands()
 w._upload_limit = lambda: 10**9
 ed = w.new_tab()
-w._upload_into(ed, song)
+w._add_media_file(ed, song)
 
 def fill():
     image = ed.document().resource(QTextDocument.ImageResource, QUrl(f"myeditor-asset:{sha}"))
@@ -680,7 +699,7 @@ w._upload_limit = lambda: 10**9
 ed = w.new_tab()
 ed.setFocus()
 QTest.keyClicks(ed, "Top")
-w._upload_into(ed, song)
+w._add_media_file(ed, song)
 doc = ed.document()
 
 def blocks():
@@ -737,7 +756,7 @@ w.nostr_state._active = True
 w._update_nostr_commands()
 w._upload_limit = lambda: 10**9
 ed = w.new_tab()
-w._upload_into(ed, song)
+w._add_media_file(ed, song)
 r = {}
 for code in ("UPLOAD_FAILED", "NETWORK_UNAVAILABLE", "PAYMENT_REQUIRED"):
     w._on_asset_upload_failed(sha, code)
@@ -772,9 +791,10 @@ w.show()
 w._media_store.upload_bytes = lambda body, name, mime_type: None
 w.nostr_state._active = True
 w._update_nostr_commands()
+w._upload_choice = lambda: "now"                    # Settings: Upload Right Away
 w._upload_limit = lambda: 10**9
 ed = w.new_tab()
-w._upload_into(ed, song)
+w._add_media_file(ed, song)
 r = {"checks while uploading": list(w._preview_content(ed, "article").checks)}
 url = f"https://cdn.example/{sha}"
 w._media_store.upload_status.emit(f"myeditor-asset:{sha}", "uploading")
@@ -795,7 +815,7 @@ def test_the_preview_shows_the_file_as_readers_do_and_says_while_it_uploads(tmp_
     song = tmp_path / "song.mp3"
     song.write_bytes(BODY)
     r = run_window_script(PREVIEW_SCRIPT, tmp_path, str(song), SHA)
-    assert any("still uploading" in check for check in r["checks while uploading"])
+    assert any("not on your media servers yet" in check for check in r["checks while uploading"])
     assert r["name"] == "song.mp3"
     assert r["document preview"] == f"{URL}.mp3"
 
@@ -860,11 +880,12 @@ sent = []
 w._media_store.upload_bytes = lambda body, *, name, mime_type, **kw: sent.append(name)
 w.nostr_state._active = True
 w._update_nostr_commands()
+w._upload_choice = lambda: "now"                    # Settings: Upload Right Away
 w._upload_limit = lambda: 10**9
 ed = w.new_tab()
 ed.setFocus()
 ed.textCursor().insertText("Before.")
-w._upload_into(ed, song)
+w._add_media_file(ed, song)
 r = {"right away": ed.toPlainText()}
 ed.textCursor().insertText(" Typed meanwhile.")          # the window answers meanwhile
 for _ in range(200):
@@ -941,7 +962,7 @@ w._upload_limit = lambda: 10**9
 ed = w.new_tab()
 ed.setFocus()
 QTest.keyClicks(ed, "Top")
-w._upload_into(ed, song)
+w._add_media_file(ed, song)
 doc = ed.document()
 
 def blocks():
@@ -1014,11 +1035,12 @@ w.show()
 w._media_store.upload_bytes = lambda body, *, name, mime_type: None
 w.nostr_state._active = True
 w._update_nostr_commands()
+w._upload_choice = lambda: "now"                    # Settings: Upload Right Away
 w._upload_limit = lambda: 10**9
 ed = w.new_tab()
 ed.setFocus()
 QTest.keyClicks(ed, "Words")
-w._upload_into(ed, song)
+w._add_media_file(ed, song)
 url = f"https://cdn.example/{sha}"
 w._media_store.upload_status.emit(f"myeditor-asset:{sha}", "uploading")
 w._media_store.upload_finished.emit(f"myeditor-asset:{sha}", MediaFile(
@@ -1102,7 +1124,7 @@ r = {}
 ed = w.new_tab()
 ed.setFocus()
 ed.textCursor().insertText("Abandoned.")
-w._upload_into(ed, song)
+w._add_media_file(ed, song)
 w.close_tab(w.tabs.currentIndex())
 for _ in range(100):
     app.processEvents()
@@ -1115,7 +1137,7 @@ r["closed: kept"] = w._media_image_loader.cache_path(sha).exists()
 ed = w.new_tab()
 ed.setFocus()
 ed.textCursor().insertText("Before.")
-w._upload_into(ed, song)
+w._add_media_file(ed, song)
 typing = ed.textCursor()
 typing.insertText(" Typed meanwhile.")
 typing.insertBlock()
@@ -1149,6 +1171,68 @@ def test_a_file_still_read_when_its_document_closes_goes_nowhere(tmp_path):
     assert r["typed: blocks"][-1] == "A paragraph typed meanwhile."
 
 
+LOCAL_SCRIPT = r"""
+import json, os, sys, threading
+sys.path.insert(0, sys.argv[1])
+os.environ["QT_QPA_PLATFORM"] = "offscreen"
+from PySide6.QtWidgets import QApplication
+app = QApplication(sys.argv[:1])
+import main_window
+from doc_walk import iter_image_names
+
+song, sha, folder = sys.argv[2], sys.argv[3], sys.argv[4]
+w = main_window.MainWindow()
+w.show()
+sent = []
+w._media_store.upload_bytes = lambda body, *, name, mime_type, **kw: sent.append(name)
+w.nostr_state._active = True
+w._update_nostr_commands()
+w._upload_limit = lambda: 10**9
+ed = w.new_tab()
+ed.setFocus()
+ed.textCursor().insertText("Listen:")
+w._add_media_file(ed, song)
+for _ in range(200):
+    app.processEvents()
+    if list(iter_image_names(ed.document())):
+        break
+    threading.Event().wait(0.01)
+r = {"names": list(iter_image_names(ed.document())), "sent": sent,
+     "state": w._asset_manager.get(sha).upload_state.value,
+     "badge": w._media_badge(ed, f"myeditor-asset:{sha}").words}
+path = os.path.join(folder, "My Trip.md")
+w._save_to(path)
+r["saved"] = open(path, encoding="utf-8").read()
+r["copy"] = os.path.exists(os.path.join(folder, "My Trip_media", sha + ".mp3"))
+w.close_tab(w.tabs.currentIndex())
+w.open_path(path)
+app.processEvents()
+r["reopened"] = list(iter_image_names(w.current_editor().document()))
+r["sent at last"] = sent
+w.current_editor().document().setModified(False)
+w.close()
+print("RESULT " + json.dumps(r))
+"""
+
+
+def test_audio_added_stays_on_this_computer_and_survives_a_save(tmp_path):
+    """Added, it stays on this computer, its badge says so, and nothing is
+    sent; a .md file keeps it as a copy beside itself (a link to it, which
+    a folder name with a space must not break) and reopens it as its card."""
+    song = tmp_path / "song.mp3"
+    song.write_bytes(BODY)
+    folder = tmp_path / "docs"
+    folder.mkdir()
+    r = run_window_script(LOCAL_SCRIPT, tmp_path, str(song), SHA, str(folder))
+    assert r["names"] == [f"myeditor-asset:{SHA}"]
+    assert r["sent"] == [] and r["state"] == "local"
+    assert r["badge"] == "On This Computer"
+    assert f"[song.mp3](<My Trip_media/{SHA}.mp3>)" in r["saved"]
+    assert r["copy"] is True
+    assert r["reopened"] == [f"myeditor-asset:{SHA}"]
+    assert r["sent at last"] == []
+
+
 QUIT_READ_SCRIPT = r"""
 import json, os, sys, threading
 sys.path.insert(0, sys.argv[1])
@@ -1169,7 +1253,7 @@ w.nostr_state._active = True
 w._update_nostr_commands()
 w._upload_limit = lambda: 10**9
 ed = w.new_tab()
-w._upload_into(ed, song)
+w._add_media_file(ed, song)
 ed.document().setModified(False)
 event = QCloseEvent()
 w.closeEvent(event)                       # quitting while the file is read
@@ -1220,7 +1304,7 @@ def slow_put(data):
 
 store.put_bytes = slow_put
 ed = w.new_tab()
-w._upload_into(ed, song)
+w._add_media_file(ed, song)
 ed.document().setModified(False)
 # Quit while the copy is being written, or just after it was kept but
 # before its result was handled; no event is handled after that, as when
@@ -1273,9 +1357,9 @@ def counted_put(data):
 
 store.put_bytes = counted_put
 first = w.new_tab()
-w._upload_into(first, song)
+w._add_media_file(first, song)
 second = w.new_tab()
-w._upload_into(second, song)
+w._add_media_file(second, song)
 puts.acquire(timeout=10)                  # both reads have kept their copy
 puts.acquire(timeout=10)
 w.close_tab(w._editor_widget_index(first))
@@ -1329,7 +1413,7 @@ w._asset_manager.store_media_file = failing_read
 r = {}
 for case in ("closed", "open"):
     ed = w.new_tab()
-    w._upload_into(ed, song)
+    w._add_media_file(ed, song)
     if case == "closed":
         w.close_tab(w._editor_widget_index(ed))
     closed.set()

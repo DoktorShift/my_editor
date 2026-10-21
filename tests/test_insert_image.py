@@ -7,8 +7,8 @@ What must hold:
   Insert > Image… opens the system's file dialog and puts the chosen
   picture in at the caret exactly as dropping that file there does: the
   same path (MainWindow._handle_dropped_images), one step of Undo (called
-  "Image"), and, while a Nostr account is in use, the same offer to upload
-  it. Cancelling the dialog changes nothing.
+  "Image"), and, while a Nostr account is in use, kept on this computer
+  without a question, as a drop is. Cancelling the dialog changes nothing.
 
   It is offered where a document can keep a picture as Markdown or HTML
   does (Markdown and HTML documents, new documents), not in plain text,
@@ -77,7 +77,7 @@ answer[0] = ""
 w.act_insert_image.trigger()
 r["cancelled"] = [ed.toPlainText(), ed.undo_name()]
 
-# With an account in use: the same offer a drop makes.
+# With an account in use: no question, as a drop asks none.
 answer[0] = picture
 w.nostr_state._active = True
 w._update_nostr_commands()
@@ -85,6 +85,7 @@ w._profile_store.default = lambda: types.SimpleNamespace(
     user_pubkey="ab" * 32, display_name="Me", npub_short=lambda: "npub1me")
 w.act_insert_image.trigger()
 r["account"] = asked[:]
+r["account_inserted"] = ed.toPlainText().count("\ufffc")
 r["menu_account"] = titles()
 
 # Where a picture cannot be kept, it is dimmed.
@@ -120,7 +121,7 @@ def test_insert_image_is_a_drop_of_the_chosen_file(r):
     assert "*.png" in r["filters"] and "*.jpg" in r["filters"]
     assert r["undone"] == "Look: "
     assert r["cancelled"] == ["Look: ", "Typing"]
-    assert r["account"] == ["Upload 1 image to your media servers?"]
+    assert r["account"] == [] and r["account_inserted"] == 1
 
 
 def test_one_image_item_in_the_insert_menu(r):

@@ -71,6 +71,7 @@ from commands import (
 )
 import front_matter
 import tab_details
+import media_badge
 import media_files
 import slash_menu
 from slash_menu import SlashItem
@@ -86,7 +87,8 @@ from preview_pane import (
 from nostr import preview as preview_module
 from nostr.preview import Article as PreviewArticle
 from doc_walk import (
-    image_positions, iter_blocks, iter_image_names, serialize_plain_with_images,
+    image_positions, iter_block_runs, iter_blocks, iter_image_names,
+    serialize_plain_with_images,
 )
 from markdown_writer import (
     document_to, document_to_markdown, has_local_only_formatting, holds_faithfully,
@@ -110,7 +112,7 @@ from updater import (
     sweep_stale_downloads,
 )
 from alerts import (
-    CANCEL, DEFAULT, DESTRUCTIVE, NORMAL, Button, ask, ask_with_checkbox,
+    CANCEL, DEFAULT, DESTRUCTIVE, NORMAL, Button, ask,
     confirm_destructive, inform,
 )
 from update_dialog import UpdateDialog, WhatsNewDialog
@@ -118,7 +120,8 @@ from settings_window import SettingsWindow
 from update_flow import AUTOMATIC, guide_url, plan_for
 import theme
 from export_html import (
-    document_to_html, image_data_uri, normalize_after_set_html, sniff_image_ext)
+    MEDIA_EMBED_LIMIT, document_to_html, image_data_uri, normalize_after_set_html,
+    sniff_image_ext)
 from find_replace import find_all, replace_all, replace_match, visible_matches
 from word_count import count_words, reading_minutes
 from export_pdf import export_pdf, load_page_setup
@@ -146,7 +149,11 @@ _SUPPORTED_EXTS = {'.md', '.html', '.htm', '.txt', '.rmd', '.pdf'}
 _IMAGE_EXTS = image_safety.IMAGE_FILE_SUFFIXES
 
 
-# Persisted answer to the paste-upload prompt: "ask" | "always" | "never".
+# When a picture, audio or video added to a document goes to the media
+# servers, while a Nostr account is in use: "publishing" (it stays on this
+# computer until the document is published or saved as a draft) | "now".
+_UPLOAD_SETTING = "upload_added_media"
+# What an earlier version asked of pasted images: "always" uploaded them.
 _PASTE_UPLOAD_SETTING = "upload_pasted_images"
 
 # How much larger Format > Style names each heading than Body, by level: in
@@ -233,9 +240,10 @@ from nostr.drafts import (
 from nostr.known_people import KnownPeople, Person
 from nostr.media.assets import ASSET_SCHEME, AssetState, asset_key, parse_asset_key
 from nostr.imports.sources.nostr import RelayQueryAdapter
-from nostr.media.manager import AssetManager
+from nostr.media.manager import MAX_MEDIA_BYTES, AssetManager
 from nostr.media.media_visibility import MediaVisibility
 from nostr.media.private_library import PrivateLibrary
+from nostr.media.upload_wait import UploadWait
 from nostr.media.publish_copy import PublicCopyMaker
 from nostr.media.visibility import PublicLedger
 from nostr.metadata import AvatarLoader, ProfileMetadataFetcher, can_receive_zaps
@@ -774,6 +782,7 @@ class MainWindow(QMainWindow):
         )
         self._asset_manager.asset_changed.connect(self._refresh_asset_in_documents)
         self._asset_manager.asset_changed.connect(self._on_media_uploaded)
+        self._asset_manager.asset_changed.connect(lambda _sha: self._redraw_badges())
         self._asset_manager.asset_upload_failed.connect(self._on_asset_upload_failed)
         # Pictures a document names by a web address (an article or draft
         # reopened, a page pasted): fetched through the importer's network
@@ -781,6 +790,9 @@ class MainWindow(QMainWindow):
         # in the text and its preview when they arrive.
         self._web_images = RemoteImages(fetcher=BlobFetcher(self), parent=self)
         self._web_images.ready.connect(self._on_web_image_ready)
+        # What waits for files to be uploaded first, by document and
+        # purpose (publishing, or saving a draft): _after_uploads.
+        self._upload_waits = {}
         # Audio and video uploading from a document show how far they have
         # got on their cards (the upload's own indicator), redrawn while
         # any is on its way so the bar keeps moving.
@@ -1167,6 +1179,12 @@ class MainWindow(QMainWindow):
             current.close()
             ed.set_spelling(None)
 
+    def _redraw_badges(self) -> None:
+        """Where each picture, audio or video is moved on (media_badge.py),
+        or Nostr came or went: every open document shows it again."""
+        for ed in self._all_editors():
+            ed.viewport().update()
+
     def _all_editors(self) -> list:
         found = []
         for i in range(self.tabs.count()):
@@ -1383,6 +1401,7 @@ class MainWindow(QMainWindow):
         ed.set_local_image_resolver(lambda name, e=ed: self._resolve_local_image(e, name))
         ed.set_web_image_resolver(self._resolve_web_image)
         ed.set_library_check(lambda url: self._library_file_at(url) is not None)
+        ed.set_media_badges(lambda name, e=ed: self._media_badge(e, name))
         ed.media_clicked.connect(self._on_media_clicked)
         ed.image_pasted.connect(lambda img, e=ed: self._handle_pasted_image(e, img))
         ed.notice.connect(lambda text: self.status.showMessage(text, 8000))
@@ -1435,14 +1454,28 @@ class MainWindow(QMainWindow):
         letting Qt fall back to the working directory also keeps the
         bytes inside the decode allowlist.
         """
+        data = self._local_image_bytes(editor, name)
+        return image_safety.decode_image_bytes(data) if data else None
+
+    @staticmethod
+    def _has_local_image(editor, name: str) -> bool:
+        """Whether a picture named relative to the editor's own file is
+        there (without reading it: asked while painting)."""
+        path = getattr(editor, "_file_path", "") or ""
+        if not path:
+            return False
+        root = os.path.dirname(os.path.abspath(path))
+        found = image_safety.ImageRootPolicy((root,)).resolve(name)
+        return found is not None and found.is_file()
+
+    @staticmethod
+    def _local_image_bytes(editor, name: str) -> Optional[bytes]:
+        """The bytes of a picture named relative to the editor's own file."""
         path = getattr(editor, "_file_path", "") or ""
         if not path:
             return None
         root = os.path.dirname(os.path.abspath(path))
-        data = image_safety.ImageRootPolicy((root,)).read(name)
-        if not data:
-            return None
-        return image_safety.decode_image_bytes(data)
+        return image_safety.ImageRootPolicy((root,)).read(name) or None
 
     # ----------------------------------------------------------------------
     # EDITOR / TAB HELPERS
@@ -2566,8 +2599,8 @@ class MainWindow(QMainWindow):
                     keywords=(_("inspector"), _("title"), _("summary"), _("cover"),
                               _("hashtags"))),
             toggled=self._show_article_details_panel)
-        # Audio or video, uploaded to the media servers and put in the text
-        # as its address, where readers show a player.
+        # Audio or video, put in the text as a card, and published as its
+        # address on the media servers, where readers show a player.
         self.act_insert_audio_video = add(
             Command("nostr.insert_audio_video", _("Insert Audio or Video…"), NOSTR,
                     "Ctrl+Shift+J", nostr=True, keywords=(_("audio"), _("video"), _("podcast"), _("music"),
@@ -3642,7 +3675,7 @@ class MainWindow(QMainWindow):
                 image_paths.append(path)
             elif media_files.is_audio_or_video(path) and self._may_insert_audio_video(
                     self.current_editor()):
-                self._upload_into(self.current_editor(), path)
+                self._add_media_file(self.current_editor(), path)
             else:
                 unsupported.append(os.path.basename(path))
 
@@ -3665,9 +3698,9 @@ class MainWindow(QMainWindow):
         one step of Undo called ``step`` (an N_ word; a paste's own
         name stays the paste's).
 
-        The insert never waits for a signer or a server. Uploading is
-        offered afterwards, and declining costs nothing: the image is
-        already in the document either way.
+        The insert never waits for a signer or a server, and asks nothing:
+        a picture added stays on this computer until the document is
+        published (_upload_added).
         """
         ed = self.current_editor()
         if ed is None:
@@ -3701,34 +3734,23 @@ class MainWindow(QMainWindow):
             self.status.showMessage(
                 _("Could not add: {names}").format(names=", ".join(refused)), 5000
             )
-        if not adopted:
-            return
+        for asset in adopted:
+            self._upload_added(asset)
 
-        pending = [a for a in adopted if not a.is_uploaded]
-        if not pending:
-            return
-        if self._profile_store.default() is None:
-            return          # a local image; nothing of Nostr without an account
-
-        count = len(pending)
-        upload = ask(
-            self,
-            title=ngettext("Upload {count} image to your media servers?",
-                           "Upload {count} images to your media servers?",
-                           count).format(count=count),
-            message=_("Anyone with the link can view them. They’re already in your "
-                      "document and stay there either way."),
-            buttons=(Button(_("Keep Local"), False, CANCEL), Button(_("Upload"), True, DEFAULT)))
-        if not upload:
-            return
-        for asset in pending:
+    def _upload_added(self, asset) -> None:
+        """A picture, audio or video just added to a document: on its way
+        to the media servers only when the person chose Upload Right Away
+        in Settings; else it stays on this computer, its badge says so, and
+        publishing uploads it (_after_uploads). Nothing of Nostr without an
+        account."""
+        if self.nostr_state.active and self._upload_choice() == "now":
             self._asset_manager.request_upload(asset.sha256)
 
     def _insert_image(self) -> None:
         """Insert > Image…: a picture file chosen in the system's dialog,
         put in at the caret exactly as dropping it there would
-        (_handle_dropped_images: one step of Undo, and the offer to upload
-        it while a Nostr account is in use)."""
+        (_handle_dropped_images: one step of Undo, kept on this computer
+        until the document is published)."""
         ed = self.current_editor()
         if ed is None or self._editor_kind(ed) != "rich":
             return
@@ -3928,65 +3950,148 @@ class MainWindow(QMainWindow):
         """
         return any(True for _ in iter_image_names(ed.document()))
 
-    def _unpublishable_images(self, doc) -> list:
-        """Image names that would break for a reader of a published event.
-
-        An asset with no upload has no address anyone else can fetch,
-        and a bare local path means even less to a stranger. A foreign
-        http(s) or data: image is already readable and passes.
-        """
-        blocked = []
-        for name in dict.fromkeys(iter_image_names(doc)):
-            sha = parse_asset_key(name)
-            if sha is None:
-                if not image_safety.is_portable_image_source(name):
-                    blocked.append(name)
+    def _local_objects(self, ed) -> tuple:
+        """What of ``ed`` readers could not see yet: ``(assets, missing)``,
+        the files on this computer only that publishing uploads first, and
+        the names of pictures that cannot be (a file beside the document
+        that is gone). A picture or a file on the web already is neither."""
+        assets, missing = [], []
+        for name in dict.fromkeys(iter_image_names(ed.document())):
+            if parse_asset_key(name) is None and image_safety.is_portable_image_source(name):
                 continue
-            asset = self._asset_manager.get(sha)
-            if asset is None or not asset.is_uploaded:
-                blocked.append(name)
-        return blocked
+            asset = self._asset_named(ed, name, adopt=True)
+            if asset is None:
+                missing.append(name)
+            elif not asset.is_uploaded:
+                assets.append(asset)
+        return assets, missing
 
-    def _confirm_images_uploaded(self, ed) -> bool:
-        """Gate before anything is signed. False means do not publish.
+    def _after_uploads(self, ed, then, *, draft: bool = False) -> None:
+        """Run ``then()`` (publishing ``ed``, or saving it as a ``draft``)
+        once everything of it on this computer only is on the media
+        servers: asked once, uploaded, and then on by itself (UploadWait),
+        as Mail sends once its attachments are ready.
 
-        Publishing is irreversible in a way that inserting is not: an
-        event with an unreachable image cannot be recalled, so this is
-        the one place where waiting is the right answer.
+        Publishing is irreversible in a way that inserting is not, so this
+        is where a file leaves the computer, and only once the person said
+        so. Files already on their way (Upload Right Away) need no asking.
         """
         if ed is None:
-            return True
-        waiting = self._media_not_uploaded(ed.document())
-        if waiting:
-            # Not there yet: its upload goes on (or starts again after a
-            # failure or a restart), and publishing waits for it.
-            for asset in waiting:
-                self._asset_manager.request_upload(asset.sha256)
-            inform(self, title=_("Audio or video is still uploading"),
-                   message=_("Publish or save it as a draft once the upload is done; it "
-                             "goes on uploading meanwhile."))
-            return False
-        blocked = self._unpublishable_images(ed.document())
-        if not blocked:
-            return True
+            then()
+            return
+        assets = self._uploads_needed(ed)
+        if assets is None:
+            return
+        if not assets:
+            then()
+            return
+        if any(asset.upload_state not in _UPLOADING for asset in assets) \
+                and not self._agree_to_upload(assets, draft=draft):
+            return
+        self._wait_for_uploads(ed, assets, then, draft=draft)
 
-        count = len(blocked)
-        upload = ask(
-            self,
-            title=ngettext("Upload {count} image before publishing?",
-                           "Upload {count} images before publishing?", count).format(count=count),
-            message=ngettext(
-                "{count} image in this document is not on your media servers yet. "
-                "Publishing now would break it for readers.",
-                "{count} images in this document are not on your media servers yet. "
-                "Publishing now would break them for readers.", count).format(count=count),
-            buttons=(Button(_("Cancel"), False, CANCEL), Button(_("Upload Now"), True, DEFAULT)))
-        if upload:
-            for name in blocked:
-                sha = parse_asset_key(name)
-                if sha is not None:
-                    self._asset_manager.request_upload(sha)
-        return False
+    def _uploads_needed(self, ed):
+        """The files of ``ed`` to upload before it goes out, or None (said
+        why) when a picture of it cannot be found."""
+        assets, missing = self._local_objects(ed)
+        if missing:
+            inform(self, title=ngettext("A picture can’t be found",
+                                        "{count} pictures can’t be found",
+                                        len(missing)).format(count=len(missing)),
+                   message=_("“{name}” is not on this computer any more. Insert it again, "
+                             "or delete it, to go on.").format(name=missing[0]))
+            return None
+        return assets
+
+    def _agree_to_upload(self, assets, *, draft: bool) -> bool:
+        count = len(assets)
+        if draft:
+            title = ngettext("Upload {count} file to save the draft?",
+                             "Upload {count} files to save the draft?", count)
+            message = ngettext(
+                "“{name}” is on this computer only. Your draft is encrypted, the file "
+                "on your media servers is not: anyone with its link can view it.",
+                "{count} files are on this computer only. Your draft is encrypted, the "
+                "files on your media servers are not: anyone with a link can view them.",
+                count)
+            action = _("Upload and Save")
+        else:
+            title = ngettext("Upload {count} file to publish?",
+                             "Upload {count} files to publish?", count)
+            message = ngettext(
+                "“{name}” is on this computer only. Readers see it once it is on your "
+                "media servers, where anyone with its link can view it.",
+                "{count} files are on this computer only. Readers see them once they are "
+                "on your media servers, where anyone with a link can view them.", count)
+            action = _("Upload and Publish")
+        return ask(self, title=title.format(count=count),
+                   message=message.format(count=count, name=self._file_label(assets[0])),
+                   buttons=(Button(_("Cancel"), False, CANCEL),
+                            Button(action, True, DEFAULT))) is True
+
+    @staticmethod
+    def _file_label(asset) -> str:
+        return asset.alt or asset.sha256[:12]
+
+    def _wait_for_uploads(self, ed, assets, then, *, draft: bool = False) -> None:
+        """Upload ``assets`` and run ``then()`` once all are there, while
+        ``ed`` is still open. A failure stops it, saying why, with Try
+        Again. One wait per document and purpose: publishing again
+        replaces the earlier wait to publish, and leaves a draft being
+        saved alone."""
+        key = (ed, draft)
+        earlier = self._upload_waits.pop(key, None)
+        if earlier is not None:
+            earlier.cancel()
+        wait = UploadWait(self._asset_manager, [asset.sha256 for asset in assets])
+        self._upload_waits[key] = wait
+
+        def over() -> bool:
+            """Whether this wait is still the one, and its document open."""
+            if self._upload_waits.get(key) is not wait:
+                return False
+            del self._upload_waits[key]
+            self.status.clearMessage()
+            return self._editor_widget_index(ed) >= 0
+
+        def done() -> None:
+            if over():
+                then()
+
+        def failed(sha: str, code: str) -> None:
+            if not over():
+                return
+            asset = self._asset_manager.get(sha)
+            name = self._file_label(asset) if asset is not None else sha[:12]
+            again = ask(self, title=_("Couldn’t upload “{name}”").format(name=name),
+                        message=friendly_message(code) + " " + (
+                            _("The draft was not saved.") if draft else _("Nothing was published.")),
+                        buttons=(Button(_("Cancel"), False, CANCEL),
+                                 Button(_("Try Again"), True, DEFAULT)))
+            if again is not True or self._editor_widget_index(ed) < 0:
+                return
+            left = self._uploads_needed(ed)
+            if left is None:
+                return
+            if left:
+                self._wait_for_uploads(ed, left, then, draft=draft)
+            else:
+                then()
+
+        wait.done.connect(done)
+        wait.failed.connect(failed)
+        self.status.showMessage(ngettext("Uploading {count} file to your media servers…",
+                                         "Uploading {count} files to your media servers…",
+                                         len(assets)).format(count=len(assets)))
+        wait.start()
+
+    def _cancel_upload_waits(self) -> None:
+        """Nothing goes out once its account is no longer in use."""
+        waits, self._upload_waits = self._upload_waits, {}
+        for wait in waits.values():
+            wait.cancel()
+        if waits:
+            self.status.clearMessage()
 
     def _publish_payload(self, ed, flavor: str) -> tuple[str, list]:
         """Document text for a signed event, plus what its media is.
@@ -4006,7 +4111,9 @@ class MainWindow(QMainWindow):
         plain URL, and ``AssetManager.find_by_url`` recognises it only
         when the address is one an upload actually produced. Nothing is
         rewritten either way; the only effect is whether the image gets
-        described.
+        described. A picture beside the document's file goes out at the
+        address publishing uploaded it to (_asset_named), its name in the
+        document unchanged.
         """
         records: dict = {}
 
@@ -4029,15 +4136,11 @@ class MainWindow(QMainWindow):
 
         def destination(fmt) -> Optional[str]:
             name = fmt.name()
-            sha = parse_asset_key(name)
-            if sha is None:
-                if not image_safety.is_portable_image_source(name):
-                    return None
-                asset = self._asset_manager.find_by_url(name)
+            asset = self._asset_named(ed, name)
+            if parse_asset_key(name) is None and image_safety.is_portable_image_source(name):
                 if asset is not None:
                     remember(asset, name, fmt)
                 return name
-            asset = self._asset_manager.get(sha)
             if asset is None or not asset.is_uploaded:
                 return None
             url = _published_address(asset)
@@ -4233,6 +4336,7 @@ class MainWindow(QMainWindow):
         ext = path.lower()
         front = None
         head = ""                   # a Markdown file's front matter, as written
+        left_out = []               # audio or video a Markdown file could not hold
         try:
             if ext.endswith(('.pdf', '.rtf')) and getattr(ed, "_lock", None) is not None:
                 inform(self, title=_("A locked document can’t be saved as PDF or RTF"),
@@ -4258,6 +4362,7 @@ class MainWindow(QMainWindow):
                 # The same Markdown an article publishes, whether the tab
                 # came from a .md file or was typed here.
                 target = self._image_target_for_file_save(ed.document(), path)
+                left_out = target.left_out
                 reference = self._markdown_reference_for(target)
                 if getattr(ed, "_markdown_source", False):
                     content = serialize_plain_with_images(ed.document(), reference)
@@ -4292,7 +4397,7 @@ class MainWindow(QMainWindow):
             ed._recovered_title = ""
             ed.document().setModified(False)
             self._update_tab_title()
-            self._say_saved(ed, path)
+            self._say_saved(ed, path, left_out)
             return True
 
         except Exception as e:
@@ -4306,15 +4411,20 @@ class MainWindow(QMainWindow):
             # written here, _on_file_changed knows the change is this save.
             self._saved_stamps[path] = _file_stamp(path)
 
-    def _say_saved(self, ed, path: str) -> None:
+    def _say_saved(self, ed, path: str, left_out=()) -> None:
         """Say a document was saved, and whether audio or video in it is
-        still to go in. A Markdown, HTML or PDF file holds such a file once
-        it is on a media server (its address, or a link to it): until then the save writes what it can, and the
-        document is edited again when the upload is done
-        (_on_media_uploaded), as Pages does when an inserted item finishes
-        loading after a save."""
-        waiting = (self._media_not_uploaded(ed.document())
-                   if path.lower().endswith((".md", ".html", ".htm", ".pdf")) else [])
+        still to go in. A Markdown file holds one on this computer as a
+        copy beside it, an HTML page inside it (when not too large, and its
+        bytes here); a PDF, and a page for any other, link to it once it is
+        on a media server: until then the save writes what it can, and the document
+        is edited again when the upload is done (_on_media_uploaded), as
+        Pages does when an inserted item finishes loading after a save.
+        ``left_out``: what a Markdown file could not hold a copy of."""
+        lower = path.lower()
+        waiting = list(left_out) + [
+            asset for asset in self._media_not_uploaded(ed.document())
+            if lower.endswith(".pdf") or (lower.endswith((".html", ".htm")) and (
+                asset.size > MEDIA_EMBED_LIMIT or not self._asset_manager.has_bytes(asset.sha256)))]
         ed._media_left_out = {asset.sha256 for asset in waiting}
         not_saved = getattr(ed, "_details_not_saved", None) if path.lower().endswith(".md") \
             else None
@@ -4610,10 +4720,12 @@ class MainWindow(QMainWindow):
         asset that is not uploaded is copied into a sidecar folder
         beside the document, so a .md file carries its own pictures
         without the app running. Media this app did not create is left
-        exactly as it was found.
+        exactly as it was found. Audio or video whose copy could not be
+        written is listed in the target's ``left_out`` (_say_saved).
         """
         media_dir = media_dir_for(save_path)
         written: dict = {}
+        left_out: list = []
 
         def sidecar(sha: str, data: bytes, ext: str) -> Optional[str]:
             # Hex names only: a markdown destination containing a space
@@ -4639,9 +4751,15 @@ class MainWindow(QMainWindow):
             if asset is not None and asset.is_uploaded:
                 return _published_address(asset)
             if asset is not None and asset.is_media:
-                # Not on a media server yet: nothing to write (never a
-                # placeholder); saved again once it is, it is there.
-                return None
+                # On this computer only: a link to its copy beside the
+                # document, as its pictures are, which reopening makes its
+                # card again (_media_from_addresses).
+                link = self._media_file_link(
+                    asset, save_path, str(fmt.property(QTextImageFormat.ImageAltText) or ""))
+                if link is None:
+                    left_out.append(asset)
+                    return None
+                return link.markdown()
 
             data = self._asset_manager.resolve_bytes(name)
             if data:
@@ -4665,6 +4783,7 @@ class MainWindow(QMainWindow):
             ext = ".png"
             return f"{os.path.basename(media_dir)}/{sha}{ext}"
 
+        target.left_out = left_out
         return target
 
     def _foreign_image_target(self, name: str, sidecar):
@@ -4791,23 +4910,29 @@ class MainWindow(QMainWindow):
 
         return copy
 
-    def _media_file_link(self, asset, save_path: str) -> Optional[MediaLink]:
+    def _media_file_link(self, asset, save_path: str, label: str = "") -> Optional[MediaLink]:
         """An audio or video file as a link from the document saved at
-        ``save_path``: to its address once uploaded, else to a copy of it
-        in the document's media folder, as the document's pictures are."""
-        label = asset.alt or f"{asset.sha256}{media_files.extension_for(asset.mime)}"
+        ``save_path``, called ``label`` (else the file's name): to its
+        address once uploaded, else to a copy of it in the document's media
+        folder, as the document's pictures are. A copy already there is
+        left as it is (named by the hash of what was copied, it is this
+        file, or one the person changed since). None when no copy can be
+        written."""
+        label = label or asset.alt or f"{asset.sha256}{media_files.extension_for(asset.mime)}"
         if asset.is_uploaded:
             return MediaLink(label, _published_address(asset))
-        data = self._asset_manager.resolve_bytes(asset.key)
-        if not data:
-            return None
         media_dir = media_dir_for(save_path)
         name = asset.sha256 + media_files.extension_for(asset.mime)
-        try:
-            os.makedirs(media_dir, exist_ok=True)
-            save_document(os.path.join(media_dir, name), data)
-        except OSError:
-            return None
+        copy = os.path.join(media_dir, name)
+        if not os.path.isfile(copy):
+            data = self._asset_manager.resolve_bytes(asset.key)
+            if not data:
+                return None
+            try:
+                os.makedirs(media_dir, exist_ok=True)
+                save_document(copy, data)
+            except OSError:
+                return None
         return MediaLink(label, f"{os.path.basename(media_dir)}/{name}")
 
     def _save_as_rtf(self, editor, path: str) -> bool:
@@ -5277,8 +5402,8 @@ class MainWindow(QMainWindow):
                 choose_language=lambda code: self._choose_language(code, tell=False),
                 writing_family=lambda: self.writing_family,
                 choose_writing_family=self.set_writing_family,
-                paste_choice=self._paste_choice,
-                choose_paste=self._store_paste_choice,
+                upload_choice=self._upload_choice,
+                choose_upload=self._store_upload_choice,
                 nostr_in_use=lambda: self.nostr_state.active,
                 format_bar=lambda: self.format_bar_on_selection,
                 choose_format_bar=self._set_format_bar_on_selection,
@@ -6299,6 +6424,7 @@ class MainWindow(QMainWindow):
             menu.addAction(_("Copy Link"), lambda: self._copy_link(href))
             menu.addAction(_("Remove Link"), editor.remove_link)
             menu.addSeparator()
+        self._media_context(menu, editor, pos)
         if self._editor_kind(editor) == "rich":
             if rich_text.footnote_jump(editor.textCursor()) is not None:
                 # A footnote's mark or note: the way to the other (also in
@@ -6322,6 +6448,33 @@ class MainWindow(QMainWindow):
         menu.addSeparator()
         menu.addAction(self.m_style.menuAction())
         menu.addAction(self.act_reset_format)
+
+    def _media_context(self, menu, editor, pos) -> None:
+        """On a picture, audio or video, while a Nostr account is in use:
+        what its badge says can be done there. One on this computer only
+        goes to the media servers (as publishing would take it); one there
+        gives its address."""
+        name = editor.media_object_at(pos) if self.nostr_state.active else None
+        badge = self._media_badge(editor, name) if name else None
+        if badge is None:
+            return
+        if badge.place == media_badge.UPLOADED:
+            address = _published_address(self._asset_named(editor, name))
+            # Named apart from a link around the picture (Copy Link).
+            menu.addAction(_("Copy Media Link"), lambda: self._copy_link(address))
+        elif badge.place in (media_badge.LOCAL, media_badge.FAILED):
+            menu.addAction(_("Upload to Media Servers"),
+                           lambda: self._upload_object(editor, name))
+        else:
+            return
+        menu.addSeparator()
+
+    def _upload_object(self, editor, name: str) -> None:
+        asset = self._asset_named(editor, name, adopt=True)
+        if asset is None:
+            self.status.showMessage(_("That file is not on this computer any more."), 5000)
+            return
+        self._asset_manager.request_upload(asset.sha256)
 
 
     # ----------------------------------------------------------------------
@@ -6655,15 +6808,13 @@ class MainWindow(QMainWindow):
         profile = self._profile_store.default()
         author = (profile.display_name or profile.npub_short()) if profile is not None else ""
         checks = []
-        if self._media_not_uploaded(ed.document()):
-            checks.append(_("Audio or video is still uploading: it shows here, and is "
-                            "published, once it is on your media servers."))
-        missing = self._pictures_not_uploaded(ed)
-        if missing:
+        local = self._not_uploaded(ed)
+        if local:
             checks.append(ngettext(
-                "A picture is not uploaded yet: readers will not see it.",
-                "{count} pictures are not uploaded yet: readers will not see them.",
-                missing).format(count=missing))
+                "A file is not on your media servers yet: it shows here once publishing "
+                "has uploaded it.",
+                "{count} files are not on your media servers yet: they show here once "
+                "publishing has uploaded them.", local).format(count=local))
         if kind == NOTE:
             text = self._publish_payload(ed, "note")[0]
             return PreviewContent(NOTE, text, author=author, names=names, checks=tuple(checks))
@@ -6695,17 +6846,15 @@ class MainWindow(QMainWindow):
         person = self._known_people.get(pubkey)
         return person.display_name if person is not None and person.display_name else None
 
-    def _pictures_not_uploaded(self, ed) -> int:
-        """Pictures in the document that would not be published: kept on
-        this computer only."""
+    def _not_uploaded(self, ed) -> int:
+        """How many pictures, audio and video files of the document are not
+        on the media servers yet: on this computer only, or on their way."""
         count = 0
-        for name in iter_image_names(ed.document()):
-            sha = parse_asset_key(name)
-            if sha is not None:
-                asset = self._asset_manager.get(sha)
-                if asset is None or not asset.is_uploaded:
-                    count += 1
-            elif not name.lower().startswith(("http://", "https://")):
+        for name in dict.fromkeys(iter_image_names(ed.document())):
+            if parse_asset_key(name) is None and image_safety.is_portable_image_source(name):
+                continue
+            asset = self._asset_named(ed, name)
+            if asset is None or not asset.is_uploaded:
                 count += 1
         return count
 
@@ -7162,7 +7311,9 @@ class MainWindow(QMainWindow):
         """Nothing of Nostr stays on screen once no account is in use."""
         self._show_pane_toggles(active)
         self._update_article_headers()
+        self._redraw_badges()
         if not active:
+            self._cancel_upload_waits()
             self._hide_drafts_panel()
             details = getattr(self, "act_article_details", None)
             if details is not None:
@@ -7715,13 +7866,15 @@ class MainWindow(QMainWindow):
     # -- publish ----------------------------------------------------------
 
     def _on_nostr_publish_note(self):
-        active = self._profile_store.default()
-        if active is None:
+        if self._profile_store.default() is None:
             self._offer_publishing_account()
             return
-
         ed = self.current_editor()
-        if not self._confirm_images_uploaded(ed):
+        self._after_uploads(ed, lambda: self._open_publish_note(ed))
+
+    def _open_publish_note(self, ed) -> None:
+        active = self._profile_store.default()
+        if active is None:
             return
         content, media = self._publish_payload(ed, "note") if ed is not None else ("", [])
         content = content.strip()
@@ -7958,8 +8111,8 @@ class MainWindow(QMainWindow):
                 and self._editor_kind(ed) == "rich")
 
     def _ask_audio_or_video(self) -> None:
-        """Insert > Audio or Video: a file chosen, uploaded to the media
-        servers, and put in the text as its own paragraph."""
+        """Insert > Audio or Video: a file chosen and put in the text as its
+        own paragraph (_add_media_file)."""
         ed = self.current_editor()
         if not self._may_insert_audio_video(ed):
             return
@@ -7968,7 +8121,7 @@ class MainWindow(QMainWindow):
             self, _("Insert Audio or Video"), "",
             _("Audio and video ({patterns})").format(patterns=patterns))
         if path:
-            self._upload_into(ed, file_paths.normalize(path))
+            self._add_media_file(ed, file_paths.normalize(path))
 
     def _upload_limit(self) -> int:
         """The largest file one of the media servers takes."""
@@ -7977,11 +8130,12 @@ class MainWindow(QMainWindow):
                       default=BLOSSOM_MAX_FILE_SIZE)
         return min(largest, BLOSSOM_MAX_FILE_SIZE)
 
-    def _upload_into(self, ed, path: str) -> None:
+    def _add_media_file(self, ed, path: str) -> None:
         """Put the audio or video file ``path`` into ``ed`` as a paragraph of
-        its own and send it to the media servers. It is an object of the
-        text, as a picture is (an asset, named by its hash): finishing its
-        upload changes nothing the person wrote and no step of Undo, and it
+        its own, kept on this computer until the document is published, as
+        a picture is (_upload_added). It is an object of the text, as a
+        picture is (an asset, named by its hash): finishing its upload
+        changes nothing the person wrote and no step of Undo, and it
         outlives a crash or a restart. A file larger than every media server
         takes is refused at once, saying the limit (nostrdesign: before a
         long wait, not after)."""
@@ -8037,8 +8191,8 @@ class MainWindow(QMainWindow):
     def _insert_media(self, ed, at, stored, mime: str, name: str,
                       read: "_MediaRead") -> None:
         """The file kept in the local store (``stored``: its sha256 and size)
-        as an object of ``ed``'s text, in a paragraph of its own at ``at``,
-        and on its way to the media servers."""
+        as an object of ``ed``'s text, in a paragraph of its own at ``at``
+        (_upload_added says when it is uploaded)."""
         if stored is None:
             return                         # dropped before it was kept
         sha, size = stored
@@ -8055,7 +8209,7 @@ class MainWindow(QMainWindow):
             self._say_cannot_add(name)
             return
         self._insert_media_card(ed, at, asset)
-        self._asset_manager.request_upload(asset.sha256)
+        self._upload_added(asset)
 
     def _insert_media_card(self, ed, at, asset) -> None:
         """Audio or video ``asset`` as an object of ``ed``'s text: its card,
@@ -8200,6 +8354,62 @@ class MainWindow(QMainWindow):
         return paste.Outside(False, address or asset.alt, address,
                              address or (image_data_uri(data) or "" if data else ""))
 
+    def _asset_named(self, ed, name: str, *, adopt: bool = False):
+        """The file of this app behind the object of ``ed`` named ``name``:
+        its own (an asset key), one it uploaded (by its address), or a
+        picture beside the document's file (a .md reopened names its
+        pictures so, as other editors' files do). Such a picture is taken
+        in as an asset only when ``adopt`` asks (to upload it), read again
+        then (it may have been changed on disk), and its name stays as the
+        file has it: the document is not edited, and saving writes it back
+        as it was. None for anything else."""
+        sha = parse_asset_key(name)
+        if sha is not None:
+            return self._asset_manager.get(sha)
+        if image_safety.is_portable_image_source(name):
+            return self._asset_manager.find_by_url(name)
+        beside = getattr(ed, "_pictures_beside", None)
+        if beside is None:
+            beside = ed._pictures_beside = {}
+        if not adopt:
+            return self._asset_manager.get(beside[name]) if name in beside else None
+        beside.pop(name, None)
+        data = self._local_image_bytes(ed, name)
+        alt = os.path.splitext(os.path.basename(name))[0] or "image"
+        asset = self._asset_manager.adopt_bytes(data, alt=alt) if data else None
+        if asset is not None:
+            beside[name] = asset.sha256
+        return asset
+
+    def _media_badge(self, ed, name: str):
+        """Where the object of ``ed`` named ``name`` is (media_badge.py),
+        while a Nostr account is in use: nothing of it before."""
+        if not self.nostr_state.active:
+            return None
+        asset = self._asset_named(ed, name)
+        if asset is None and (parse_asset_key(name) is not None
+                              or image_safety.is_portable_image_source(name)
+                              or not self._has_local_image(ed, name)):
+            # On the web (someone else's), or nowhere: nothing to upload.
+            return None
+        if asset is not None and asset.is_uploaded:
+            return media_badge.Badge(media_badge.UPLOADED, _("Uploaded"),
+                                     _("On your media servers: anyone with its link can "
+                                       "view it."))
+        state = asset.upload_state if asset is not None else AssetState.LOCAL
+        if state in _UPLOADING:
+            return media_badge.Badge(media_badge.UPLOADING, _("Uploading…"),
+                                     _("On its way to your media servers."))
+        if asset is not None and not self._asset_manager.has_bytes(asset.sha256):
+            return None                        # its bytes are gone from here
+        if state is AssetState.FAILED:
+            return media_badge.Badge(media_badge.FAILED, _("Couldn’t Upload"),
+                                     friendly_message(asset.failure_code) + " "
+                                     + _("Publishing tries again."))
+        return media_badge.Badge(media_badge.LOCAL, _("On This Computer"),
+                                 _("On this computer only. Publishing uploads it to your "
+                                   "media servers."))
+
     def _media_not_uploaded(self, doc) -> list:
         """The audio and video in ``doc`` not on a media server yet."""
         found = []
@@ -8307,33 +8517,44 @@ class MainWindow(QMainWindow):
 
     def _media_from_addresses(self, ed) -> None:
         """Audio and video a reopened article names by its address, alone
-        on a line (where readers show its player), back as the card it was
-        written from: it reads, plays and publishes as it did. Nothing of
-        the document counts as edited for it."""
+        on a line (where readers show its player), or by a link alone on a
+        line to its copy beside the document (a save of one on this
+        computer only), back as the card it was written from: it reads,
+        plays and publishes as it did. Nothing of the document counts as
+        edited for it."""
         if not self._may_insert_audio_video(ed):
             return
         doc = ed.document()
         modified = doc.isModified()
         found = []
         for block in iter_blocks(doc):
+            if block.textList() is not None or rich_text.is_code_block(block):
+                continue
             address = block.text().strip()
             if (address.lower().startswith(("https://", "http://"))
                     and not any(c.isspace() for c in address)
-                    and block.textList() is None and not rich_text.is_code_block(block)
                     and url_safety.is_safe_media_url(address)):
                 media = self._media_file_at(address)
                 if media is not None and media_files.kind_of(media[1]) is not None:
-                    found.append((block.blockNumber(), address, media))
+                    found.append((block.blockNumber(),
+                                  lambda a=address, m=media: self._adopt_media_at(a, *m)))
+                continue
+            copy = self._media_copy_linked(ed, block)
+            if copy is not None:
+                found.append((block.blockNumber(),
+                              lambda c=copy, words=address: self._adopt_media_copy(c, words)))
         # From the end, so each paragraph is still where it was found.
-        for number, address, (media, mime, name) in reversed(found):
-            asset = self._asset_manager.adopt_library_file(
-                sha256=media.hash, remote_url=address, mime=mime, size=media.size,
-                alt=name, from_address=True)
+        for number, adopt in reversed(found):
+            asset = adopt()
             if asset is None or not asset.is_media:
                 continue
+            words = doc.findBlockByNumber(number).text().strip()
             image = QTextImageFormat()
             image.setName(asset.key)
-            image.setProperty(QTextImageFormat.ImageAltText, asset.alt)
+            # A copy's link words are the card's name, as written in the
+            # file (saving writes them back); an address names none.
+            linked = not words.lower().startswith(("https://", "http://"))
+            image.setProperty(QTextImageFormat.ImageAltText, words if linked else asset.alt)
             width, height = media_card.size_for(asset.mime)
             image.setWidth(width)
             image.setHeight(height)
@@ -8342,6 +8563,49 @@ class MainWindow(QMainWindow):
                                 QTextCursor.MoveMode.KeepAnchor)
             cursor.insertImage(image)
         doc.setModified(modified)
+
+    def _adopt_media_at(self, address: str, media: MediaFile, mime: str, name: str):
+        return self._asset_manager.adopt_library_file(
+            sha256=media.hash, remote_url=address, mime=mime, size=media.size,
+            alt=name, from_address=True)
+
+    def _media_copy_linked(self, ed, block) -> Optional[str]:
+        """The audio or video file in the document's own media folder that
+        ``block`` is nothing but a link to, as saving writes one that is on
+        this computer only (_media_file_link: named by its hash), or None.
+        A link the person wrote to a file of their own stays a link."""
+        path = getattr(ed, "_file_path", "") or ""
+        hrefs = {fmt.anchorHref() for text, fmt in iter_block_runs(block) if text.strip()}
+        if not path or len(hrefs) != 1:
+            return None
+        href = hrefs.pop()
+        if not _MEDIA_COPY_NAME.fullmatch(os.path.basename(href)):
+            return None
+        folder = os.path.realpath(media_dir_for(path))
+        target = os.path.realpath(os.path.join(os.path.dirname(os.path.abspath(path)), href))
+        if os.path.dirname(target) != folder or not os.path.isfile(target) \
+                or media_files.kind_of(media_files.type_of(target) or "") is None:
+            return None
+        return target
+
+    def _adopt_media_copy(self, path: str, name: str):
+        """The file at ``path``, a copy a save made, as audio or video of
+        this app again, by what it holds (it may have been changed since).
+        Read as the document opens, so a copy from another computer is
+        there at once; one larger than a media server takes stays a link."""
+        try:
+            if os.path.getsize(path) > MAX_MEDIA_BYTES:
+                return None
+            stored = self._asset_manager.store_media_file(path)
+        except OSError:
+            return None
+        if stored is None:
+            return None
+        sha, size = stored
+        asset = self._asset_manager.adopt_stored_media(
+            sha, size=size, mime=media_files.type_of(path), name=name)
+        self._asset_manager.release_stored(sha, taken=asset is not None)
+        return asset
 
     def _want_poster(self, media: MediaFile, mime: str) -> None:
         """Find a file's first frame and length, once."""
@@ -8525,13 +8789,15 @@ class MainWindow(QMainWindow):
         self._say_published(results, article=False)
 
     def _on_nostr_publish_article(self):
-        active = self._profile_store.default()
-        if active is None:
+        if self._profile_store.default() is None:
             self._offer_publishing_account()
             return
-
         ed = self.current_editor()
-        if not self._confirm_images_uploaded(ed):
+        self._after_uploads(ed, lambda: self._open_publish_article(ed))
+
+    def _open_publish_article(self, ed) -> None:
+        active = self._profile_store.default()
+        if active is None:
             return
         body, media = self._publish_payload(ed, "markdown") if ed is not None else ("", [])
         body = body.rstrip()
@@ -8556,10 +8822,11 @@ class MainWindow(QMainWindow):
         first_published = details.published_at
         file_name = ""
         if not default_slug:
-            default_slug = self._link_name_for_file(self.current_path(), active.user_pubkey)
+            path = getattr(ed, "_file_path", None) if ed is not None else None
+            default_slug = self._link_name_for_file(path, active.user_pubkey)
             # The file's name as it is, which version 3.3 published files
             # under: the sheet asks the relays about it at Publish.
-            file_name = self._file_name(self.current_path())
+            file_name = self._file_name(path)
 
         dialog = PublishArticleDialog(
             body_markdown=body,
@@ -8892,11 +9159,12 @@ class MainWindow(QMainWindow):
     # -- Blossom: paste image from clipboard ------------------------------
 
     def _handle_pasted_image(self, editor, image) -> None:
-        """A clipboard image arrived. Insert it, then ask about uploading.
+        """A clipboard image arrived: insert it, kept on this computer as a
+        picture dropped is (_upload_added).
 
-        The insert is unconditional and comes first. A pasted screenshot
-        exists nowhere else, so a missing signer, a refused upload or no
-        network must never be a reason for it to vanish.
+        The insert is unconditional. A pasted screenshot exists nowhere
+        else, so a missing signer, a refused upload or no network must
+        never be a reason for it to vanish.
         """
         buf = QBuffer()
         buf.open(QIODevice.WriteOnly)
@@ -8912,50 +9180,21 @@ class MainWindow(QMainWindow):
             self.status.showMessage(_("That image could not be added."), 5000)
             return
         self._insert_asset(editor, asset, alt="image")
+        self._upload_added(asset)
 
-        if asset.is_uploaded or self._profile_store.default() is None:
-            return          # nothing of Nostr without an account
+    def _upload_choice(self) -> str:
+        """When what is added to a document goes to the media servers:
+        "publishing" or "now" (_UPLOAD_SETTING). Who had pasted images
+        uploaded always (the earlier setting) has them uploaded now."""
+        settings = load_settings()
+        choice = settings.get(_UPLOAD_SETTING)
+        if choice in ("publishing", "now"):
+            return choice
+        return "now" if settings.get(_PASTE_UPLOAD_SETTING) == "always" else "publishing"
 
-        choice = self._paste_choice()
-        if choice == "never":
-            return
-        if choice != "always" and not self._confirm_paste_upload():
-            return
-        self._asset_manager.request_upload(asset.sha256)
-
-    def _confirm_paste_upload(self) -> bool:
-        """Ask before a pasted image leaves the machine.
-
-        Keep local is the default: a paste is a high-frequency, low
-        intent gesture, so the outcome of an accidental one has to be
-        that nothing was published.
-        """
-        # What the person decides is who can see it, which the message
-        # says; the servers are their own, listed in Media Servers. A
-        # paste is a quick, low-intent gesture, so Keep Local is the
-        # default.
-        upload, remember = ask_with_checkbox(
-            self,
-            title=_("Upload this image to your media servers?"),
-            message=_("Anyone with the link can view it. The image is already in "
-                      "your document and stays there either way."),
-            buttons=(Button(_("Upload"), True, NORMAL), Button(_("Keep Local"), False, DEFAULT)),
-            checkbox=_("Remember this choice"))
-        if remember:
-            self._store_paste_choice("always" if upload else "never")
-        return upload
-
-    def _paste_choice(self) -> str:
-        """What a pasted image does while an account is in use: "ask",
-        "always" (upload) or "never"."""
-        return load_settings().get(_PASTE_UPLOAD_SETTING, "ask")
-
-    def _store_paste_choice(self, value: str) -> None:
-        """The one place the choice is stored, from Settings or from the
-        alert's Remember This Choice; an open Settings window shows it."""
-        save_setting(_PASTE_UPLOAD_SETTING, value)
-        if getattr(self, "_settings_window", None) is not None:
-            self._settings_window.refresh()
+    @staticmethod
+    def _store_upload_choice(value: str) -> None:
+        save_setting(_UPLOAD_SETTING, value)
 
     # ----------------------------------------------------------------------
     # NOSTR - drafts panel toggling
@@ -9675,7 +9914,15 @@ class MainWindow(QMainWindow):
         choice: StashChoice = dlg.choice
         if not self._may_replace_draft(prior, choice.identifier):
             return
-        if not self._confirm_images_uploaded(ed):
+        self._after_uploads(ed, lambda: self._save_draft(ed, profile, choice), draft=True)
+
+    def _save_draft(self, ed, profile: Profile, choice: StashChoice) -> None:
+        """``ed`` saved as the draft ``choice`` names, its files uploaded
+        (_after_uploads): under ``profile`` only, while it is the account
+        in use (another may have been chosen while the files went up)."""
+        current = self._profile_store.default()
+        if current is None or current.user_pubkey != profile.user_pubkey:
+            self.status.showMessage(_("The draft was not saved: another account is in use."))
             return
         flavor = "markdown" if choice.kind is StashKind.ARTICLE else "note"
         inner = self._build_inner_for_choice(
@@ -9734,15 +9981,7 @@ class MainWindow(QMainWindow):
             title=details.title or binding.title,
             summary=details.summary,
         )
-        if not self._confirm_images_uploaded(ed):
-            return
-        flavor = "markdown" if kind is StashKind.ARTICLE else "note"
-        inner = self._build_inner_for_choice(
-            profile, choice, self._publish_text(ed, flavor), details=details
-        )
-        if inner is None:
-            return
-        self._fire_draft_publish_job(ed, profile, choice, inner)
+        self._after_uploads(ed, lambda: self._save_draft(ed, profile, choice), draft=True)
 
     def _fire_draft_publish_job(
         self,
@@ -10313,6 +10552,9 @@ def _details_saved_as(details: Optional[ArticleDetails], choice: StashChoice) ->
 
 # The states of an asset on its way to the media servers.
 _UPLOADING = (AssetState.QUEUED, AssetState.SIGNING, AssetState.UPLOADING)
+# The name a save gives a copy of audio or video in the document's media
+# folder (_media_file_link): its hash and its type's extension.
+_MEDIA_COPY_NAME = re.compile(r"[0-9a-f]{64}\.[A-Za-z0-9]+")
 
 
 def _media_asset(assets, name: str):

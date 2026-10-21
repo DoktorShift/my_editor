@@ -818,8 +818,8 @@ def test_a_publish_job_is_given_the_resolved_relays(handler, job):
 
 
 @pytest.mark.parametrize("handler,dialog", [
-    ("_on_nostr_publish_note", "PublishNoteDialog"),
-    ("_on_nostr_publish_article", "PublishArticleDialog"),
+    ("_open_publish_note", "PublishNoteDialog"),
+    ("_open_publish_article", "PublishArticleDialog"),
 ])
 def test_a_publish_dialog_is_given_the_provider(handler, dialog):
     # A dialog gets the provider, so membership resolving while it is open

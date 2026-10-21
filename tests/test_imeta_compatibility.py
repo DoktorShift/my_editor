@@ -71,6 +71,8 @@ class _Window:
     """MainWindow's publish-side media methods over a minimal stub."""
 
     _publish_payload = MainWindow._publish_payload
+    _asset_named = MainWindow._asset_named
+    _local_image_bytes = staticmethod(MainWindow._local_image_bytes)
     _publish_text = MainWindow._publish_text
 
     def __init__(self, cache_dir):

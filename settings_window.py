@@ -6,14 +6,14 @@ Apple's Human Interface Guidelines give app-wide settings a window of their
 own (Settings…, Command-comma on a Mac; Ctrl+comma elsewhere), so there is
 one place to look for how MyEditor behaves instead of hunting through
 menus. MyEditor's had no such place: the appearance and the language sat in
-the View menu, and a remembered answer about pasted images could not be
-changed at all once given.
+the View menu.
 
 The window holds only what is chosen once and kept: the appearance, the
 language, the writing font and the text size (which View > Zoom In and
 Zoom Out step through too), whether the format bar shows over a selection,
-how the text cursor looks, and, while a Nostr account is in use, what
-happens to a pasted image and where published posts open on the web.
+how the text cursor looks, and, while a Nostr account is in use, when a
+picture, audio or video added to a document goes to the media servers and
+where published posts open on the web.
 Every command stays in its menu: the window
 shows the menu commands' state and chooses through them (or through what
 they call), so the two never disagree, and it holds no feature logic of its
@@ -58,9 +58,10 @@ from text_size import text_size
 # The pop-up's item that asks for another installed font.
 _OTHER_FONT = "other"
 
-# What happens to a pasted image while a Nostr account is in use, as the
-# setting stores it ("ask", "always", "never"), in the order offered.
-PASTE_CHOICES = ("ask", "always", "never")
+# When a picture, audio or video added to a document goes to the media
+# servers while a Nostr account is in use, as the setting stores it, in the
+# order offered: once it is published (or saved as a draft), or at once.
+UPLOAD_CHOICES = ("publishing", "now")
 
 
 # The text cursors offered, as the setting stores them (editor.CARET_STYLES).
@@ -75,9 +76,8 @@ def _caret_titles() -> Dict[str, str]:
             "block": _("Block")}
 
 
-def _paste_titles() -> Dict[str, str]:
-    # The words of the alert that asks: its buttons are Upload and Keep Local.
-    return {"ask": _("Ask Every Time"), "always": _("Upload"), "never": _("Keep Local")}
+def _upload_titles() -> Dict[str, str]:
+    return {"publishing": _("When Publishing"), "now": _("Right Away")}
 
 
 class SettingsWindow(QDialog):
@@ -93,8 +93,9 @@ class SettingsWindow(QDialog):
     ``format_bar()`` and
     ``choose_format_bar(on)`` read and store whether the format bar shows
     over a selection; ``caret_style()`` and ``choose_caret_style(value)``
-    read and store the text cursor (CARET_CHOICES); ``paste_choice()`` and
-    ``choose_paste(value)`` read and store the pasted-image setting, and
+    read and store the text cursor (CARET_CHOICES); ``upload_choice()`` and
+    ``choose_upload(value)`` read and store when what is added to a
+    document is uploaded (UPLOAD_CHOICES), and
     ``web_reader()`` and ``choose_web_reader(key)`` the reading app
     published posts open in (web_readers), both offered while
     ``nostr_in_use()``.
@@ -105,8 +106,8 @@ class SettingsWindow(QDialog):
                  choose_language: Callable[[str], None],
                  writing_family: Callable[[], str],
                  choose_writing_family: Callable[[str], None],
-                 paste_choice: Callable[[], str],
-                 choose_paste: Callable[[str], None],
+                 upload_choice: Callable[[], str],
+                 choose_upload: Callable[[str], None],
                  nostr_in_use: Callable[[], bool],
                  format_bar: Callable[[], bool],
                  choose_format_bar: Callable[[bool], None],
@@ -123,8 +124,8 @@ class SettingsWindow(QDialog):
         self._appearance = appearance
         self._languages = languages
         self._choose_language = choose_language
-        self._paste_choice = paste_choice
-        self._choose_paste = choose_paste
+        self._upload_choice = upload_choice
+        self._choose_upload = choose_upload
         self._nostr_in_use = nostr_in_use
         self._format_bar_shown = format_bar
         self._web_reader = web_reader
@@ -222,23 +223,24 @@ class SettingsWindow(QDialog):
             _("How the cursor looks where you type, in every document.")))
         form.addRow(self._label(_("Text cursor:"), self.caret), caret_box)
 
-        # Pasted images: only while Nostr is in use (nothing of Nostr before).
-        self.paste = QComboBox()
-        titles = _paste_titles()
-        for value in PASTE_CHOICES:
-            self.paste.addItem(titles[value], value)
-        self.paste.activated.connect(
-            lambda index: self._choose_paste(self.paste.itemData(index)))
-        self._paste_box = QWidget()
-        paste_column = QVBoxLayout(self._paste_box)
-        paste_column.setContentsMargins(0, 0, 0, 0)
-        paste_column.setSpacing(4)
-        paste_column.addWidget(self.paste, 0, Qt.AlignLeft)
-        paste_column.addWidget(self._help(
-            _("Upload puts a pasted image on your media server right away. Keep Local "
-              "leaves it in the document; publishing asks before it goes up.")))
-        self._paste_label = self._label(_("Pasted images:"), self.paste)
-        form.addRow(self._paste_label, self._paste_box)
+        # When added media is uploaded: only while Nostr is in use (nothing
+        # of Nostr before).
+        self.upload = QComboBox()
+        titles = _upload_titles()
+        for value in UPLOAD_CHOICES:
+            self.upload.addItem(titles[value], value)
+        self.upload.activated.connect(
+            lambda index: self._choose_upload(self.upload.itemData(index)))
+        self._upload_box = QWidget()
+        upload_column = QVBoxLayout(self._upload_box)
+        upload_column.setContentsMargins(0, 0, 0, 0)
+        upload_column.setSpacing(4)
+        upload_column.addWidget(self.upload, 0, Qt.AlignLeft)
+        upload_column.addWidget(self._help(
+            _("Pictures, audio and video you add stay on this computer until you publish. "
+              "Right Away puts them on your media servers as soon as you add them.")))
+        self._upload_label = self._label(_("Upload files:"), self.upload)
+        form.addRow(self._upload_label, self._upload_box)
 
         # Where published posts open on the web: only while Nostr is in use.
         self.reader = QComboBox()
@@ -474,21 +476,20 @@ class SettingsWindow(QDialog):
 
     def refresh(self) -> None:
         """Read again what can change elsewhere: whether Nostr is in use, the
-        writing font and the text size (the View menu changes them too), the
-        format bar's setting, and the pasted-image setting (an alert's
-        Remember This Choice sets it)."""
+        writing font and the text size (the View menu changes them too), and
+        the format bar's setting."""
         self._show_fonts()
         self._show_font_size()
         self.format_bar.setChecked(bool(self._format_bar_shown()))
         shown = bool(self._nostr_in_use())
-        self._paste_label.setVisible(shown)
-        self._paste_box.setVisible(shown)
+        self._upload_label.setVisible(shown)
+        self._upload_box.setVisible(shown)
         self._reader_label.setVisible(shown)
         self._reader_box.setVisible(shown)
         chosen = self.reader.findData(self._web_reader())
         self.reader.setCurrentIndex(chosen if chosen >= 0 else 0)
-        index = self.paste.findData(self._paste_choice())
-        self.paste.setCurrentIndex(index if index >= 0 else 0)
+        index = self.upload.findData(self._upload_choice())
+        self.upload.setCurrentIndex(index if index >= 0 else 0)
 
     def showEvent(self, event) -> None:  # noqa: N802, Qt's name
         self.refresh()

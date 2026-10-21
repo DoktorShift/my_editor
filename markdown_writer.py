@@ -521,7 +521,9 @@ def _inline_markdown(spans: List[_Span], hard_break: str = "  \n") -> str:
             inner = "".join(_styled(s) for s in group)
             label = inner.replace(LINE_SEPARATOR, " ")
             if not span.literal:               # escaped already when literal
-                label = label.replace("]", "\\]")
+                # A bracket either way, or a "<" (read as HTML), would end
+                # or change the link when the file is read again.
+                label = re.sub(r"([\[\]<])", r"\\\1", label)
             out.append(f"[{label}]({_destination(span.href)})")
             continue
         out.append(_styled(span))
@@ -776,7 +778,10 @@ _LOSSY = [
     re.compile(r"^\t", re.MULTILINE),                     # a tab where a line starts
     re.compile(r"^ {2,}(?:```|~~~)", re.MULTILINE),        # code inside a list item
     re.compile(r"\\\[\^"),                                 # an escaped footnote mark
-    re.compile(r"<(?:[A-Za-z][\w-]*[\s/>]|/[A-Za-z]|!--)"),  # raw HTML
+    # raw HTML: not an escaped "\<", nor a link's whole address in <…>
+    # (one with a space); a "<" that opens no such address is HTML
+    re.compile(r"(?<!\\)(?<!\]\()<(?:[A-Za-z][\w-]*[\s/>]|/[A-Za-z]|!--)"),
+    re.compile(r"\]\(<(?![^<>\n]*>\))"),
     re.compile(r"!\[\]\("),                                # image without alt text
     re.compile(r"\]\((?!<)[^)\s]+\s+[\"'(]"),              # link title
     re.compile(r"\[!\["),                                  # image inside a link
@@ -929,6 +934,14 @@ def image_markdown(alt: str, url: str) -> str:
     return f"![{(alt or 'image').replace(']', chr(92) + ']')}]({_destination(url)})"
 
 
+def link_markdown(words: str, url: str) -> str:
+    """``[words](url)``, with a bracket, a "<" or a backslash in the words
+    escaped and an address that holds a space or a parenthesis written as
+    ``<url>``."""
+    words = re.sub(r"([\\\[\]<])", r"\\\1", words)
+    return f"[{words}]({_destination(url)})"
+
+
 def document_to(doc, flavor: str, image_target: Optional[ImageTarget] = None) -> str:
     """:func:`document_to_markdown` or :func:`document_to_note_text`."""
     if flavor == NOTE:
@@ -939,6 +952,6 @@ def document_to(doc, flavor: str, image_target: Optional[ImageTarget] = None) ->
 __all__: Tuple[str, ...] = (
     "MARKDOWN", "NOTE", "document_blocks", "document_to", "document_to_markdown",
     "document_to_note_text", "has_local_only_formatting", "holds_faithfully",
-    "image_markdown", "literal_footnotes", "literal_text", "read_markdown", "READ_FEATURES",
+    "image_markdown", "link_markdown", "literal_footnotes", "literal_text", "read_markdown", "READ_FEATURES",
     "PASTE_FEATURES",
 )

@@ -20,6 +20,7 @@ the local-to-sidecar branch at all, which is how those branches went
 unguarded.
 """
 
+import hashlib
 import os
 import sys
 import types
@@ -32,7 +33,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtCore import QUrl
 from PySide6.QtGui import (
-    QColor, QImage, QTextCursor, QTextDocument, QTextImageFormat,
+    QColor, QImage, QTextDocument, QTextImageFormat,
 )
 from PySide6.QtWidgets import QApplication
 
@@ -46,7 +47,7 @@ from editor import HtmlEditor
 from export_html import document_to_html  # noqa: E402
 from markdown_writer import document_to_markdown
 from main_window import MainWindow
-from nostr.media.assets import ASSET_SCHEME, AssetIndex
+from nostr.media.assets import ASSET_SCHEME, AssetIndex, AssetState
 from nostr.media.manager import AssetManager
 
 from tests.media_fakes import (
@@ -79,14 +80,21 @@ class _Window:
     _markdown_reference_for = MainWindow._markdown_reference_for
     _publish_payload = MainWindow._publish_payload
     _publish_text = MainWindow._publish_text
-    _unpublishable_images = MainWindow._unpublishable_images
+    _asset_named = MainWindow._asset_named
+    _local_image_bytes = staticmethod(MainWindow._local_image_bytes)
+    _local_objects = MainWindow._local_objects
+    _uploads_needed = MainWindow._uploads_needed
+    _after_uploads = MainWindow._after_uploads
+    _agree_to_upload = MainWindow._agree_to_upload
+    _file_label = staticmethod(MainWindow._file_label)
+    _wait_for_uploads = MainWindow._wait_for_uploads
     _media_not_uploaded = MainWindow._media_not_uploaded
     _has_images = MainWindow._has_images
     _loses_content_on_save = MainWindow._loses_content_on_save
     _has_formatting = MainWindow._has_formatting
     _resolve_local_image = MainWindow._resolve_local_image
 
-    def __init__(self, cache_dir):
+    def __init__(self, cache_dir, *, profile=None):
         cache_dir = Path(cache_dir)
         self._store = FakeBlobStore(cache_dir)
         # The blob cache is one object behind two names in production:
@@ -97,10 +105,28 @@ class _Window:
         self._asset_manager = AssetManager(
             blob_store=self._store,
             uploader=self._uploader,
-            profile_provider=lambda: None,
+            profile_provider=lambda: profile,
             decoder=image_safety.decode_image_bytes,
             index=AssetIndex(path=cache_dir.parent / "media_assets.json"),
         )
+        self._upload_waits = {}
+        self.status = types.SimpleNamespace(showMessage=lambda *a: None, clearMessage=lambda: None)
+
+    @staticmethod
+    def _editor_widget_index(ed):
+        return 0                     # still open
+
+    def finish_upload(self):
+        """The media server takes the file being sent."""
+        call = self._uploader.calls[-1]
+        sha = hashlib.sha256(call.body).hexdigest()
+        self._uploader.finish(call.name, types.SimpleNamespace(
+            url=f"https://cdn.example/{sha}.png", size=len(call.body), servers=()))
+        QApplication.processEvents()         # what waits is told from the event loop
+
+    def fail_upload(self, code="UPLOAD_FAILED"):
+        self._uploader.fail(self._uploader.calls[-1].name, code)
+        QApplication.processEvents()
 
     def uploaded_asset(self, data=PNG_BYTES, *, alt="a photo"):
         """An asset whose bytes are cached and whose blob is hosted."""
@@ -476,49 +502,288 @@ def test_publish_text_never_emits_the_replacement_character(tmp_path):
         assert "￼" not in win._publish_text(ed, flavor)
 
 
-def test_unpublishable_images_blocks_only_what_a_reader_cannot_fetch(tmp_path):
+def test_local_objects_are_what_a_reader_cannot_fetch_yet(tmp_path):
     win = _Window(tmp_path / "cache")
     hosted = win.uploaded_asset()
     local = win.local_asset()
-    doc = QTextDocument()
-    cursor = QTextCursor(doc)
+    ed = HtmlEditor()
+    cursor = ed.textCursor()
     for name in (hosted.key, local.key, "https://other.example/cat.png",
                  "data:image/png;base64,AAAA", "pics/dog.png"):
         cursor.insertImage(_fmt(name, "x"))
 
-    assert win._unpublishable_images(doc) == [local.key, "pics/dog.png"]
+    assets, missing = win._local_objects(ed)
+
+    assert [asset.sha256 for asset in assets] == [local.sha256]
+    assert missing == ["pics/dog.png"], "a file beside no document cannot be found"
 
 
-def test_publish_gate_stops_a_document_with_an_unuploaded_image(tmp_path,
-                                                                monkeypatch):
-    # A relay event cannot be recalled, so this is the one place where
-    # waiting is the right answer.
-    win = _Window(tmp_path / "cache")
-    win._confirm_images_uploaded = types.MethodType(
-        MainWindow._confirm_images_uploaded, win)
+def _publishing(win, ed, monkeypatch, click):
+    box, shown = fake_alert(click=click)
+    monkeypatch.setattr(alerts, "Alert", box)
+    published = []
+    win._after_uploads(ed, lambda: published.append(True))
+    QApplication.processEvents()
+    return shown, published
+
+
+def test_publishing_asks_once_uploads_and_goes_on_by_itself(tmp_path, monkeypatch):
+    # The irreversible step is where a file leaves the computer: asked
+    # once, then the sheet opens by itself once the upload is done, as
+    # Mail sends once its attachments are ready.
+    win = _Window(tmp_path / "cache", profile=object())
     local = win.local_asset()
     ed = _editor_with(local)
-    box, shown = fake_alert(click="Upload Now")
+
+    shown, published = _publishing(win, ed, monkeypatch, "Upload and Publish")
+
+    assert [d.title for d in shown] == ["Upload 1 file to publish?"]
+    assert shown[0].message == ("“a sketch” is on this computer only. Readers see it once it "
+                                "is on your media servers, where anyone with its link can "
+                                "view it.")
+    assert published == [], "not before the file is there"
+    win.finish_upload()
+    assert published == [True]
+    assert win._asset_manager.get(local.sha256).is_uploaded
+    assert win._upload_waits == {}
+
+
+def test_cancel_uploads_nothing_and_publishes_nothing(tmp_path, monkeypatch):
+    win = _Window(tmp_path / "cache", profile=object())
+    local = win.local_asset()
+
+    _shown, published = _publishing(win, _editor_with(local), monkeypatch, "Cancel")
+
+    assert published == []
+    assert win._uploader.calls == []
+    assert win._asset_manager.get(local.sha256).upload_state is AssetState.LOCAL
+
+
+def test_a_document_on_the_servers_publishes_at_once(tmp_path, monkeypatch):
+    win = _Window(tmp_path / "cache", profile=object())
+
+    shown, published = _publishing(win, _editor_with(win.uploaded_asset()), monkeypatch, None)
+
+    assert shown == [], "nothing to upload, so no question"
+    assert published == [True]
+
+
+def test_a_failed_upload_says_why_and_publishes_nothing(tmp_path, monkeypatch):
+    win = _Window(tmp_path / "cache", profile=object())
+    ed = _editor_with(win.local_asset())
+    shown, published = _publishing(win, ed, monkeypatch, "Upload and Publish")
+
+    win.fail_upload()
+
+    assert [d.title for d in shown] == ["Upload 1 file to publish?",
+                                        "Couldn’t upload “a sketch”"]
+    assert shown[1].message.endswith("Nothing was published.")
+    assert published == []
+
+
+def test_try_again_uploads_again_and_then_publishes(tmp_path, monkeypatch):
+    win = _Window(tmp_path / "cache", profile=object())
+    ed = _editor_with(win.local_asset())
+    box, shown = fake_alert(click="Upload and Publish")
+    monkeypatch.setattr(alerts, "Alert", box)
+    published = []
+    win._after_uploads(ed, lambda: published.append(True))
+    box, shown = fake_alert(click="Try Again")
     monkeypatch.setattr(alerts, "Alert", box)
 
-    assert win._confirm_images_uploaded(ed) is False
-    assert [d.title for d in shown] == ["Upload 1 image before publishing?"]
-    assert win._asset_manager.get(local.sha256).upload_state.value != "local", (
-        "Upload now has to actually queue the blocked asset"
-    )
+    win.fail_upload()
+    win.finish_upload()
+
+    assert len(win._uploader.calls) == 2
+    assert published == [True]
 
 
-def test_publish_gate_passes_a_document_whose_images_are_all_reachable(tmp_path,
-                                                                       monkeypatch):
+def test_a_picture_that_is_gone_stops_publishing_saying_which(tmp_path, monkeypatch):
+    win = _Window(tmp_path / "cache", profile=object())
+    ed = HtmlEditor()
+    ed._file_path = str(tmp_path / "Trip.md")
+    ed.textCursor().insertImage(_fmt("Trip_media/gone.png", "gone"))
+
+    shown, published = _publishing(win, ed, monkeypatch, None)
+
+    assert [d.title for d in shown] == ["A picture can’t be found"]
+    assert "Trip_media/gone.png" in shown[0].message
+    assert published == []
+
+
+def test_a_picture_beside_the_document_is_published_by_its_address(tmp_path, monkeypatch):
+    # A .md reopened names its pictures by their file beside it: publishing
+    # used to ask to upload them, upload nothing and ask again, forever.
+    win = _Window(tmp_path / "cache", profile=object())
+    (tmp_path / "Trip_media").mkdir()
+    (tmp_path / "Trip_media" / "sea.png").write_bytes(PNG_BYTES)
+    ed = HtmlEditor()
+    ed._file_path = str(tmp_path / "Trip.md")
+    ed.textCursor().insertImage(_fmt("Trip_media/sea.png", "sea"))
+
+    _shown, published = _publishing(win, ed, monkeypatch, "Upload and Publish")
+    win.finish_upload()
+
+    sha = hashlib.sha256(PNG_BYTES).hexdigest()
+    assert published == [True]
+    assert f"](https://cdn.example/{sha}.png)" in win._publish_text(ed, "markdown")
+    assert list(iter_image_names(ed.document())) == ["Trip_media/sea.png"], (
+        "the document names it as its file does: saving writes it back as it was")
+
+
+def _two_local(win):
+    first = win._asset_manager.adopt_bytes(GIF_BYTES, alt="sketch")
+    second = win._asset_manager.adopt_bytes(PNG_BYTES, alt="photo")
+    return first, second, _editor_with(first, second)
+
+
+def _answer(monkeypatch, click):
+    box, shown = fake_alert(click=click)
+    monkeypatch.setattr(alerts, "Alert", box)
+    return shown
+
+
+def test_a_failure_names_the_file_that_failed_and_is_said_once(tmp_path, monkeypatch):
+    # The manager fails the file queued behind a failing one first, with
+    # no signal of its own: the alert named that one, opened inside the
+    # manager's drain, and Try Again failed again at once, for ever.
+    win = _Window(tmp_path / "cache", profile=object())
+    first, second, ed = _two_local(win)
+    _answer(monkeypatch, "Upload and Publish")
+    published = []
+    win._after_uploads(ed, lambda: published.append(True))
+    QApplication.processEvents()
+    sending = win._asset_manager.get(win._uploader.calls[-1].name.split(":", 1)[1])
+    shown = _answer(monkeypatch, "Try Again")
+
+    win.fail_upload()
+
+    assert [d.title for d in shown] == [f"Couldn’t upload “{sending.alt}”"]
+    assert published == []
+    win.finish_upload()
+    win.finish_upload()
+    assert [d.title for d in shown] == [f"Couldn’t upload “{sending.alt}”"]
+    assert published == [True]
+
+
+def test_files_that_failed_before_are_sent_again_without_a_false_failure(tmp_path,
+                                                                        monkeypatch):
+    win = _Window(tmp_path / "cache", profile=object())
+    first, second, ed = _two_local(win)
+    win._uploader.fail_synchronously = "UPLOAD_FAILED"
+    for asset in (first, second):
+        win._asset_manager.request_upload(asset.sha256)
+    win._uploader.fail_synchronously = None
+    assert {a.upload_state for a in (first, second)} == {AssetState.FAILED}
+    shown = _answer(monkeypatch, "Upload and Publish")
+    published = []
+
+    win._after_uploads(ed, lambda: published.append(True))
+    QApplication.processEvents()
+    win.finish_upload()
+    win.finish_upload()
+
+    assert [d.title for d in shown] == ["Upload 2 files to publish?"]
+    assert published == [True]
+
+
+def test_after_a_refusal_on_the_spot_and_cancel_nothing_more_is_sent(tmp_path, monkeypatch):
+    # The person cancelled and was told nothing was published: the file
+    # after the refused one must not leave the computer.
+    win = _Window(tmp_path / "cache", profile=object())
+    first, second, ed = _two_local(win)
+    win._uploader.fail_synchronously = "UPLOAD_FAILED"
+    _answer(monkeypatch, "Upload and Publish")
+    win._after_uploads(ed, lambda: None)
+    shown = _answer(monkeypatch, "Cancel")
+
+    QApplication.processEvents()
+
+    assert [d.title for d in shown][0].startswith("Couldn’t upload")
+    assert len(win._uploader.calls) == 1
+    assert AssetState.LOCAL in {first.upload_state, second.upload_state}
+
+
+def test_publishing_while_a_draft_is_saved_leaves_the_draft_alone(tmp_path, monkeypatch):
+    win = _Window(tmp_path / "cache", profile=object())
+    ed = _editor_with(win.local_asset())
+    _answer(monkeypatch, "Upload and Save")
+    happened = []
+
+    win._after_uploads(ed, lambda: happened.append("draft"), draft=True)
+    win._after_uploads(ed, lambda: happened.append("publish"))
+    QApplication.processEvents()
+    win.finish_upload()
+
+    assert sorted(happened) == ["draft", "publish"]
+
+
+def test_a_failure_for_a_closed_document_says_nothing(tmp_path, monkeypatch):
+    win = _Window(tmp_path / "cache", profile=object())
+    ed = _editor_with(win.local_asset())
+    _answer(monkeypatch, "Upload and Publish")
+    win._after_uploads(ed, lambda: None)
+    shown = _answer(monkeypatch, "Try Again")
+    win._editor_widget_index = lambda _ed: -1           # its tab was closed
+
+    win.fail_upload()
+
+    assert shown == []
+
+
+def test_a_draft_is_saved_only_under_the_account_it_was_asked_for(tmp_path):
+    said, fired = [], []
+    window = types.SimpleNamespace(
+        _profile_store=types.SimpleNamespace(
+            default=lambda: types.SimpleNamespace(user_pubkey="b" * 64)),
+        status=types.SimpleNamespace(showMessage=said.append),
+        _fire_draft_publish_job=lambda *args: fired.append(args))
+
+    MainWindow._save_draft(window, HtmlEditor(), types.SimpleNamespace(user_pubkey="a" * 64),
+                           types.SimpleNamespace(kind=None))
+
+    assert fired == []
+    assert said == ["The draft was not saved: another account is in use."]
+
+
+def test_a_markdown_save_that_cannot_copy_a_file_says_so(tmp_path):
     win = _Window(tmp_path / "cache")
-    win._confirm_images_uploaded = types.MethodType(
-        MainWindow._confirm_images_uploaded, win)
-    ed = _editor_with(win.uploaded_asset())
-    box, shown = fake_alert()
+    win._media_file_link = types.MethodType(MainWindow._media_file_link, win)
+    song = win._asset_manager.adopt_media(b"ID3" + b"x" * 64, mime="audio/mpeg", name="song.mp3")
+    ed = _editor_with(song)
+    (tmp_path / "Doc_media").write_text("a file where the folder goes", encoding="utf-8")
+
+    target = win._image_target_for_file_save(ed.document(), str(tmp_path / "Doc.md"))
+    written = document_to_markdown(ed.document(), win._markdown_reference_for(target))
+
+    assert "song" not in written
+    assert target.left_out == [song]
+
+
+def test_a_copy_already_beside_the_document_is_never_written_over(tmp_path):
+    win = _Window(tmp_path / "cache")
+    win._media_file_link = types.MethodType(MainWindow._media_file_link, win)
+    song = win._asset_manager.adopt_media(b"ID3" + b"x" * 64, mime="audio/mpeg", name="song.mp3")
+    (tmp_path / "Doc_media").mkdir()
+    copy = tmp_path / "Doc_media" / f"{song.sha256}.mp3"
+    copy.write_bytes(b"trimmed by the person since")
+
+    link = win._media_file_link(song, str(tmp_path / "Doc.md"), "Our song")
+
+    assert copy.read_bytes() == b"trimmed by the person since"
+    assert link.markdown() == f"[Our song](Doc_media/{song.sha256}.mp3)"
+
+
+def test_saving_a_draft_says_its_files_are_not_encrypted(tmp_path, monkeypatch):
+    win = _Window(tmp_path / "cache", profile=object())
+    box, shown = fake_alert(click="Cancel")
     monkeypatch.setattr(alerts, "Alert", box)
 
-    assert win._confirm_images_uploaded(ed) is True
-    assert shown == [], "nothing to warn about, so no modal"
+    win._after_uploads(_editor_with(win.local_asset()), lambda: None, draft=True)
+
+    assert shown[0].title == "Upload 1 file to save the draft?"
+    assert "Your draft is encrypted, the file on your media servers is not" in shown[0].message
+    assert [b.label for b in shown[0].buttons] == ["Cancel", "Upload and Save"]
 
 
 # --------------------------------------------------------------------------- #

@@ -56,13 +56,13 @@ def group_of(names, checked):
 
 
 class Fixture:
-    def __init__(self, *, nostr=False, paste="ask", format_bar=True):
+    def __init__(self, *, nostr=False, upload="publishing", format_bar=True):
         self.appearance_group, self.appearance = group_of(("system", "light", "dark"), "system")
         self.language_group, languages = group_of(("system", "en", "de"), "en")
         self.languages = list(languages.items())
         self.chosen_languages = []
         self.family = "system"
-        self.paste = paste
+        self.upload = upload
         self.nostr = nostr
         self.format_bar = format_bar
         self.triggered = []
@@ -72,7 +72,7 @@ class Fixture:
             appearance=self.appearance, languages=self.languages,
             choose_language=self.chosen_languages.append,
             writing_family=lambda: self.family, choose_writing_family=self._store_family,
-            paste_choice=lambda: self.paste, choose_paste=self._store_paste,
+            upload_choice=lambda: self.upload, choose_upload=self._store_upload,
             nostr_in_use=lambda: self.nostr,
             format_bar=lambda: self.format_bar, choose_format_bar=self._store_format_bar,
             is_dark=False)
@@ -83,8 +83,8 @@ class Fixture:
     def _store_family(self, family):
         self.family = family
 
-    def _store_paste(self, value):
-        self.paste = value
+    def _store_upload(self, value):
+        self.upload = value
 
 
 def test_choosing_an_appearance_is_the_menu_command():
@@ -196,26 +196,28 @@ def test_the_format_bar_over_a_selection_is_a_writing_choice():
     assert Fixture(format_bar=False).window.format_bar.isChecked() is False
 
 
-def test_pasted_images_are_offered_only_while_nostr_is_in_use():
+def test_when_files_upload_is_offered_only_while_nostr_is_in_use():
     f = Fixture(nostr=False)
     f.window.show()
     QApplication.processEvents()
-    assert not f.window.paste.isVisible()
+    assert not f.window.upload.isVisible()
     f.nostr = True
     f.window.refresh()
     QApplication.processEvents()
-    assert f.window.paste.isVisible()
+    assert f.window.upload.isVisible()
     f.window.close()
 
 
-def test_the_pasted_image_choice_is_stored_and_read_again_when_shown():
-    f = Fixture(nostr=True, paste="never")
-    assert f.window.paste.currentData() == "never"
-    f.window.paste.activated.emit(f.window.paste.findData("always"))
-    assert f.paste == "always"
-    f.paste = "ask"                      # an alert remembered something else meanwhile
+def test_the_upload_choice_is_stored_and_read_again_when_shown():
+    f = Fixture(nostr=True, upload="now")
+    assert [f.window.upload.itemData(i) for i in range(f.window.upload.count())] == [
+        "publishing", "now"]
+    assert f.window.upload.currentData() == "now"
+    f.window.upload.activated.emit(f.window.upload.findData("publishing"))
+    assert f.upload == "publishing"
+    f.upload = "now"
     f.window.show()
-    assert f.window.paste.currentData() == "ask"
+    assert f.window.upload.currentData() == "now"
     f.window.close()
 
 
@@ -276,7 +278,7 @@ def test_where_published_posts_open_is_offered_with_nostr_and_kept():
         appearance=appearance, languages=list(languages.items()),
         choose_language=lambda code: None, writing_family=lambda: "system",
         choose_writing_family=lambda family: None,
-        paste_choice=lambda: "ask", choose_paste=lambda value: None,
+        upload_choice=lambda: "publishing", choose_upload=lambda value: None,
         nostr_in_use=lambda: nostr["on"], format_bar=lambda: True,
         choose_format_bar=lambda on: None, web_reader=lambda: "discover",
         choose_web_reader=chosen.append)
@@ -302,7 +304,7 @@ def dictation_window(ways, prefs=None, **kwargs):
         appearance=appearance, languages=[],
         choose_language=lambda code: None,
         writing_family=lambda: "system", choose_writing_family=lambda family: None,
-        paste_choice=lambda: "ask", choose_paste=lambda value: None,
+        upload_choice=lambda: "publishing", choose_upload=lambda value: None,
         nostr_in_use=lambda: False, format_bar=lambda: True,
         choose_format_bar=lambda on: None, dictation_ways=ways,
         dictation=lambda: chosen[-1], choose_dictation=chosen.append, is_dark=False, **kwargs)

@@ -36,7 +36,7 @@ from PySide6.QtGui import (  # noqa: E402
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
 from markdown_writer import (  # noqa: E402
-    READ_FEATURES, document_to, document_to_markdown, document_to_note_text,
+    READ_FEATURES, document_to, document_to_markdown, document_to_note_text, holds_faithfully,
 )
 
 
@@ -352,8 +352,12 @@ def test_a_bare_nostr_reference_keeps_a_space_from_the_words_around_it():
 
 
 def test_a_link_label_with_a_bracket_is_escaped():
-    doc = typed(("see [1]", {"href": "https://x.example"}))
-    assert document_to_markdown(doc) == "[see [1\\]](https://x.example)\n"
+    # Both brackets, and a "<" (read as HTML): an unescaped "[" did not
+    # read back as the same link, so such a file opened as its text.
+    doc = typed(("see [1] <live>", {"href": "https://x.example"}))
+    written = document_to_markdown(doc)
+    assert written == "[see \\[1\\] \\<live>](https://x.example)\n"
+    assert holds_faithfully(written)
 
 
 def test_backticks_inside_code_get_a_longer_fence():

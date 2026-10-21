@@ -162,7 +162,9 @@ def test_the_drafts_panel_goes_when_no_account_is_in_use():
     hidden, toggles = [], []
     win = SimpleNamespace(_hide_drafts_panel=lambda: hidden.append(True),
                           _show_pane_toggles=toggles.append,
-                          _update_article_headers=lambda: None)
+                          _update_article_headers=lambda: None,
+                          _redraw_badges=lambda: None,
+                          _cancel_upload_waits=lambda: None)
     MainWindow._on_nostr_in_use_changed(win, True)
     assert hidden == [] and toggles == [True]
     # The panel and its toolbar toggles go together.

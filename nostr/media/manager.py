@@ -189,6 +189,10 @@ class AssetManager(QObject):
     def get(self, sha256: str) -> Optional[DocumentAsset]:
         return self._index.get(sha256)
 
+    def has_bytes(self, sha256: str) -> bool:
+        """Whether this computer holds the file's bytes (without reading them)."""
+        return self._blob_store.has((sha256 or "").lower())
+
     def __contains__(self, sha256: object) -> bool:
         return isinstance(sha256, str) and self._index.get(sha256) is not None
 
