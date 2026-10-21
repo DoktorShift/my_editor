@@ -15,7 +15,7 @@ from dataclasses import dataclass
 from typing import List, Optional
 
 from PySide6.QtCore import (
-    Qt, QTimer, QRect, QPoint, QPointF, QMetaMethod, QEvent, QUrl, Signal,
+    Qt, QTimer, QMargins, QRect, QPoint, QPointF, QMetaMethod, QEvent, QUrl, Signal,
 )
 from PySide6.QtGui import (
     QPainter, QTextBlockFormat, QTextCursor, QTextCharFormat, QColor, QClipboard, QPen,
@@ -46,8 +46,9 @@ import url_safety
 from link_popover import LinkPopover, clipboard_address
 
 
-# Characters per line when writing: within the 50 to 75 that typography
-# (and nostrdesign.org's UI tips) give for comfortable reading.
+# Characters per line of prose (set_readable_width): within the 50 to 75
+# that typography (and nostrdesign.org's UI tips) give for comfortable
+# reading.
 WRITING_MEASURE = 72
 
 # Stand-in painted for an image whose bytes have not arrived yet. Its
@@ -285,8 +286,10 @@ class HtmlEditor(QTextEdit):
         doc.setDocumentMargin(text_look.CODE_PAD_X + 4)
         doc.setUndoRedoEnabled(True)
         doc.setModified(False)
-        # Characters per line when writing; None for code (full width).
-        self._writing_measure_chars = None
+        # Characters per line of prose; None for code (full width).
+        self._readable_chars = None
+        # Line numbers shown beside the text (set_gutter_shown).
+        self._gutter_shown = False
         self._highlights = {layer: [] for layer in self.HIGHLIGHT_LAYERS}
         self.document().contentsChange.connect(self._renew_highlights)
         self.verticalScrollBar().valueChanged.connect(self.visible_area_changed)
@@ -694,15 +697,30 @@ class HtmlEditor(QTextEdit):
         self.viewport().update()
 
     def set_writing_font(self, writing: bool, font: Optional[QFont] = None) -> None:
-        """Writing (Markdown, drafts): a text font at a reading size, in a
-        column of a comfortable line length. Otherwise (code, plain text):
-        the monospace font across the whole width. ``font``: the one chosen
-        (Settings: the writing font, and the app's text size); the defaults
-        when not given."""
+        """Writing (Markdown, drafts): a text font at a reading size.
+        Otherwise (code, plain text): the monospace font. ``font``: the one
+        chosen (Settings: the writing font, and the app's text size); the
+        defaults when not given. How wide the text runs is apart from it
+        (set_readable_width)."""
         self.setFont(font if font is not None else (writing_font() if writing else code_font()))
-        self._writing_measure_chars = WRITING_MEASURE if writing else None
         self._update_paper_margins()
         self.viewport().update()
+
+    def set_readable_width(self, on: bool) -> None:
+        """Prose (``on``) keeps to a readable line length, WRITING_MEASURE
+        characters of its font, in a column centred in the window, as
+        Apple's readable content width keeps text; code runs across the
+        whole width, its lines as long as they were written."""
+        self._readable_chars = WRITING_MEASURE if on else None
+        self._update_paper_margins()
+        self.viewport().update()
+
+    def set_gutter_shown(self, on: bool) -> None:
+        """Line numbers are shown at the left (``on``): the column starts
+        beside them, as Xcode keeps its line numbers next to the text,
+        instead of in the middle of the window, far from them."""
+        self._gutter_shown = bool(on)
+        self._update_paper_margins()
 
     def set_top_inset(self, height: int) -> None:
         """Room above the text, in pixels, for a header shown there
@@ -716,23 +734,30 @@ class HtmlEditor(QTextEdit):
         return self._top_inset
 
     def _update_paper_margins(self):
-        """The text column: Paper Mode's page, or the writing measure, or
-        the whole width; below a header's room, if any."""
-        chars = self._paper_measure_chars if self._paper_mode else self._writing_measure_chars
-        if not chars:
-            self.setViewportMargins(0, self._top_inset, 0, 0)
-            return
-        metrics = self.fontMetrics()
-        char_w = (metrics.averageCharWidth() if self._writing_measure_chars
-                  else metrics.horizontalAdvance("0")) or 8
-        # The line is ``chars`` long, the document's margins beside it.
-        measure = char_w * chars + 2 * self.document().documentMargin()
-        side = int(max(0, (self.width() - measure) / 2))
-        self.setViewportMargins(side, self._top_inset, side, 0)
+        """The text column: Paper Mode's page, or the readable width, or
+        the whole width; below a header's room, if any; centred, or beside
+        the line numbers while they are shown."""
+        chars = self._paper_measure_chars if self._paper_mode else self._readable_chars
+        side = 0
+        if chars:
+            metrics = self.fontMetrics()
+            char_w = (metrics.averageCharWidth() if self._readable_chars
+                      else metrics.horizontalAdvance("0")) or 8
+            # The line is ``chars`` long, the document's margins beside it.
+            measure = char_w * chars + 2 * self.document().documentMargin()
+            side = int(max(0, (self.width() - measure) / 2))
+        margins = (QMargins(0, self._top_inset, 2 * side, 0) if self._gutter_shown
+                   else QMargins(side, self._top_inset, side, 0))
+        if margins != self.viewportMargins():
+            self.setViewportMargins(margins)
+            # Qt lays the text out again when the editor is resized, not
+            # its viewport: laid out to the new width now, or its lines
+            # run on past the column, cut off, until the window is resized.
+            self.setLineWrapColumnOrWidth(self.lineWrapColumnOrWidth())
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
-        if self._paper_mode or self._writing_measure_chars:
+        if self._paper_mode or self._readable_chars:
             self._update_paper_margins()
         self.visible_area_changed.emit()
 
