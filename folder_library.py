@@ -132,9 +132,40 @@ def safe_name(text: str, fallback: str) -> str:
     return name or fallback
 
 
-def _check_name(name: str) -> None:
+# What Windows refuses in a name, as Explorer names it when a name
+# holds one of these.
+_WINDOWS_REFUSED = '\\ / : * ? " < > |'
+
+
+def name_problem(name: str, platform: Optional[str] = None) -> Optional[str]:
+    """Why ``name`` cannot be given to an item on this system (or on
+    ``platform``, a ``sys.platform`` value), as a sentence for the
+    person; None when it can. Every system refuses an empty name, "." and
+    "..", a path separator and a NUL. Windows also refuses the characters
+    Explorer names, control characters, a name that ends with a space or
+    a period, and the names it keeps for its devices (CON, NUL, COM1 and
+    on, with any extension); asked anyway, it answers with an error that
+    says nothing about the name."""
+    platform = sys.platform if platform is None else platform
     if not name or name in (".", "..") or "/" in name or "\\" in name or "\x00" in name:
-        raise ValueError(_("“{name}” cannot be used as a name.").format(name=name))
+        return _("“{name}” cannot be used as a name.").format(name=name)
+    if platform != "win32":
+        return None
+    if _FORBIDDEN.search(name):
+        return _("A name can't contain any of these characters: {characters}").format(
+            characters=_WINDOWS_REFUSED)
+    if name[-1] in ". ":
+        return _("A name can't end with a space or a period.")
+    if _RESERVED.match(name.split(".")[0].rstrip(" ")):
+        return _("“{name}” is a name Windows keeps for itself. Choose a different name.").format(
+            name=name)
+    return None
+
+
+def _check_name(name: str) -> None:
+    problem = name_problem(name)
+    if problem is not None:
+        raise ValueError(problem)
 
 
 def media_folder_of(note: str) -> str:

@@ -455,7 +455,13 @@ def test_a_note_of_any_shape_is_read_in_time_proportional_to_its_length():
 # -- names that would change what a link means ---------------------------------
 
 
-@pytest.mark.parametrize("name", ["C# tips.md", "Why?.md", "100% sure.md", "a%41.md"])
+@pytest.mark.parametrize("name", [
+    "C# tips.md",
+    # Windows holds no "?" in a name: the library refuses it there and says
+    # why (test_folder_library), so no link ever points at one.
+    pytest.param("Why?.md", marks=pytest.mark.skipif(sys.platform == "win32",
+                                                     reason="Windows names hold no question mark")),
+    "100% sure.md", "a%41.md"])
 def test_a_name_that_reads_as_part_of_an_address_is_encoded_and_followed_again(tmp_path,
                                                                                 name):
     write(tmp_path / "tips.md", "")

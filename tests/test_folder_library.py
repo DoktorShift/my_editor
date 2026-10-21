@@ -309,6 +309,45 @@ def test_a_name_with_a_slash_is_refused(tmp_path, library):
             library.rename(str(tmp_path / "a.md"), bad)
 
 
+WINDOWS_CHARACTERS = "A name can't contain any of these characters: \\ / : * ? \" < > |"
+
+
+@pytest.mark.parametrize("name", ["Why?.md", "a:b.md", "a*.md", "<a>.md", "a|b.md",
+                                  "say \"hi\".md", "tab\there.md"])
+def test_windows_refuses_the_characters_explorer_names_and_says_which(name):
+    assert folder_library.name_problem(name, "win32") == WINDOWS_CHARACTERS
+    assert folder_library.name_problem(name, "darwin") is None
+    assert folder_library.name_problem(name, "linux") is None
+
+
+@pytest.mark.parametrize("name", ["CON", "con.md", "Nul .txt", "COM1.tar.gz", "lpt9.md"])
+def test_windows_refuses_the_names_it_keeps_for_its_devices(name):
+    assert folder_library.name_problem(name, "win32") == (
+        f"“{name}” is a name Windows keeps for itself. Choose a different name.")
+    assert folder_library.name_problem(name, "darwin") is None
+
+
+def test_windows_refuses_a_name_that_ends_with_a_space_or_a_period():
+    for name in ("Notes.", "Notes "):
+        assert folder_library.name_problem(name, "win32") == \
+            "A name can't end with a space or a period."
+    for name in ("Console.md", "Connect", "COM10.md", ".hidden", "Notes.md"):
+        assert folder_library.name_problem(name, "win32") is None
+
+
+def test_a_rename_to_a_name_the_system_refuses_says_why_and_changes_nothing(tmp_path, library):
+    note = write(tmp_path / "tips.md")
+    if sys.platform == "win32":
+        with pytest.raises(ValueError) as refused:
+            library.rename(str(note), "Why?.md")
+        assert str(refused.value) == WINDOWS_CHARACTERS
+        assert os.listdir(tmp_path) == ["tips.md"]
+    else:
+        # Elsewhere the name is a name like any other.
+        assert library.rename(str(note), "Why?.md").new_path == str(tmp_path / "Why?.md")
+        assert os.listdir(tmp_path) == ["Why?.md"]
+
+
 def test_a_change_of_case_is_a_rename(tmp_path, library):
     write(tmp_path / "note.md")
     result = library.rename(str(tmp_path / "note.md"), "Note.md")

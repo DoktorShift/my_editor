@@ -65,6 +65,7 @@ from dictation import models as dictation_models, on_device, setup as dictation_
 from dictation.indicator import DictationIndicator
 from dictation.preferences import Preferences
 import file_paths
+import folder_library
 import i18n
 from i18n import N_, _, ngettext, pgettext
 from commands import (
@@ -3719,6 +3720,10 @@ class MainWindow(QMainWindow):
             return
 
         new_name = new_name.strip()
+        problem = folder_library.name_problem(new_name)
+        if problem is not None:
+            inform(self, title=_("Couldn't rename the file"), message=problem)
+            return
         new_path = file_paths.normalize(os.path.join(directory, new_name))
 
         # Any entry with that name is a clash, a link (even a broken one)
@@ -3760,6 +3765,10 @@ class MainWindow(QMainWindow):
                                             text=old_name)
         new_name = new_name.strip() if ok else ""
         if not new_name or new_name == old_name:
+            return
+        problem = folder_library.name_problem(new_name)
+        if problem is not None:
+            inform(self, title=_("Couldn't rename the file"), message=problem)
             return
         new_path = file_paths.normalize(os.path.join(os.path.dirname(old_path), new_name))
         if os.path.lexists(new_path) and not file_paths.is_case_change(old_path, new_path):
