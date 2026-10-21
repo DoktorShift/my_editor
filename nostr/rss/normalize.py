@@ -14,15 +14,17 @@ Two layers:
 
 from __future__ import annotations
 
+import html
+import re
 from dataclasses import dataclass
 from typing import Iterable, Optional, Tuple
-from urllib.parse import urljoin, urlsplit
+from urllib.parse import urlsplit
 
-from bs4 import BeautifulSoup
 from markdownify import ATX, markdownify as _markdownify
 
+from .clean import clean_html, code_language
 from .dtag import derive_identifier
-from .parser import FeedItem
+from .parser import FeedItem, whole_url
 
 
 _SOURCE_FOOTER_SEPARATOR = "\n\n---\n\n"
@@ -45,61 +47,143 @@ class ArticleTemplate:
 def html_to_markdown(html: str, *, base_url: Optional[str] = None) -> str:
     """HTML to Markdown with TS-reference-aligned options.
 
-    ``base_url`` (the post's own page) makes relative links and images
-    whole: a feed's ``<a href="/about">`` or ``<img src="/media/a.jpg">``
-    points nowhere in a draft or an article read elsewhere (CP1 review
-    O3). A link to a place in the post itself (``#notes``) is left alone.
+    The HTML is cleaned first (clean.py): ``base_url`` (the post's own
+    page) makes relative links and images whole, since a feed's
+    ``<a href="/about">`` or ``<img src="/media/a.jpg">`` points nowhere
+    in a draft or an article read elsewhere (CP1 review O3); lazy
+    images, embeds, video and audio, and page furniture are settled
+    there too. A code block keeps the language it names.
     """
     if not html:
         return ""
-    if base_url and urlsplit(base_url).scheme in ("http", "https"):
-        html = _absolute(html, base_url)
     return _markdownify(
-        html,
+        clean_html(html, base_url=base_url),
         heading_style=ATX,
         bullets="-",
         strong_em_symbol="_",
+        code_language_callback=code_language,
     )
 
 
-def _absolute(html: str, base_url: str) -> str:
-    if "href" not in html and "src" not in html:
-        return html
-    soup = BeautifulSoup(html, "html.parser")
-    changed = False
-    for tag, attribute in (("a", "href"), ("img", "src")):
-        for element in soup.find_all(tag):
-            value = (element.get(attribute) or "").strip()
-            if not value or value.startswith("#") or urlsplit(value).scheme:
-                continue
-            element[attribute] = urljoin(base_url, value)
-            changed = True
-    return str(soup) if changed else html
+# WordPress's default category, as its translations name it: a post
+# nobody filed is not about "uncategorized".
+_UNFILED = frozenset({
+    "uncategorized", "uncategorised", "allgemein", "sincategoría",
+    "sincategoria", "nonclassé", "nonclasse", "senzacategoria",
+    "geencategorie", "semcategoria", "bezkategorii", "okategoriserade",
+})
+
+_SUMMARY_CHARS = 280
+_SPACE = re.compile(r"\s+")
+_TAG = re.compile(r"<[^>]+>")
+_EMAIL = re.compile(r"^[^@\s()<>]+@[^@\s()<>]+\.[^@\s()<>]+$")
+_EMAIL_WITH_NAME = re.compile(r"^\S+@\S+\s*\((.+)\)$")
+_READ_MORE = re.compile(r"\s*(\[(…|\.\.\.|&hellip;)\]|…|\.\.\.)\s*"
+                        r"(continue reading.*|read more.*|weiterlesen.*)?$",
+                        re.IGNORECASE)
+_APPEARED_FIRST = re.compile(r"\s*\b(The post|Der Beitrag)\b.+\b(appeared first on|"
+                             r"erschien zuerst auf)\b.*$", re.IGNORECASE)
+_MD_IMAGE = re.compile(r"!\[[^\]]*\]\([^)]*\)")
+_MD_LINK = re.compile(r"\[([^\]]*)\]\([^)]*\)")
+_MD_MARKS = re.compile(r"(^|\s)[#>]+\s|(?<!\\)[*_`~]+|<(https?://[^>]+)>")
+_MD_ESCAPE = re.compile(r"\\([\\`*_{}\[\]()#+\-.!<>|~])")
+
+
+def hashtag(raw: str) -> str:
+    """One category as a Nostr hashtag: no ``#``, lower case, no spaces
+    (a ``t`` tag with a space is a hashtag no client can link)."""
+    return "".join((raw or "").strip().lstrip("#").lower().split())
 
 
 def _merge_hashtags(
     item_categories: Iterable[str],
     extra: Iterable[str],
 ) -> Tuple[str, ...]:
-    """Lowercase, strip, dedupe (preserving first-seen order)."""
+    """As hashtags (:func:`hashtag`), deduped in first-seen order.
+    WordPress's default "Uncategorized" is left out."""
     seen: list[str] = []
-    for raw in (*item_categories, *extra):
-        if not raw:
-            continue
-        tag = raw.strip().lstrip("#").lower()
+    categories = [hashtag(raw) for raw in item_categories]
+    for tag in (*(c for c in categories if c not in _UNFILED),
+                *(hashtag(raw) for raw in extra)):
         if tag and tag not in seen:
             seen.append(tag)
     return tuple(seen)
 
 
-def source_link_footer(link: str) -> str:
-    """Footer block appended to a feed item's body when ``link`` is set.
+def author_name(raw: Optional[str]) -> str:
+    """The name to credit a post to, or "" when the source names nobody.
+
+    RSS writes an author as an e-mail address, often with the name after
+    it (``jane@example.com (Jane Doe)``): the name is kept, an address
+    alone is never published."""
+    value = _SPACE.sub(" ", html.unescape(_TAG.sub(" ", raw or ""))).strip()
+    match = _EMAIL_WITH_NAME.match(value)
+    if match:
+        value = match.group(1).strip()
+    if _EMAIL.match(value):
+        return ""
+    return value
+
+
+def plain_summary(summary_html: Optional[str]) -> str:
+    """A feed's summary as the plain text NIP-23 asks for: no tags, no
+    entities, one line, without the "[…]" a teaser ends on or the
+    "The post X appeared first on Y." line SEO plugins add."""
+    text = _SPACE.sub(" ", html.unescape(_TAG.sub(" ", summary_html or ""))).strip()
+    text = _APPEARED_FIRST.sub("", text).strip()
+    trimmed = _READ_MORE.sub("", text).strip()
+    if trimmed != text and trimmed:
+        text = trimmed + "…"
+    return _shorten(text)
+
+
+def summary_from_body(markdown: str) -> str:
+    """A summary made of the article's opening words, for a post whose
+    source gives none: what a reader sees first, cut at a word."""
+    paragraphs = []
+    in_code = False
+    for block in re.split(r"\n\s*\n", markdown or ""):
+        stripped = block.strip()
+        if stripped.startswith("```"):
+            in_code = not in_code or stripped.count("```") > 1
+            continue
+        if in_code or not stripped or stripped.startswith(("#", "|", "---", "*Originally")):
+            continue
+        text = _MD_MARKS.sub(lambda m: m.group(1) or m.group(2) or "",
+                             _MD_LINK.sub(r"\1", _MD_IMAGE.sub(" ", stripped)))
+        text = _MD_ESCAPE.sub(r"\1", text)
+        text = _SPACE.sub(" ", text).strip()
+        if text:
+            paragraphs.append(text)
+        if sum(len(p) for p in paragraphs) >= _SUMMARY_CHARS // 2:
+            break
+    return _shorten(" ".join(paragraphs))
+
+
+def _shorten(text: str) -> str:
+    if len(text) <= _SUMMARY_CHARS:
+        return text
+    cut = text[:_SUMMARY_CHARS].rsplit(" ", 1)[0].rstrip(" ,;:.-")
+    return cut + "…"
+
+
+def source_link_footer(link: str, author: Optional[str] = None) -> str:
+    """Footer block appended to a feed item's body when ``link`` is set,
+    crediting the post's author when the source names one.
 
     Public so other callers (notably the long-form resolver) can compute
     its length to decide whether the pre-footer body is "thin", without
     re-implementing the format.
     """
+    name = author_name(author)
+    if name:
+        credit = _MD_SPECIAL.sub(r"\\\g<0>", name)
+        return (f"{_SOURCE_FOOTER_SEPARATOR}*Originally published by {credit} "
+                f"at [{link}]({link})*")
     return f"{_SOURCE_FOOTER_SEPARATOR}*Originally published at [{link}]({link})*"
+
+
+_MD_SPECIAL = re.compile(r"[\\`*_\[\]<>]")
 
 
 def item_to_article(
@@ -118,13 +202,18 @@ def item_to_article(
     Content precedence: a source-supplied ``content_markdown`` (Nostr
     long-form, NostrHub NIPs, MDX) is authoritative and taken verbatim;
     otherwise the item's HTML body is converted.
+
+    The details are made fit to publish whatever the source wrote: the
+    summary as plain text (or the opening words when the source has
+    none), the cover as a whole address, the hashtags without spaces.
     """
     if (item.content_markdown or "").strip():
         markdown = str(item.content_markdown).strip()
     else:
         markdown = html_to_markdown(item.content_html, base_url=item.link).strip()
+    body = markdown
     if append_source_link and item.link:
-        markdown = (markdown + source_link_footer(item.link)).strip()
+        markdown = (markdown + source_link_footer(item.link, item.author)).strip()
 
     slug = derive_identifier(
         guid=item.guid,
@@ -137,8 +226,16 @@ def item_to_article(
         slug=slug,
         content=markdown,
         title=item.title or "",
-        summary=item.summary or "",
-        image=item.image or "",
+        summary=plain_summary(item.summary) or summary_from_body(body),
+        image=cover_address(item.image, item.link),
         published_at=item.published_at,
         hashtags=_merge_hashtags(item.categories, hashtags),
     )
+
+
+def cover_address(image: Optional[str], page: Optional[str]) -> str:
+    """The cover as a whole web address (made whole against the post's
+    page), or "" for anything else (a ``data:`` picture, a bare path
+    with no page to place it)."""
+    value = whole_url(image, page) or ""
+    return value.strip() if urlsplit(value.strip()).scheme in ("http", "https") else ""

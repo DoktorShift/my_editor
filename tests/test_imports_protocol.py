@@ -119,8 +119,11 @@ class TestInnerEventNip23:
         bare = make_item("", guid="proto-guid-2", link=None,
                          content_html="<p>body text of the bare item</p>")
         inner = imported_inner_event(bare)
-        for name in ("title", "summary", "image", "published_at", "t"):
+        for name in ("title", "image", "published_at", "t"):
             assert tag_values(inner, name) == [], name
+        # The one detail made when the source has none: a summary of the
+        # opening words, as plain text.
+        assert tag_values(inner, "summary") == ["body text of the bare item"]
 
     def test_identifier_is_deterministic_across_runs(self):
         first = imported_inner_event()

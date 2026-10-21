@@ -382,7 +382,7 @@ class ImportItemsJob(QObject):
         """Length of the markdown body excluding the source-link footer."""
         body_chars = len(template.content.strip())
         if self._append_source_link and item.link:
-            footer_chars = len(source_link_footer(item.link))
+            footer_chars = len(source_link_footer(item.link, item.author))
             body_chars = max(0, body_chars - footer_chars)
         return body_chars
 
@@ -391,7 +391,7 @@ class ImportItemsJob(QObject):
 
     def _with_footer(self, content: str, item: FeedItem) -> str:
         if self._append_source_link and item.link:
-            return (content + source_link_footer(item.link)).strip()
+            return (content + source_link_footer(item.link, item.author)).strip()
         return content.strip()
 
     # -- podcast episodes --------------------------------------------------
