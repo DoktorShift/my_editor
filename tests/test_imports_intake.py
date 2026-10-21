@@ -12,6 +12,8 @@ from __future__ import annotations
 
 import pytest
 
+from nostr.rss.normalize import item_to_article
+
 from nostr.bech32 import encode_naddr
 from nostr.imports.intake import (
     AUTHOR,
@@ -137,7 +139,7 @@ class TestReadingAFile:
         (item,) = read_export(path).items
         assert item.title == "Sound money"
         # The title is not there twice: the heading repeating it is dropped.
-        assert item.content_markdown == "The text."
+        assert item_to_article(item, append_source_link=False).content == "The text."
         assert item.published_at == 1709596800
         assert item.categories == ("Bitcoin", "Nostr")
         assert item.summary == "Why it matters."

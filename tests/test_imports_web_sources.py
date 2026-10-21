@@ -304,8 +304,13 @@ class TestMdxConversion(unittest.TestCase):
         self.assertEqual(rooted.image, "")
 
     def test_title_heading_not_repeated(self):
-        doc = mdx_to_markdown("---\ntitle: My Guide\n---\n# My Guide\n\nBody.")
-        self.assertEqual(doc.markdown, "Body.")
+        from nostr.rss.normalize import item_to_article
+        from nostr.imports.resolvers.mdx import _doc_to_item
+        item = _doc_to_item("---\ntitle: My Guide\n---\n# My Guide\n\nBody.",
+                            fallback_name="guide.md", link="https://example.com/guide.md",
+                            guid="")
+        article = item_to_article(item, append_source_link=False)
+        self.assertEqual(article.content, "Body.")
 
     def test_inline_code_survives(self):
         doc = mdx_to_markdown("Use `<Button>` with `List<String>` here.")
@@ -330,16 +335,16 @@ class TestMdxConversion(unittest.TestCase):
             base_url="https://raw.githubusercontent.com/o/r/main/docs/a.mdx")
         self.assertIn("https://www.youtube.com/watch?v=dQw4w9WgXcQ", doc.markdown)
         self.assertIn("https://vimeo.com/76979871", doc.markdown)
-        self.assertIn("https://x.com/i/status/1234", doc.markdown)
+        self.assertIn("https://twitter.com/i/web/status/1234", doc.markdown)
         self.assertIn("![A diagram](https://raw.githubusercontent.com/o/r/main/docs/diagram.png)",
                       doc.markdown)
 
     def test_relative_images_made_whole(self):
         doc = mdx_to_markdown(
-            "![Flow](./img/flow chart.png)\n\n![Abs](https://cdn.example/a.png)",
+            "![Flow](<./img/flow chart.png>)\n\n![Abs](https://cdn.example/a.png)",
             base_url="https://raw.githubusercontent.com/o/r/main/docs/a.md")
-        self.assertIn("![Flow](https://raw.githubusercontent.com/o/r/main/docs/img/"
-                      "flow%20chart.png)", doc.markdown)
+        self.assertIn("![Flow](<https://raw.githubusercontent.com/o/r/main/docs/img/"
+                      "flow%20chart.png>)", doc.markdown)
         self.assertIn("![Abs](https://cdn.example/a.png)", doc.markdown)
 
 
@@ -599,7 +604,9 @@ class TestBlueskyResolver(unittest.TestCase):
         }]}
         sink = run("https://bsky.app/profile/alice.bsky.social/post/xyz",
                    self._fetcher_for_thread(thread))
-        self.assertEqual(sink.result.feed.items[0].categories, ("Bitcoin", "bluesky"))
+        from nostr.rss.normalize import item_to_article
+        self.assertEqual(item_to_article(sink.result.feed.items[0]).hashtags,
+                         ("bitcoin", "bluesky"))
 
     def test_single_post_rejected(self):
         thread = {"post": bsky_post("xyz", "just one"), "replies": []}

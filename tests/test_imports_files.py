@@ -157,7 +157,10 @@ MEDIUM_EXPORT_POST = (
     ' on <a href="https://medium.com/p/1"><time class="dt-published" '
     'datetime="2020-01-01T10:00:00.000Z">January 1, 2020</time></a>.</p>'
     '<p><a class="p-canonical" href="https://medium.com/@jane/sound-money-1">'
-    'Canonical link</a></p></footer></article></body></html>'
+    'Canonical link</a></p><p class="p-tags">Tagged in '
+    '<a class="p-tag" href="https://medium.com/tag/bitcoin">Bitcoin</a>, '
+    '<a class="p-tag" href="https://medium.com/tag/money">Money</a></p>'
+    '</footer></article></body></html>'
 )
 
 
@@ -299,6 +302,26 @@ class TestWxr(unittest.TestCase):
         self.assertIn("<p>Builder words</p>", body)
         self.assertIn("Text [see below] stays, and [gallery] is written as text.", body)
 
+    def test_jetpack_embeds_are_their_pages_and_never_lost(self):
+        cases = {
+            "[youtube=https://www.youtube.com/watch?v=x]": "https://www.youtube.com/watch?v=x",
+            "[youtube https://youtu.be/x&w=640&h=360]": "https://youtu.be/x",
+            "[vimeo 141358]": "https://vimeo.com/141358",
+            "[tweet 1234567]": "https://twitter.com/i/web/status/1234567",
+            '[soundcloud url="https://api.soundcloud.com/tracks/1"]':
+                "https://api.soundcloud.com/tracks/1",
+            '[spotify id="spotify:track:abc"]': "https://open.spotify.com/track/abc",
+        }
+        for shortcode, address in cases.items():
+            self.assertIn(f'<a href="{address}">', post_html(shortcode), shortcode)
+        self.assertIn("[vimeo not-an-id]", post_html("[vimeo not-an-id]"))
+
+    def test_code_and_bracketed_words_are_left_alone(self):
+        self.assertIn('<pre>[my_code x="1"]\n\nmore</pre>',
+                      post_html('<pre>[my_code x="1"]\n\nmore</pre>'))
+        self.assertIn("<code>[gallery]</code>", post_html("Write <code>[gallery]</code>."))
+        self.assertIn("Write [e-mail] to me.", post_html("Write [e-mail] to me."))
+
     def test_block_editor_posts_are_left_as_they_are(self):
         body = post_html("<!-- wp:paragraph -->\n<p>One</p>\n<!-- /wp:paragraph -->\n\n"
                          "<!-- wp:paragraph -->\n<p>Two</p>\n<!-- /wp:paragraph -->")
@@ -435,6 +458,7 @@ class TestArchives(unittest.TestCase):
         self.assertEqual(post.link, "https://medium.com/@jane/sound-money-1")
         self.assertEqual(post.author, "Jane Doe")
         self.assertEqual(post.published_at, 1577872800)
+        self.assertEqual(post.categories, ("Bitcoin", "Money"))
 
     def test_substack_details_and_furniture(self):
         posts = extract_archive(substack_export_zip()).items
@@ -519,10 +543,18 @@ class TestSubstackAddress(unittest.TestCase):
                   '<a href="https://other.substack.com/p/b">b</a>']
         self.assertEqual(_publication_address(bodies, []), "mine.example")
 
-    def test_post_links_count_when_no_subscribe_link_does(self):
+    def test_without_subscribe_links_the_subscriber_list_names_it(self):
         from nostr.imports.sources.archive import _publication_address
-        self.assertEqual(_publication_address(['<a href="https://mine.example/p/x">x</a>'], []),
-                         "mine.example")
+        self.assertEqual(_publication_address(
+            ['<a href="https://www.instagram.com/p/abc/">a post</a>'],
+            ["posts.csv", "email_list.mypub.csv"]), "mypub.substack.com")
+
+    def test_only_substack_post_links_name_a_publication(self):
+        from nostr.imports.sources.archive import _publication_address
+        self.assertIsNone(_publication_address(
+            ['<a href="https://www.instagram.com/p/abc/">a post</a>'], []))
+        self.assertEqual(_publication_address(
+            ['<a href="https://mine.substack.com/p/x">x</a>'], []), "mine.substack.com")
 
 
 

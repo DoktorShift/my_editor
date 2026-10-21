@@ -22,22 +22,23 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import dataclass, replace
-from datetime import datetime, timezone
 from typing import Any, Iterable, List, Optional, Tuple
-from urllib.parse import urljoin, urlsplit
+from urllib.parse import urlsplit
 
 from bs4 import BeautifulSoup
 
+from ..rss.dates import to_unix
+from ..rss.normalize import cover_address
 from ..rss.parser import FeedItem
+from ..rss.urls import is_web
 
 _ARTICLE_TYPES = {"article", "blogposting", "newsarticle", "techarticle",
                   "report", "scholarlyarticle", "socialmediaposting", "webpage"}
 _MAX_TAGS = 12
 # A picture named as the site's default for link previews
 # ("default-ogimage.png", "og-default.jpg"): every post would share it.
-_SITE_DEFAULT = re.compile(r"(^|[/_-])(default[-_]?og|og[-_]?default|default[-_]?share|"
-                           r"share[-_]?default|default[-_]?(social|preview|image|cover))"
-                           r"[^/]*$", re.IGNORECASE)
+_SITE_DEFAULT = re.compile(r"(^|[/_-])(default[-_]?og|og[-_]?default|default[-_]?share)[^/]*$",
+                           re.IGNORECASE)
 
 
 @dataclass(frozen=True)
@@ -68,10 +69,10 @@ def read_page_meta(html: str, *, url: Optional[str] = None) -> PageMeta:
     image = _image(ld.get("image")) or meta.first("og:image", "og:image:url",
                                                   "og:image:secure_url", "twitter:image",
                                                   "twitter:image:src")
-    published = (_date(ld.get("datePublished"))
-                 or _date(meta.first("article:published_time", "og:published_time",
+    published = (to_unix(ld.get("datePublished"))
+                 or to_unix(meta.first("article:published_time", "og:published_time",
                                      "date", "dc.date", "dcterms.created"))
-                 or _date(ld.get("dateCreated")))
+                 or to_unix(ld.get("dateCreated")))
     author = _person(ld.get("author")) or _name(meta.first("author", "article:author",
                                                            "twitter:creator"))
     tags = _keywords(ld.get("keywords")) or tuple(meta.all("article:tag"))
@@ -81,10 +82,10 @@ def read_page_meta(html: str, *, url: Optional[str] = None) -> PageMeta:
     return PageMeta(
         title=title,
         description=description,
-        image=_whole(image, url),
+        image=cover_address(image, url),
         published_at=published,
         author=author,
-        tags=tuple(dict.fromkeys(t for t in tags if t))[:_MAX_TAGS],
+        tags=tuple(t for t in tags if t)[:_MAX_TAGS],
     )
 
 
@@ -193,7 +194,7 @@ def _person(value: Any) -> str:
 def _name(value: str) -> str:
     """A name, not an address: ``article:author`` is often a profile URL."""
     value = (value or "").strip()
-    if not value or urlsplit(value).scheme in ("http", "https"):
+    if not value or is_web(value):
         return ""
     return value.lstrip("@") if value.startswith("@") and " " not in value else value
 
@@ -206,28 +207,3 @@ def _keywords(value: Any) -> Tuple[str, ...]:
     return ()
 
 
-def _date(value: Any) -> Optional[int]:
-    if not isinstance(value, str) or not value.strip():
-        return None
-    text = value.strip()
-    if text.endswith("Z"):
-        text = text[:-1] + "+00:00"
-    try:
-        moment = datetime.fromisoformat(text)
-    except ValueError:
-        try:
-            moment = datetime.strptime(text[:10], "%Y-%m-%d")
-        except ValueError:
-            return None
-    if moment.tzinfo is None:
-        moment = moment.replace(tzinfo=timezone.utc)
-    return int(moment.timestamp())
-
-
-def _whole(url: str, base: Optional[str]) -> str:
-    url = (url or "").strip()
-    if not url:
-        return ""
-    if urlsplit(base or "").scheme in ("http", "https"):
-        url = urljoin(base, url)
-    return url if urlsplit(url).scheme in ("http", "https") else ""

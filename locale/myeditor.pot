@@ -5725,7 +5725,7 @@ msgid "network error"
 msgstr ""
 
 #: nostr/imports/fetch.py:59
-#: nostr/imports/images.py:67
+#: nostr/imports/images.py:69
 msgid "URL was not allowed"
 msgstr ""
 
@@ -5755,7 +5755,7 @@ msgstr ""
 msgid "Could not download the image"
 msgstr ""
 
-#: nostr/imports/images.py:411
+#: nostr/imports/images.py:255
 msgid "Empty mirror response"
 msgstr ""
 
@@ -5809,57 +5809,62 @@ msgstr ""
 msgid "the request could not be made"
 msgstr ""
 
-#: nostr/imports/pipeline.py:301
+#: nostr/imports/pipeline.py:300
 msgid "(untitled)"
 msgstr ""
 
-#: nostr/imports/pipeline.py:569
+#: nostr/imports/pipeline.py:531
+#, python-brace-format
+msgid "Fetching full text for '{title}'…"
+msgstr ""
+
+#: nostr/imports/pipeline.py:532
+#, python-brace-format
+msgid "Fetching the details of '{title}'…"
+msgstr ""
+
+#: nostr/imports/pipeline.py:551
 msgid "Couldn't read this post's page, and its full text isn't kept here."
 msgstr ""
 
-#: nostr/imports/pipeline.py:670
+#: nostr/imports/pipeline.py:637
 #, python-brace-format
 msgid "{failed} of {total} image(s) couldn't be mirrored; originals kept."
 msgid_plural "{failed} of {total} image(s) couldn't be mirrored; originals kept."
 msgstr[0] ""
 msgstr[1] ""
 
-#: nostr/imports/pipeline.py:303
+#: nostr/imports/pipeline.py:302
 #, python-brace-format
 msgid "Item {n}/{total}: {title}"
 msgstr ""
 
-#: nostr/imports/pipeline.py:323
+#: nostr/imports/pipeline.py:322
 #, python-brace-format
 msgid "Could not normalise item: {error}"
 msgstr ""
 
-#: nostr/imports/pipeline.py:410
+#: nostr/imports/pipeline.py:406
 #, python-brace-format
 msgid "Fetching chapters for '{title}'…"
 msgstr ""
 
-#: nostr/imports/pipeline.py:448
+#: nostr/imports/pipeline.py:444
 #, python-brace-format
 msgid "Resolving '{title}' from Nostr…"
 msgstr ""
 
-#: nostr/imports/pipeline.py:535
-#, python-brace-format
-msgid "Fetching full text for '{title}'…"
-msgstr ""
-
-#: nostr/imports/pipeline.py:660
+#: nostr/imports/pipeline.py:627
 #, python-brace-format
 msgid "Mirroring images {n}/{total}…"
 msgstr ""
 
-#: nostr/imports/pipeline.py:737
+#: nostr/imports/pipeline.py:704
 #, python-brace-format
 msgid "Could not build article: {error}"
 msgstr ""
 
-#: nostr/imports/pipeline.py:755
+#: nostr/imports/pipeline.py:722
 #, python-brace-format
 msgid "Could not start draft job: {error}"
 msgstr ""
@@ -6024,7 +6029,7 @@ msgstr[0] ""
 msgstr[1] ""
 
 #: nostr/imports/resolvers/ghost.py:41
-#: nostr/imports/sources/ghost.py:156
+#: nostr/imports/sources/ghost.py:149
 msgid "Ghost export"
 msgstr ""
 
@@ -6074,11 +6079,11 @@ msgstr ""
 msgid "{name} · Articles"
 msgstr ""
 
-#: nostr/imports/resolvers/nostrhub.py:105
+#: nostr/imports/resolvers/nostrhub.py:104
 msgid "NostrHub NIPs"
 msgstr ""
 
-#: nostr/imports/resolvers/nostrhub.py:104
+#: nostr/imports/resolvers/nostrhub.py:103
 #, python-brace-format
 msgid "{name} · NostrHub NIPs"
 msgstr ""
@@ -6111,11 +6116,11 @@ msgstr ""
 msgid "Could not read that WordPress export: {error}"
 msgstr ""
 
-#: nostr/imports/sources/archive.py:366
+#: nostr/imports/sources/archive.py:355
 msgid "Substack export"
 msgstr ""
 
-#: nostr/imports/sources/archive.py:366
+#: nostr/imports/sources/archive.py:355
 msgid "Medium export"
 msgstr ""
 

@@ -5740,7 +5740,7 @@ msgid "network error"
 msgstr "Netzwerkfehler"
 
 #: nostr/imports/fetch.py:59
-#: nostr/imports/images.py:67
+#: nostr/imports/images.py:69
 msgid "URL was not allowed"
 msgstr "Adresse nicht erlaubt"
 
@@ -5770,7 +5770,7 @@ msgstr "Die Feed-Adresse muss mit http oder https beginnen"
 msgid "Could not download the image"
 msgstr "Bild konnte nicht heruntergeladen werden"
 
-#: nostr/imports/images.py:411
+#: nostr/imports/images.py:255
 msgid "Empty mirror response"
 msgstr "Leere Antwort beim Kopieren"
 
@@ -5824,57 +5824,62 @@ msgstr "sie leitet zu oft weiter"
 msgid "the request could not be made"
 msgstr "die Anfrage konnte nicht gestellt werden"
 
-#: nostr/imports/pipeline.py:301
+#: nostr/imports/pipeline.py:300
 msgid "(untitled)"
 msgstr "(ohne Titel)"
 
-#: nostr/imports/pipeline.py:569
+#: nostr/imports/pipeline.py:531
+#, python-brace-format
+msgid "Fetching full text for '{title}'…"
+msgstr "Volltext für „{title}“ wird geladen …"
+
+#: nostr/imports/pipeline.py:532
+#, python-brace-format
+msgid "Fetching the details of '{title}'…"
+msgstr "Details zu „{title}“ werden geladen …"
+
+#: nostr/imports/pipeline.py:551
 msgid "Couldn't read this post's page, and its full text isn't kept here."
 msgstr "Die Seite dieses Beitrags konnte nicht gelesen werden, und sein vollständiger Text ist hier nicht gespeichert."
 
-#: nostr/imports/pipeline.py:670
+#: nostr/imports/pipeline.py:637
 #, python-brace-format
 msgid "{failed} of {total} image(s) couldn't be mirrored; originals kept."
 msgid_plural "{failed} of {total} image(s) couldn't be mirrored; originals kept."
 msgstr[0] "{failed} von {total} Bild nicht kopiert, das Original bleibt verlinkt."
 msgstr[1] "{failed} von {total} Bildern nicht kopiert, die Originale bleiben verlinkt."
 
-#: nostr/imports/pipeline.py:303
+#: nostr/imports/pipeline.py:302
 #, python-brace-format
 msgid "Item {n}/{total}: {title}"
 msgstr "Beitrag {n}/{total}: {title}"
 
-#: nostr/imports/pipeline.py:323
+#: nostr/imports/pipeline.py:322
 #, python-brace-format
 msgid "Could not normalise item: {error}"
 msgstr "Beitrag konnte nicht aufbereitet werden: {error}"
 
-#: nostr/imports/pipeline.py:410
+#: nostr/imports/pipeline.py:406
 #, python-brace-format
 msgid "Fetching chapters for '{title}'…"
 msgstr "Kapitel für „{title}“ werden geladen …"
 
-#: nostr/imports/pipeline.py:448
+#: nostr/imports/pipeline.py:444
 #, python-brace-format
 msgid "Resolving '{title}' from Nostr…"
 msgstr "„{title}“ wird aus Nostr geladen …"
 
-#: nostr/imports/pipeline.py:535
-#, python-brace-format
-msgid "Fetching full text for '{title}'…"
-msgstr "Volltext für „{title}“ wird geladen …"
-
-#: nostr/imports/pipeline.py:660
+#: nostr/imports/pipeline.py:627
 #, python-brace-format
 msgid "Mirroring images {n}/{total}…"
 msgstr "Bild {n} von {total} wird kopiert …"
 
-#: nostr/imports/pipeline.py:737
+#: nostr/imports/pipeline.py:704
 #, python-brace-format
 msgid "Could not build article: {error}"
 msgstr "Artikel konnte nicht erstellt werden: {error}"
 
-#: nostr/imports/pipeline.py:755
+#: nostr/imports/pipeline.py:722
 #, python-brace-format
 msgid "Could not start draft job: {error}"
 msgstr "Entwurf konnte nicht gespeichert werden: {error}"
@@ -6039,7 +6044,7 @@ msgstr[0] "Bluesky-Thread von {name} ({n} Beitrag)"
 msgstr[1] "Bluesky-Thread von {name} ({n} Beiträge)"
 
 #: nostr/imports/resolvers/ghost.py:41
-#: nostr/imports/sources/ghost.py:156
+#: nostr/imports/sources/ghost.py:149
 msgid "Ghost export"
 msgstr "Ghost-Export"
 
@@ -6089,11 +6094,11 @@ msgstr "Nostr-Artikel"
 msgid "{name} · Articles"
 msgstr "{name} · Artikel"
 
-#: nostr/imports/resolvers/nostrhub.py:105
+#: nostr/imports/resolvers/nostrhub.py:104
 msgid "NostrHub NIPs"
 msgstr "NostrHub-NIPs"
 
-#: nostr/imports/resolvers/nostrhub.py:104
+#: nostr/imports/resolvers/nostrhub.py:103
 #, python-brace-format
 msgid "{name} · NostrHub NIPs"
 msgstr "{name} · NostrHub-NIPs"
@@ -6126,11 +6131,11 @@ msgstr "WordPress-Export"
 msgid "Could not read that WordPress export: {error}"
 msgstr "Dieser WordPress-Export konnte nicht gelesen werden: {error}"
 
-#: nostr/imports/sources/archive.py:366
+#: nostr/imports/sources/archive.py:355
 msgid "Substack export"
 msgstr "Substack-Export"
 
-#: nostr/imports/sources/archive.py:366
+#: nostr/imports/sources/archive.py:355
 msgid "Medium export"
 msgstr "Medium-Export"
 

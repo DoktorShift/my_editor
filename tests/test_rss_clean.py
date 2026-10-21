@@ -57,6 +57,27 @@ class EmbedTests(unittest.TestCase):
         src = "https://open.spotify.com/embed/episode/7makk4oTQel546B0PZlDM5"
         self.assertIn(src, md(f'<iframe src="{src}"></iframe>'))
 
+    def test_a_youtube_playlist_is_its_playlist_page(self) -> None:
+        self.assertIn("https://www.youtube.com/playlist?list=PL123",
+                      md('<iframe src="https://www.youtube.com/embed/videoseries?list=PL123">'
+                         '</iframe>'))
+
+    def test_the_old_flash_player_is_its_watch_page(self) -> None:
+        self.assertIn("https://www.youtube.com/watch?v=abc123XYZ",
+                      md('<object data="https://www.youtube.com/v/abc123XYZ"></object>'))
+        self.assertIn("https://www.youtube.com/watch?v=abc123XYZ",
+                      md('<embed src="https://www.youtube.com/v/abc123XYZ">'))
+
+    def test_a_peertube_player_is_its_watch_page(self) -> None:
+        self.assertIn("https://videos.example/videos/watch/9c9de5e8",
+                      md('<iframe src="https://videos.example/videos/embed/9c9de5e8?start=1">'
+                         '</iframe>'))
+
+    def test_an_embedded_tweet_is_its_page(self) -> None:
+        self.assertIn("https://twitter.com/i/web/status/20",
+                      md('<iframe src="https://platform.twitter.com/embed/Tweet.html?id=20">'
+                         '</iframe>'))
+
     def test_an_unknown_frame_is_dropped(self) -> None:
         self.assertEqual(md('<p>Hi</p><iframe src="https://ads.example/x"></iframe>'), "Hi")
 
@@ -90,9 +111,48 @@ class FurnitureTests(unittest.TestCase):
                  '<a href="/">Y</a>.</p>')
         self.assertEqual(out, "Ende.")
 
+    def test_the_appeared_first_line_in_yoast_and_aioseo_translations(self) -> None:
+        lines = (
+            "The post <a>X</a> first appeared on <a>Y</a>.",
+            "Het bericht <a>X</a> verscheen eerst op <a>Y</a>.",
+            "Cet article <a>X</a> est apparu en premier sur <a>Y</a>.",
+            "La entrada <a>X</a> se publicó primero en <a>Y</a>.",
+            "L'articolo <a>X</a> proviene da <a>Y</a>.",
+            "Artykuł <a>X</a> pochodzi z serwisu <a>Y</a>.",
+            "O post <a>X</a> apareceu primeiro em <a>Y</a>.",
+            "O conteúdo <a>X</a> aparece primeiro em <a>Y</a>.",
+        )
+        for line in lines:
+            self.assertEqual(md(f"<p>Real ending.</p><p>{line}</p>"), "Real ending.", line)
+
     def test_a_sentence_like_it_in_the_middle_stays(self) -> None:
         out = md('<p>The post office appeared first on the map.</p><p>More.</p><p>End.</p>')
         self.assertIn("post office", out)
+
+
+class AddressPolicyTests(unittest.TestCase):
+    """feedparser's cleaning is off, so clean.py is where a link or a
+    picture that is no web address goes."""
+
+    def test_a_script_or_data_link_keeps_its_words_and_loses_the_link(self) -> None:
+        out = md('<p>hi <a href="javascript:alert(1)">click</a> '
+                 '<a href="data:text/html,x">d</a> <a href="vbscript:x">v</a></p>')
+        self.assertEqual(out, "hi click d v")
+
+    def test_web_mail_and_relative_links_stay(self) -> None:
+        out = md('<p><a href="https://x.example">a</a> <a href="mailto:me@x.example">m</a> '
+                 '<a href="/about">r</a></p>')
+        self.assertIn("(https://x.example)", out)
+        self.assertIn("(mailto:me@x.example)", out)
+        self.assertIn("(https://blog.example/about)", out)
+
+    def test_a_picture_or_player_that_is_no_web_address_is_dropped(self) -> None:
+        out = md('<p>t</p><img src="javascript:x"><img src="file:///etc/x.png">'
+                 '<video src="javascript:x"></video>')
+        self.assertEqual(out, "t")
+
+    def test_a_protocol_relative_pixel_is_dropped(self) -> None:
+        self.assertEqual(md('<p>t</p><img src="//pixel.wp.com/b.gif?x=1">'), "t")
 
 
 class CodeLanguageTests(unittest.TestCase):
@@ -105,6 +165,10 @@ class CodeLanguageTests(unittest.TestCase):
         }
         for html, fence in cases.items():
             self.assertIn(fence, md(html), html)
+
+    def test_a_class_that_names_no_language_gives_none(self) -> None:
+        self.assertTrue(md('<pre class="highlight-text-html-basic"><code>x</code></pre>')
+                        .startswith("```\n"))
 
     def test_a_block_without_a_language_has_a_plain_fence(self) -> None:
         self.assertTrue(md("<pre><code>x</code></pre>").startswith("```\n"))

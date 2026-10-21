@@ -34,7 +34,6 @@ from ...relay import RelayPool
 from ..constants import NOSTR_WIKI_KIND
 from ..fetch import SourceFetcher
 from ...rss.parser import FeedItem
-from .mdx import derive_summary
 from .wiki import normalize_wiki_content
 
 
@@ -240,7 +239,7 @@ def nostr_event_to_item(event: dict) -> FeedItem:
         guid=f"{kind}:{pubkey}:{d_tag}" if addressable else str(event.get("id", "")),
         title=title,
         link=f"{NJUMP}/{bech}",
-        summary=event_tag(event, "summary") or derive_summary(body) or None,
+        summary=event_tag(event, "summary") or None,
         content_html="",
         published_at=published,
         categories=tuple(["wiki", *topics] if is_wiki else topics),

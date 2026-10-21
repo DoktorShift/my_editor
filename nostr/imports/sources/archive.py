@@ -37,13 +37,13 @@ import re
 import zipfile
 from collections import Counter
 from dataclasses import dataclass
-from datetime import datetime, timezone
 from typing import Iterable, List, Optional, Tuple
 
 import lxml.html
 
 from i18n import _
 
+from ...rss.dates import to_unix
 from ...rss.parser import FeedItem
 from .podcast import PodcastEpisode
 
@@ -66,21 +66,6 @@ class ArchiveResult:
 def looks_like_zip(data: bytes) -> bool:
     return isinstance(data, (bytes, bytearray)) and bytes(data[:4]) in (
         b"PK\x03\x04", b"PK\x05\x06", b"PK\x07\x08")
-
-
-def _to_unix(value: Optional[str]) -> Optional[int]:
-    if not value:
-        return None
-    raw = str(value).strip()
-    try:
-        if raw.endswith("Z"):
-            raw = raw[:-1] + "+00:00"
-        parsed = datetime.fromisoformat(raw)
-        if parsed.tzinfo is None:
-            parsed = parsed.replace(tzinfo=timezone.utc)
-        return int(parsed.timestamp())
-    except ValueError:
-        return None
 
 
 def _read_member(zf: zipfile.ZipFile, name: str) -> Optional[bytes]:
@@ -170,7 +155,8 @@ def _medium_post(doc, name: str) -> Optional[FeedItem]:
     published_node = _by_class(doc, "dt-published")
     canonical_node = _by_class(doc, "p-canonical")
     canonical = (canonical_node.get("href") or "").strip() if canonical_node is not None else ""
-    tags = tuple(text for text in (_text_of(node) for node in _all_by_class(doc, "p-category"))
+    # "Tagged in <a class="p-tag">…</a>" in the post's footer.
+    tags = tuple(text for text in (_text_of(node) for node in _all_by_class(doc, "p-tag"))
                  if text)
     return FeedItem(
         guid=canonical or name,
@@ -178,7 +164,7 @@ def _medium_post(doc, name: str) -> Optional[FeedItem]:
         link=canonical or None,
         summary=subtitle or _text_of(_by_class(doc, "p-summary")) or None,
         content_html=content_html,
-        published_at=_to_unix(
+        published_at=to_unix(
             published_node.get("datetime") if published_node is not None else None),
         categories=tags,
         image=cover,
@@ -218,12 +204,12 @@ def _extract_medium(zf: zipfile.ZipFile) -> List[FeedItem]:
 _SUBSTACK_FURNITURE = ("subscription-widget", "subscribe-widget", "button-wrapper",
                        "captioned-button-wrap", "install-substack-app", "share-dialog")
 # A link to the subscribe page names the publication's own address (a
-# custom domain included); a link to a post does too, unless it is to
-# another publication's, so those only count when no subscribe link does.
+# custom domain included). A link to a post on substack.com names one,
+# but maybe another newsletter's.
 _SUBSTACK_SUBSCRIBE_LINK = re.compile(
     r"""href=["']https?://([a-z0-9.-]+)/subscribe""", re.IGNORECASE)
 _SUBSTACK_POST_LINK = re.compile(
-    r"""href=["']https?://([a-z0-9.-]+)/p/""", re.IGNORECASE)
+    r"""href=["']https?://([a-z0-9-]+\.substack\.com)/p/""", re.IGNORECASE)
 _NOT_A_PUBLICATION = frozenset({"substack.com", "www.substack.com", "open.substack.com"})
 _EMAIL_LIST = re.compile(r"(?:^|/)email_list\.([a-z0-9-]+)\.csv$", re.IGNORECASE)
 
@@ -247,21 +233,24 @@ def _without_substack_furniture(html: str) -> Tuple[str, Optional[str]]:
 
 def _publication_address(bodies: Iterable[str], names: Iterable[str]) -> Optional[str]:
     """The publication's own host, where its posts live: the one its
-    bodies link to for subscribing most often (for posts, when none
-    links to subscribing), or else the
-    ``<name>.substack.com`` its subscriber list is named after."""
+    bodies link to for subscribing most often, else the
+    ``<name>.substack.com`` its subscriber list (``email_list.<name>.csv``)
+    is named after, else the substack.com host its posts link to most."""
     bodies = list(bodies)
-    for pattern in (_SUBSTACK_SUBSCRIBE_LINK, _SUBSTACK_POST_LINK):
-        hosts = Counter(
-            host.lower() for body in bodies for host in pattern.findall(body)
-            if host.lower() not in _NOT_A_PUBLICATION)
-        if hosts:
-            return hosts.most_common(1)[0][0]
+    subscribe = _most_linked(bodies, _SUBSTACK_SUBSCRIBE_LINK)
+    if subscribe:
+        return subscribe
     for name in names:
         found = _EMAIL_LIST.search(name)
         if found:
             return f"{found.group(1).lower()}.substack.com"
-    return None
+    return _most_linked(bodies, _SUBSTACK_POST_LINK)
+
+
+def _most_linked(bodies: List[str], pattern: "re.Pattern") -> Optional[str]:
+    hosts = Counter(host.lower() for body in bodies for host in pattern.findall(body)
+                    if host.lower() not in _NOT_A_PUBLICATION)
+    return hosts.most_common(1)[0][0] if hosts else None
 
 
 def _substack_link(post_id: str, host: Optional[str]) -> Optional[str]:
@@ -322,7 +311,7 @@ def _extract_substack(zf: zipfile.ZipFile) -> List[FeedItem]:
             link=_substack_link(post_id, host),
             summary=str(row.get("subtitle") or "").strip() or None,
             content_html=content_html,
-            published_at=_to_unix(row.get("post_date")),
+            published_at=to_unix(row.get("post_date")),
             # The CSV's "type" (newsletter, podcast, thread) says what
             # Substack made of the post, not what it is about.
             categories=(),

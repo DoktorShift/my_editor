@@ -38,98 +38,139 @@ from __future__ import annotations
 
 import re
 from typing import Optional
-from urllib.parse import parse_qs, urljoin, urlsplit
+from urllib.parse import parse_qs, urlsplit
 
 from bs4 import BeautifulSoup, Comment, Tag
 
+from .urls import WEB_SCHEMES, is_web, whole_url
+
 # Page furniture: its text is never part of the article.
 _DROP = ("script", "style", "template", "form", "button", "input", "select",
-         "textarea", "svg", "canvas", "object", "embed", "head", "link", "meta")
+         "textarea", "svg", "canvas", "head", "link", "meta")
 
-# Attributes lazy-loading scripts keep the real picture in, best first.
+# Attributes lazy-loading scripts keep the real picture in, best first:
+# lazysizes (data-src, data-srcset), WP Rocket (data-lazy-src,
+# data-lazy-srcset), jQuery Lazy Load (data-original), Jetpack
+# (data-orig-file), the block editor's gallery (data-full-url).
 _LAZY_SRC = ("data-src", "data-lazy-src", "data-original", "data-orig-file",
-             "data-full-url", "data-url")
+             "data-full-url")
 _LAZY_SRCSET = ("data-srcset", "data-lazy-srcset", "srcset")
 _PLACEHOLDER = re.compile(r"(placeholder|blank\.gif|spacer\.gif|lazy[-_]?load|"
                           r"transparent\.(gif|png)|pixel\.gif)", re.IGNORECASE)
 
-# Images that are not pictures of the post: counters and pixels, and the
-# author's avatar (WordPress.com puts it in every item's media:content).
+# Images that are not pictures of the post: counters and pixels (Jetpack
+# stats, Medium's feed counter, FeedBurner's, common ad counters), and
+# the author's avatar (WordPress.com puts it in every item's
+# media:content).
 _TRACKER = re.compile(
-    r"^https?://([^/]*\.)?(pixel\.wp\.com|stats\.wp\.com|stats\.wordpress\.com|"
-    r"pixel\.quantserve\.com|www\.google-analytics\.com|feeds\.feedburner\.com/~r/|"
-    r"feedproxy\.google\.com/~r/|medium\.com/_/stat|ad\.doubleclick\.net|"
-    r"pixel\.mailerlite\.com|substackcdn\.com/open)", re.IGNORECASE)
-_AVATAR = re.compile(r"^https?://([^/]*\.)?gravatar\.com/avatar/", re.IGNORECASE)
-_EMOJI = re.compile(r"^https?://s\.w\.org/images/core/emoji/", re.IGNORECASE)
+    r"^(?:https?:)?//([^/]*\.)?(pixel\.wp\.com|stats\.wp\.com|stats\.wordpress\.com|"
+    r"medium\.com/_/stat|feeds\.feedburner\.com/~r/|pixel\.quantserve\.com|"
+    r"www\.google-analytics\.com|ad\.doubleclick\.net)", re.IGNORECASE)
+_AVATAR = re.compile(r"^(?:https?:)?//([^/]*\.)?gravatar\.com/avatar/", re.IGNORECASE)
+_EMOJI = re.compile(r"^(?:https?:)?//s\.w\.org/images/core/emoji/", re.IGNORECASE)
 
 _SRCSET_SPLIT = re.compile(r",\s+")
-# Players whose embed is worth a link in the article. Anything else in an
-# <iframe> is page furniture.
-_PLAYERS = ("youtube.com", "youtube-nocookie.com", "youtu.be", "vimeo.com",
-            "open.spotify.com", "soundcloud.com", "rumble.com", "odysee.com",
-            "fountain.fm", "wavlake.com", "dailymotion.com", "loom.com",
-            "bandcamp.com", "podcasts.apple.com", "music.apple.com",
-            "twitch.tv", "codepen.io", "platform.twitter.com", "x.com",
-            "twitter.com", "anchor.fm", "podbean.com", "buzzsprout.com",
-            "simplecast.com", "player.fm", "peertube.tv", "tube.tchncs.de")
-_YOUTUBE_ID = re.compile(r"^/(?:embed|v|shorts)/([A-Za-z0-9_-]{6,})")
+# The hosts of the players whose embed is worth a link in the article
+# (a PeerTube instance is known by its /videos/embed/ path). Anything
+# else in an <iframe> is page furniture.
+_PLAYERS = ("youtube.com", "youtube-nocookie.com", "player.vimeo.com",
+            "open.spotify.com", "w.soundcloud.com", "rumble.com", "odysee.com",
+            "dailymotion.com", "loom.com", "bandcamp.com", "embed.podcasts.apple.com",
+            "embed.music.apple.com", "player.twitch.tv", "codepen.io",
+            "platform.twitter.com", "anchor.fm", "podbean.com", "buzzsprout.com",
+            "simplecast.com", "player.fm")
+# A YouTube player (/embed/ID, and /v/ID of the old Flash <embed>).
+_YOUTUBE_ID = re.compile(r"^/(?:embed|v)/([A-Za-z0-9_-]{6,})")
 _VIMEO_ID = re.compile(r"^/video/(\d+)")
 
-# "The post <a>X</a> appeared first on <a>Blog</a>." (Yoast and others),
-# in the languages its translations use most.
-_APPEARED_FIRST = re.compile(
-    r"^(The post|Der Beitrag|La entrada|L[’']article|Il post|Het bericht|"
-    r"O post|Wpis)\b.+\b(appeared first on|erschien zuerst auf|"
-    r"aparece primero en|est apparu en premier sur|sembra essere il primo su|"
-    r"verscheen eerst op|apareceu primeiro em|pojawił się poraz pierwszy w)\b",
-    re.IGNORECASE | re.DOTALL)
+# "The post <a>X</a> appeared first on <a>Blog</a>.": Yoast SEO's feed
+# line in its translations (the current and the earlier wording), and
+# All in One SEO's.
+_APPEARED_FIRST_FORMS = (
+    r"The post\s.+\sappeared first on", r"The post\s.+\sfirst appeared on",
+    r"Der Beitrag\s.+\serschien zuerst auf", r"Het bericht\s.+\sverscheen eerst op",
+    r"(?:L[’']article|Cet article)\s.+\sest apparu en premier sur",
+    r"La entrada\s.+\s(?:se publicó primero en|aparece primero en)",
+    r"L[’']articolo\s.+\s(?:proviene da|sembra essere il primo su)",
+    r"Artykuł\s.+\spochodzi z serwisu", r"O post\s.+\sapareceu primeiro em",
+    r"O conteúdo\s.+\saparece primeiro em", r"O post\s.+\saparece primeiro no",
+)
+APPEARED_FIRST = re.compile(r"(?:%s)\b" % "|".join(_APPEARED_FIRST_FORMS),
+                            re.IGNORECASE | re.DOTALL)
 
-_LANGUAGE_PREFIXES = ("language-", "lang-", "highlight-source-", "highlight-")
+# Where a code block names its language: "language-" (CommonMark,
+# Prism, highlight.js), "lang-", GitHub's "highlight-source-".
+_LANGUAGE_PREFIXES = ("language-", "lang-", "highlight-source-")
 
 
 def clean_html(html: str, *, base_url: Optional[str] = None) -> str:
     """``html`` with the fixes above. ``base_url`` is the post's own page;
-    without a web address there, relative addresses stay as written."""
+    without a web address there, relative addresses stay as written.
+
+    feedparser's own cleaning is off (it dropped every video embed), so
+    this is also where an address that is no web address goes: a link
+    to ``javascript:`` or ``data:`` keeps its words and loses the link,
+    a picture or player there is dropped."""
     if not html or not html.strip():
         return html or ""
     soup = BeautifulSoup(html, "html.parser")
-    base = base_url if _is_web(base_url) else None
 
     for node in soup.find_all(string=lambda s: isinstance(s, Comment)):
         node.extract()
     for tag in soup.find_all(_DROP):
         tag.decompose()
-
     for img in soup.find_all("img"):
-        _settle_image(img)
+        src = _real_src(img)
+        if src:
+            img["src"] = src
+        else:
+            img.decompose()
+    for frame in soup.find_all("iframe", src=False):
+        if frame.get("data-src"):
+            frame["src"] = frame["data-src"]  # a lazily loaded player
+    _make_addresses_whole(soup, base_url)
     for img in soup.find_all("img"):
-        src = (img.get("src") or "").strip()
-        if _EMOJI.match(src) or "wp-smiley" in (img.get("class") or ()):
+        if _EMOJI.match(img["src"]) or "wp-smiley" in (img.get("class") or ()):
             img.replace_with(img.get("alt") or "")
         elif _is_pixel(img):
             img.decompose()
     _settle_noscript(soup)
 
-    for tag, attribute in (("a", "href"), ("img", "src"), ("iframe", "src"),
-                           ("video", "src"), ("audio", "src"), ("source", "src")):
-        for element in soup.find_all(tag):
-            value = (element.get(attribute) or "").strip()
-            if value and base and not value.startswith("#"):
-                element[attribute] = urljoin(base, value)
-
-    for frame in soup.find_all("iframe"):
-        _replace_with_link(soup, frame, _embed_address(frame.get("src") or
-                                                       frame.get("data-src") or ""))
+    for frame in soup.find_all(("iframe", "embed")):
+        _replace_with_link(soup, frame, _embed_address(frame.get("src") or ""))
+    for player in soup.find_all("object"):
+        # The old Flash player: its address is the object's data.
+        _replace_with_link(soup, player, _embed_address(player.get("data") or ""))
     for media in soup.find_all(("video", "audio")):
         _replace_with_link(soup, media, _media_address(media))
-
     for anchor in soup.find_all("a"):
         if not anchor.get_text(strip=True) and anchor.find("img") is None:
             anchor.decompose()
 
     _drop_appeared_first(soup)
     return str(soup)
+
+
+def _make_addresses_whole(soup: BeautifulSoup, base_url: Optional[str]) -> None:
+    """Every address made whole against the post's page, and only web
+    addresses (and ``mailto:`` for a link) kept."""
+    for anchor in soup.find_all("a", href=True):
+        href = whole_url(anchor["href"], base_url).strip()
+        scheme = urlsplit(href).scheme.lower()
+        if scheme and scheme not in (*WEB_SCHEMES, "mailto"):
+            anchor.unwrap()
+        else:
+            anchor["href"] = href
+    for element in soup.find_all(("img", "iframe", "embed", "video", "audio", "source"),
+                                 src=True):
+        src = whole_url(element["src"], base_url).strip()
+        if urlsplit(src).scheme and not is_web(src):
+            if element.name == "img":
+                element.decompose()
+            else:
+                del element["src"]
+        else:
+            element["src"] = src
 
 
 def first_image(html: str) -> Optional[str]:
@@ -178,30 +219,22 @@ def code_language(pre: Tag) -> Optional[str]:
 
 # -- images ----------------------------------------------------------------- #
 
-def _settle_image(img: Tag) -> None:
-    src = _real_src(img)
-    if src:
-        img["src"] = src
-    else:
-        img.decompose()
-
-
 def _real_src(img: Tag) -> str:
     """The picture an ``<img>`` shows once its page has loaded: ``src``,
     unless that is a placeholder and a lazy-loading attribute or a
     ``srcset`` names the real one. "" when there is nothing to show."""
     src = (img.get("src") or "").strip()
-    if not src or src.startswith("data:") or _PLACEHOLDER.search(src):
-        real = next((img.get(a).strip() for a in _LAZY_SRC
-                     if (img.get(a) or "").strip()), "")
-        if not real:
-            real = next((best for best in (_largest(img.get(a)) for a in _LAZY_SRCSET)
-                         if best), "")
-        if real:
-            return real
-        if not src or src.startswith("data:"):
-            return ""
-    return src
+    placeholder = not src or src.startswith("data:")
+    if not placeholder and not _PLACEHOLDER.search(src):
+        return src
+    for attribute in _LAZY_SRC:
+        if (img.get(attribute) or "").strip():
+            return img[attribute].strip()
+    for attribute in _LAZY_SRCSET:
+        best = _largest(img.get(attribute))
+        if best:
+            return best
+    return "" if placeholder else src
 
 
 def _is_pixel(img: Tag) -> bool:
@@ -246,36 +279,43 @@ def _settle_noscript(soup: BeautifulSoup) -> None:
 # -- embeds, video and audio ------------------------------------------------- #
 
 def _embed_address(src: str) -> str:
-    """The page a reader opens for an embed: the watch page for YouTube
-    and Vimeo players, the embed's own address for another known player,
-    and "" (dropped) for anything else."""
-    if not _is_web(src):
+    """The page a reader opens for an embed: the watch page of a YouTube
+    video or playlist, a Vimeo video, a PeerTube video or a tweet, the
+    embed's own address for another known player, and "" (dropped) for
+    anything else."""
+    if not is_web(src):
         return ""
     parts = urlsplit(src)
     host = (parts.hostname or "").lower()
+    query = parse_qs(parts.query)
+    if "/videos/embed/" in parts.path:
+        return src.replace("/videos/embed/", "/videos/watch/", 1).split("?")[0]
     if not any(host == p or host.endswith("." + p) for p in _PLAYERS):
         return ""
     if host.endswith(("youtube.com", "youtube-nocookie.com")):
+        if parts.path == "/embed/videoseries" and query.get("list"):
+            return f"https://www.youtube.com/playlist?list={query['list'][0]}"
         match = _YOUTUBE_ID.match(parts.path)
         if match:
             return f"https://www.youtube.com/watch?v={match.group(1)}"
-        video = parse_qs(parts.query).get("v")
-        if video:
-            return f"https://www.youtube.com/watch?v={video[0]}"
+        if query.get("v"):
+            return f"https://www.youtube.com/watch?v={query['v'][0]}"
     if host == "player.vimeo.com":
         match = _VIMEO_ID.match(parts.path)
         if match:
             return f"https://vimeo.com/{match.group(1)}"
+    if host == "platform.twitter.com" and query.get("id"):
+        return f"https://twitter.com/i/web/status/{query['id'][0]}"
     return src
 
 
 def _media_address(media: Tag) -> str:
     src = (media.get("src") or "").strip()
-    if _is_web(src):
+    if is_web(src):
         return src
     for source in media.find_all("source"):
         value = (source.get("src") or "").strip()
-        if _is_web(value):
+        if is_web(value):
             return value
     return ""
 
@@ -296,7 +336,7 @@ def _replace_with_link(soup: BeautifulSoup, element: Tag, address: str) -> None:
 def _drop_appeared_first(soup: BeautifulSoup) -> None:
     blocks = [b for b in soup.find_all(("p", "div")) if b.find(("p", "div")) is None]
     for block in reversed(blocks[-2:]):
-        if _APPEARED_FIRST.match(" ".join(block.get_text(" ").split())):
+        if APPEARED_FIRST.match(" ".join(block.get_text(" ").split())):
             block.decompose()
             return
 
@@ -304,8 +344,3 @@ def _drop_appeared_first(soup: BeautifulSoup) -> None:
 def _is_language(value: str) -> bool:
     return bool(value) and len(value) <= 24 and bool(re.fullmatch(r"[A-Za-z0-9_+#.-]+", value)) \
         and value.lower() not in ("none", "plain", "text", "nohighlight")
-
-
-def _is_web(url: Optional[str]) -> bool:
-    return urlsplit(url or "").scheme in ("http", "https")
-

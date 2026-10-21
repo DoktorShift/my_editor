@@ -649,6 +649,21 @@ class TestFullTextRecovery:
         assert "Paragraph 3" not in event["content"]
         assert "Originally published by Jane Doe at" in event["content"]
 
+    def test_the_articles_own_last_rule_stays_when_the_page_adds_details(self):
+        """The attribution line is kept apart from the body, so nothing has
+        to cut it off again (that took the article's own last rule too)."""
+        factory, created = make_factory()
+        page = ('<html><head><meta property="og:image" content="/c.jpg"></head>'
+                "<body><p>x</p></body></html>")
+        pages = FakeFetcher({ARTICLE_URL: ("ok", page)})
+        item = make_item("Whole", guid="t1", link=ARTICLE_URL,
+                         content_html=THICK_HTML + "<hr>")
+        job = make_job([item], factory=factory, page_fetcher=pages)
+        job.start()
+        settle()
+        content = created[0].inner_event["content"]
+        assert content.count("---") == 2   # the article's rule, then the attribution's
+
     def test_a_page_that_states_nothing_leaves_the_post_as_it_was(self):
         factory, created = make_factory()
         pages = FakeFetcher({ARTICLE_URL: ("ok", "<html><body><p>x</p></body></html>")})

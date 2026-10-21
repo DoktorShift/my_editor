@@ -19,15 +19,14 @@ import json
 import re
 import time
 from dataclasses import dataclass, field, replace
-from datetime import datetime, timezone
-from email.utils import parsedate_to_datetime
 from html import escape, unescape
 from typing import Any, Callable, List, Mapping, Optional, Sequence, Tuple
-from urllib.parse import urljoin, urlsplit
 
 import feedparser
 
 from .clean import first_image, is_cover_worthy
+from .dates import to_unix
+from .urls import is_web, whole_url
 
 
 FeedFormat = str  # one of: "rss", "atom", "jsonfeed"
@@ -89,36 +88,15 @@ def with_whole_links(feed: Feed, address: Optional[str]) -> Feed:
     The cover is made whole too, against the post's own page: a cover
     written as ``/media/a.jpg`` was refused when the article was signed,
     and the draft lost it."""
-    base = address if _is_web_address(address) else feed.link
-    if not _is_web_address(base):
+    base = address if is_web(address) else feed.link
+    if not is_web(base):
         return feed
     items = []
     for item in feed.items:
-        link = (item.link or "").strip()
-        if link and not link.startswith("#") and not urlsplit(link).scheme:
-            item = replace(item, link=urljoin(base, link))
-        image = whole_url(item.image, item.link if _is_web_address(item.link) else base)
-        if image != item.image:
-            item = replace(item, image=image)
-        items.append(item)
+        link = whole_url((item.link or "").strip() or None, base)
+        image = whole_url(item.image, link if is_web(link) else base)
+        items.append(replace(item, link=link, image=image))
     return replace(feed, items=tuple(items))
-
-
-def whole_url(url: Optional[str], base: Optional[str]) -> Optional[str]:
-    """``url`` made whole against the web address ``base``: a relative
-    or protocol-relative address gets the page's scheme and host. Any
-    other address, and every address when ``base`` is not a web
-    address, is returned as it is."""
-    value = (url or "").strip()
-    if not value or not _is_web_address(base):
-        return url
-    if value.startswith("//") or not urlsplit(value).scheme:
-        return urljoin(base, value)
-    return url
-
-
-def _is_web_address(url: Optional[str]) -> bool:
-    return urlsplit(url or "").scheme in ("http", "https")
 
 
 class RssError(Exception):
@@ -132,12 +110,6 @@ class RssError(Exception):
 # --------------------------------------------------------------------------- #
 # Shared helpers                                                               #
 # --------------------------------------------------------------------------- #
-
-def _first_image_from_html(html: str) -> Optional[str]:
-    """The first real picture in ``html``, if any (clean.first_image: the
-    one behind a lazy placeholder, never a pixel or an avatar)."""
-    return first_image(html)
-
 
 _MARKUP = re.compile(r"<[A-Za-z!/][^>]*>")
 _TAGS = re.compile(r"<[^>]+>")
@@ -186,35 +158,6 @@ def _struct_time_to_unix(st: Optional[time.struct_time]) -> Optional[int]:
         return None
 
 
-def _parse_date_string(value: Optional[str]) -> Optional[int]:
-    """Best-effort RFC-822 / ISO-8601 to unix seconds. JSON Feed only."""
-    if not value:
-        return None
-    s = value.strip()
-    if not s:
-        return None
-    # ISO 8601 with trailing Z is the JSON Feed canonical form.
-    try:
-        if s.endswith("Z"):
-            dt = datetime.fromisoformat(s[:-1] + "+00:00")
-        else:
-            dt = datetime.fromisoformat(s)
-        if dt.tzinfo is None:
-            dt = dt.replace(tzinfo=timezone.utc)
-        return int(dt.timestamp())
-    except ValueError:
-        pass
-    try:
-        dt = parsedate_to_datetime(s)
-        if dt is None:
-            return None
-        if dt.tzinfo is None:
-            dt = dt.replace(tzinfo=timezone.utc)
-        return int(dt.timestamp())
-    except (TypeError, ValueError):
-        return None
-
-
 def _clean_str(value: Any) -> str:
     """Coerce to a stripped string, never raising."""
     if value is None:
@@ -260,7 +203,7 @@ def _entry_image(entry: Mapping[str, Any], content_html: str) -> Optional[str]:
     for url in candidates:
         if is_cover_worthy(url):
             return url.strip()
-    return _first_image_from_html(content_html)
+    return first_image(content_html)
 
 
 def _entry_categories(entry: Mapping[str, Any]) -> Tuple[str, ...]:
@@ -460,7 +403,7 @@ def _parse_json_feed(payload: Any) -> Feed:
         image = (
             _clean_str(it.get("image"))
             or _clean_str(it.get("banner_image"))
-            or _first_image_from_html(content_html)
+            or first_image(content_html)
             or None
         )
 
@@ -471,8 +414,8 @@ def _parse_json_feed(payload: Any) -> Feed:
                 link=link,
                 summary=_clean_str(it.get("summary")) or None,
                 content_html=content_html,
-                published_at=(_parse_date_string(it.get("date_published"))
-                              or _parse_date_string(it.get("date_modified"))),
+                published_at=(to_unix(it.get("date_published"))
+                              or to_unix(it.get("date_modified"))),
                 categories=categories,
                 image=image if isinstance(image, str) else None,
                 author=_json_item_author(it),

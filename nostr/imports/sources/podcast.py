@@ -43,6 +43,7 @@ from dataclasses import dataclass, replace
 from typing import Callable, List, Optional, Tuple
 
 from ...rss.parser import Feed, FeedItem
+from ...rss.urls import link_target
 
 
 # Defensive caps so a hostile feed can't bloat the draft event.
@@ -420,11 +421,7 @@ def fetch_podcast_chapters(
     fetcher.fetch(url, on_success=_on_body, on_failure=lambda _e: _retry_embedded())
 
 
-def _link_target(url: str) -> str:
-    """An address as a Markdown link target: a space or a parenthesis in
-    a file name would end the link early, so those are encoded."""
-    return (str(url or "").strip().replace(" ", "%20").replace("(", "%28")
-            .replace(")", "%29").replace("<", "%3C").replace(">", "%3E"))
+
 
 
 def build_podcast_markdown(
@@ -454,7 +451,7 @@ def build_podcast_markdown(
     if meta_parts:
         lines.append("🎧 " + " · ".join(meta_parts))
         lines.append("")
-    lines.append(f"[Listen to the episode]({_link_target(episode.audio)})")
+    lines.append(f"[Listen to the episode]({link_target(episode.audio)})")
     if chapters:
         lines.append("")
         lines.append("## Chapters")
@@ -464,7 +461,7 @@ def build_podcast_markdown(
                 f"- **{format_duration(chapter.start)}** {chapter.title}")
     if episode.transcript:
         lines.append("")
-        lines.append(f"[Transcript]({_link_target(episode.transcript)})")
+        lines.append(f"[Transcript]({link_target(episode.transcript)})")
     if notes.strip():
         lines.append("")
         lines.append("---")

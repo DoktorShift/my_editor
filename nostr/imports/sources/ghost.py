@@ -32,11 +32,11 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import dataclass
-from datetime import datetime, timezone
 from typing import List, Optional, Tuple
 
 from i18n import _
 
+from ...rss.dates import to_unix
 from ...rss.parser import FeedItem
 
 
@@ -59,29 +59,19 @@ def is_ghost_export(text: Optional[str]) -> bool:
     )
 
 
-def _to_unix(value) -> Optional[int]:
-    if value in (None, ""):
-        return None
-    if isinstance(value, (int, float)):
-        # Older exports use epoch milliseconds.
-        seconds = float(value) / 1000 if value > 10**12 else float(value)
-        return int(seconds)
-    raw = str(value).strip()
-    try:
-        if raw.endswith("Z"):
-            raw = raw[:-1] + "+00:00"
-        parsed = datetime.fromisoformat(raw)
-        if parsed.tzinfo is None:
-            parsed = parsed.replace(tzinfo=timezone.utc)
-        return int(parsed.timestamp())
-    except ValueError:
-        return None
-
-
 @dataclass(frozen=True)
 class GhostExport:
     title: str
     items: Tuple[FeedItem, ...]
+
+
+def _to_unix(value) -> Optional[int]:
+    """Ghost writes ``published_at`` as ISO 8601; older exports as epoch
+    milliseconds."""
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        seconds = int(value / 1000 if value > 10**12 else value)
+        return seconds if seconds > 0 else None
+    return to_unix(value)
 
 
 def parse_ghost_export(text: str, *, site_url: str = "") -> GhostExport:
@@ -101,7 +91,10 @@ def parse_ghost_export(text: str, *, site_url: str = "") -> GhostExport:
         return GhostExport(title="", items=())
 
     site = (site_url or "").strip().rstrip("/")
-    whole = lambda value: str(value or "").replace(GHOST_URL, site).strip()  # noqa: E731
+
+    def whole(value) -> str:
+        return str(value or "").replace(GHOST_URL, site).strip()
+
     tags = _joined(data, "tags", "posts_tags", "tag_id",
                    lambda tag: "" if str(tag.get("name") or "").startswith("#")
                    or tag.get("visibility") == "internal" else str(tag.get("name") or ""))

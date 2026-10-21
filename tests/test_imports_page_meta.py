@@ -67,6 +67,12 @@ class ReadTests(unittest.TestCase):
                                   url=PAGE)
             self.assertEqual(meta.image, "", name)
 
+    def test_a_post_picture_with_default_in_its_name_stays(self) -> None:
+        for name in ("default-image-settings.png", "how-to-change-the-default-cover.jpg"):
+            meta = read_page_meta(page(f'<meta property="og:image" content="/img/{name}">'),
+                                  url=PAGE)
+            self.assertEqual(meta.image, f"https://blog.example/img/{name}", name)
+
     def test_an_unreadable_page_states_nothing(self) -> None:
         self.assertEqual(read_page_meta("", url=PAGE), PageMeta())
         self.assertEqual(read_page_meta(None, url=PAGE), PageMeta())

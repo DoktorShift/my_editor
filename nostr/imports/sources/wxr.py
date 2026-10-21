@@ -37,10 +37,9 @@ from __future__ import annotations
 import html
 import re
 from dataclasses import dataclass
-from datetime import datetime, timezone
-from email.utils import parsedate_to_datetime
 from typing import Callable, List, Optional, Tuple
 
+from ...rss.dates import to_unix
 from ...rss.parser import FeedItem
 
 
@@ -101,28 +100,6 @@ def _attributes(text: str) -> dict:
                                              else m.group(3) if m.group(3) is not None
                                              else m.group(4))
             for m in _ATTRIBUTE_RE.finditer(text or "")}
-
-
-def _to_unix(gmt: str, pub_date: str) -> Optional[int]:
-    """``wp:post_date_gmt`` (UTC, ``YYYY-MM-DD HH:MM:SS``) preferred,
-    ``pubDate`` (RFC 822) as fallback. WordPress writes
-    ``0000-00-00 00:00:00`` for some rows; those are unusable."""
-    if gmt and not gmt.startswith("0000"):
-        try:
-            parsed = datetime.strptime(gmt, "%Y-%m-%d %H:%M:%S")
-            return int(parsed.replace(tzinfo=timezone.utc).timestamp())
-        except ValueError:
-            pass
-    if pub_date:
-        try:
-            parsed = parsedate_to_datetime(pub_date)
-            if parsed is not None:
-                if parsed.tzinfo is None:
-                    parsed = parsed.replace(tzinfo=timezone.utc)
-                return int(parsed.timestamp())
-        except (TypeError, ValueError):
-            pass
-    return None
 
 
 @dataclass(frozen=True)
@@ -203,10 +180,10 @@ def parse_wxr(text: str, *, include_pages: bool = True) -> WxrExport:
             summary=_field(body, "excerpt:encoded", unmask) or None,
             content_html=post_html(_field(body, "content:encoded", unmask),
                                    attachments=attachments),
-            published_at=_to_unix(
-                _field(body, "wp:post_date_gmt", unmask),
-                _field(body, "pubDate", unmask),
-            ),
+            # The post's time in UTC; pubDate (RFC 822) for a row that
+            # has none ("0000-00-00 00:00:00").
+            published_at=(to_unix(_field(body, "wp:post_date_gmt", unmask))
+                          or to_unix(_field(body, "pubDate", unmask))),
             categories=tuple(categories),
             image=attachments.get(meta.get("_thumbnail_id", "")) or None,
             author=authors.get(creator, creator) or None,
@@ -227,8 +204,12 @@ _EMBED = re.compile(r"\[embed\b[^\]]*\]([\s\S]*?)\[/embed\]", re.IGNORECASE)
 _MEDIA = re.compile(r"\[(video|audio|playlist)\b([^\]]*)\](?:[\s\S]*?\[/\1\])?",
                     re.IGNORECASE)
 _GALLERY = re.compile(r"\[gallery\b([^\]]*)\]", re.IGNORECASE)
-_URL_SHORTCODE = re.compile(r"\[(youtube|vimeo|soundcloud|spotify|tweet)\s+([^\]\s]+)[^\]]*\]",
+# Jetpack's embed shortcodes: [youtube URL], [youtube=URL], [vimeo ID],
+# [tweet ID], [soundcloud url="..."], [spotify id="spotify:track:ID"].
+_URL_SHORTCODE = re.compile(r"\[(youtube|vimeo|soundcloud|spotify|tweet)(?:=|\s+)([^\]]*)\]",
                             re.IGNORECASE)
+_JETPACK_SIZE = re.compile(r"&(?:w|h)=\d+")
+_CODE = re.compile(r"<(pre|code)\b[\s\S]*?</\1>", re.IGNORECASE)
 _CAPTION_IMAGE = re.compile(r"^\s*((?:<a\b[^>]*>\s*)?<img\b[^>]*>(?:\s*</a>)?)\s*([\s\S]*)$",
                             re.IGNORECASE)
 
@@ -236,29 +217,32 @@ _CAPTION_IMAGE = re.compile(r"^\s*((?:<a\b[^>]*>\s*)?<img\b[^>]*>(?:\s*</a>)?)\s
 def post_html(raw: str, *, attachments: Optional[dict] = None) -> str:
     """A post's stored body as the HTML its page shows: shortcodes
     expanded or, when unknown (a page builder's), their tags dropped and
-    their words kept; a classic post's blank lines made paragraphs."""
+    their words kept; a classic post's blank lines made paragraphs. Code
+    (``<pre>``, ``<code>``) and a shortcode written as text (``[[name]]``)
+    are left as they are."""
     if not raw or not raw.strip():
         return ""
     attachments = attachments or {}
-    # [[name]] is how WordPress writes a shortcode as text: kept aside,
-    # as written less one pair of brackets.
-    literal: List[str] = []
+    kept: List[str] = []
 
-    def _aside(match: re.Match) -> str:
-        literal.append(match.group(1))
-        return f"\x00S{len(literal) - 1}\x00"
+    def _aside(text: str) -> str:
+        kept.append(text)
+        return f"\x00K{len(kept) - 1}\x00"
 
-    text = re.sub(r"\[(\[[^\[\]]+\])\]", _aside, raw)
+    text = _CODE.sub(lambda m: _aside(m.group(0)), raw)
+    # [[name]] is how WordPress writes a shortcode as text: it shows as
+    # written, less one pair of brackets.
+    text = re.sub(r"\[(\[[^\[\]]+\])\]", lambda m: _aside(m.group(1)), text)
     text = _CAPTION.sub(_caption, text)
     text = _EMBED.sub(lambda m: _link_line(m.group(1).strip()), text)
-    text = _URL_SHORTCODE.sub(lambda m: _link_line(m.group(2)), text)
+    text = _URL_SHORTCODE.sub(lambda m: _jetpack_embed(m) or _aside(m.group(0)), text)
     text = _MEDIA.sub(_media, text)
     text = _GALLERY.sub(lambda m: _gallery(m.group(1), attachments), text)
     closed = {m.group(1).lower() for m in re.finditer(r"\[/([A-Za-z][\w-]*)\]", text)}
     text = _SHORTCODE.sub(lambda m: _drop_shortcode(m, closed), text)
+    text = re.sub(r"\x00K(\d+)\x00", lambda m: kept[int(m.group(1))], text)
     if "<!-- wp:" not in text:
         text = autop(text)
-    text = re.sub(r"\x00S(\d+)\x00", lambda m: literal[int(m.group(1))], text)
     return text.strip()
 
 
@@ -298,9 +282,36 @@ def _caption(match: re.Match) -> str:
     return f"<figure>{image}<figcaption>{caption}</figcaption></figure>"
 
 
+def _jetpack_embed(match: re.Match) -> str:
+    """The page a Jetpack embed shortcode shows, as a line with its
+    address, or "" for a form not read here (the caller keeps it as
+    written)."""
+    name, rest = match.group(1).lower(), match.group(2).strip()
+    tokens = rest.split()
+    if tokens and tokens[0].startswith(("http://", "https://")):
+        # Jetpack reads its own size options off the address:
+        # [youtube https://youtu.be/ID&w=640&h=360].
+        return _link_line(_JETPACK_SIZE.sub("", tokens[0]))
+    attributes = _attributes(rest)
+    value = (attributes.get("url") or attributes.get("id")
+             or (tokens[0] if tokens and "=" not in tokens[0] else "")).strip()
+    if value.startswith(("http://", "https://")):
+        return _link_line(value)
+    if name == "vimeo" and value.isdigit():
+        return _link_line(f"https://vimeo.com/{value}")
+    if name == "tweet" and value.isdigit():
+        return _link_line(f"https://twitter.com/i/web/status/{value}")
+    if name == "spotify" and value.startswith("spotify:"):
+        kind, _colon, key = value[len("spotify:"):].partition(":")
+        if kind and key:
+            return _link_line(f"https://open.spotify.com/{kind}/{key}")
+    return ""
+
+
 def _media(match: re.Match) -> str:
     attributes = _attributes(match.group(2))
-    for key in ("src", "mp4", "m4v", "webm", "ogv", "mp3", "m4a", "ogg", "wav", "url"):
+    # The address attributes of WordPress's [video] and [audio].
+    for key in ("src", "mp4", "m4v", "webm", "ogv", "flv", "mp3", "m4a", "ogg", "wav", "flac"):
         if attributes.get(key, "").startswith(("http://", "https://")):
             return _link_line(attributes[key])
     return ""
@@ -317,10 +328,10 @@ def _drop_shortcode(match: re.Match, closed: set) -> str:
     """A shortcode nothing above expanded (a page builder's, a plugin's)
     loses its tags and keeps the words between them. Only what is surely
     a shortcode: attributes, a builder-style name (``et_pb_text``,
-    ``vc_row``) or a closing tag in the post. "[see below]" is text."""
+    ``vc_row``) or a closing tag in the post. "[see below]" and
+    "[e-mail]" are text."""
     _open, closing, name, attributes, _self, _close = match.groups()
-    if closing or "=" in attributes or "_" in name or "-" in name \
-            or name.lower() in closed:
+    if closing or "=" in attributes or "_" in name or name.lower() in closed:
         return ""
     return match.group(0)
 

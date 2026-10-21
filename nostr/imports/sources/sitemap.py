@@ -35,10 +35,10 @@ from __future__ import annotations
 import html
 import re
 from dataclasses import dataclass
-from datetime import datetime, timezone
 from typing import Callable, List, Optional, Tuple
 from urllib.parse import unquote, urlparse
 
+from ...rss.dates import to_unix
 from ...rss.parser import FeedItem
 
 
@@ -109,19 +109,9 @@ def parse_sitemap(text: str) -> Tuple[List[SitemapEntry], List[SitemapEntry]]:
     return urls, subs
 
 
-def _lastmod_seconds(value: str) -> int:
-    if not value:
-        return 0
-    raw = value.strip()
-    try:
-        if raw.endswith("Z"):
-            raw = raw[:-1] + "+00:00"
-        parsed = datetime.fromisoformat(raw)
-        if parsed.tzinfo is None:
-            parsed = parsed.replace(tzinfo=timezone.utc)
-        return int(parsed.timestamp())
-    except ValueError:
-        return 0
+def _seconds(value: str) -> int:
+    """A sitemap date as Unix seconds, 0 for none (it sorts last)."""
+    return to_unix(value) or 0
 
 
 def is_article_url(loc: str) -> bool:
@@ -182,7 +172,7 @@ def filter_entries(entries: List[SitemapEntry]) -> List[SitemapEntry]:
     last change otherwise: picking the 200 to show, a recent change is
     the best hint there is."""
     kept = [e for e in entries if is_article_url(e.loc)]
-    kept.sort(key=lambda e: _lastmod_seconds(e.published) or _lastmod_seconds(e.lastmod),
+    kept.sort(key=lambda e: _seconds(e.published) or _seconds(e.lastmod),
               reverse=True)
     return kept[:SITEMAP_MAX_URLS]
 
@@ -204,7 +194,7 @@ def entries_to_items(entries: List[SitemapEntry]) -> List[FeedItem]:
             link=e.loc,
             summary=None,
             content_html="",
-            published_at=_lastmod_seconds(e.published) or None,
+            published_at=_seconds(e.published) or None,
             categories=(),
             image=None,
             author=None,

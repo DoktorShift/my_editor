@@ -167,6 +167,15 @@ class ArticleDetailTests(unittest.TestCase):
         self.assertEqual(plain_summary("Notes with <a href='/x'>a link</a>."),
                          "Notes with a link.")
 
+    def test_a_translated_read_on_link_ends_a_teaser(self) -> None:
+        self.assertEqual(plain_summary("Mots ... Lire la suite"), "Mots…")
+        self.assertEqual(plain_summary("Wörter … „Titel“ weiterlesen"), "Wörter…")
+
+    def test_words_like_it_in_a_sentence_stay(self) -> None:
+        self.assertEqual(plain_summary("Learn how to read more books."),
+                         "Learn how to read more books.")
+        self.assertFalse(ends_as_teaser("Learn how to read more books."))
+
     def test_the_appeared_first_line_leaves_the_summary(self) -> None:
         self.assertEqual(plain_summary("Teaser. The post <a>X</a> appeared first on "
                                        "<a>Blog</a>."), "Teaser.")

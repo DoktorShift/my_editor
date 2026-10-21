@@ -26,7 +26,6 @@ from ..constants import NOSTR_MAX_ARTICLES, NOSTRHUB_NIP_KIND, NOSTRHUB_RELAYS
 from ..errors import ERROR_CODES, SourceError
 from ..registry import ResolveContext, ResolveInput, ResolveResult, SourceResolver
 from ...rss.parser import Feed, FeedItem
-from ..sources.mdx import derive_summary
 from ..sources.nostr import (
     NostrEntity,
     event_tag,
@@ -77,7 +76,7 @@ def nip_event_to_item(event: dict) -> FeedItem:
         guid=f"{kind}:{pubkey}:{d_tag}",  # stable coordinate = stable d-tag
         title=title,
         link=f"{HUB_BASE_URL}/{naddr}",
-        summary=derive_summary(body) or None,
+        summary=None,  # made of the opening words (normalize.py)
         content_html="",
         published_at=published,
         categories=tuple(_kind_labels(event)),

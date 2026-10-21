@@ -20,12 +20,11 @@ image, else the first image in the body).
 from __future__ import annotations
 
 import dataclasses
-import html
 import re
 from typing import Any, Dict, Iterable, List
 
 from ..rss.dtag import derive_identifier
-from ..rss.normalize import html_to_markdown
+from ..rss.normalize import html_to_markdown, plain_text
 from ..rss.parser import FeedItem
 from .constants import IDENTIFIER_PREFIX
 from .images import scan_markdown_images
@@ -86,10 +85,6 @@ def from_snapshot(data: Dict[str, Any]) -> FeedItem:
         podcast=podcast,
         partial=bool(data.get("partial")),
     )
-
-
-def plain_text(body_html: str) -> str:
-    return _SPACE.sub(" ", html.unescape(_TAG.sub(" ", body_html or ""))).strip()
 
 
 def markdown_text(markdown: str) -> str:

@@ -29,7 +29,7 @@ from nostr.imports.constants import NOSTRHUB_NIP_KIND
 from nostr.imports.errors import ERROR_CODES
 from nostr.imports.registry import ResolveInput, detect_resolver, resolve_source
 from nostr.imports.resolvers.nostrhub import nip_event_to_item
-from nostr.imports.sources.mdx import derive_summary
+from nostr.rss.normalize import summary_from_body
 from nostr.imports.sources.nostr import (
     event_tag,
     extract_nip05,
@@ -312,28 +312,31 @@ class TestWikiNormalisation(unittest.TestCase):
         self.assertEqual(normalize_wiki_content(md), md)
 
 
-class TestDeriveSummary(unittest.TestCase):
+class TestSummaryFromBody(unittest.TestCase):
+    """The summary a post without one gets (normalize.summary_from_body),
+    the same for every source."""
+
     def test_prefers_substantial_line(self):
         md = "# Title\n\nTEIL 00\n\nThe real opening sentence with plenty of words."
         self.assertEqual(
-            derive_summary(md),
+            summary_from_body(md),
             "The real opening sentence with plenty of words.")
 
     def test_falls_back_to_short_line(self):
-        self.assertEqual(derive_summary("# T\n\nShort."), "Short.")
+        self.assertEqual(summary_from_body("# T\n\nShort."), "Short.")
 
     def test_no_markdown_syntax_in_the_summary(self):
         md = ("![A chart](https://cdn.example/chart.png)\n\n"
               "See [the docs](https://docs.example) for **more** about it.")
-        self.assertEqual(derive_summary(md), "See the docs for more about it.")
+        self.assertEqual(summary_from_body(md), "See the docs for more about it.")
 
     def test_code_is_not_the_summary(self):
         md = "```\nrun()\n\nagain()\n```\n\nThe opening words of the article."
-        self.assertEqual(derive_summary(md), "The opening words of the article.")
+        self.assertEqual(summary_from_body(md), "The opening words of the article.")
 
     def test_empty(self):
-        self.assertEqual(derive_summary(""), "")
-        self.assertEqual(derive_summary("# only a heading"), "")
+        self.assertEqual(summary_from_body(""), "")
+        self.assertEqual(summary_from_body("# only a heading"), "")
 
 
 class TestBech32Nevent(unittest.TestCase):

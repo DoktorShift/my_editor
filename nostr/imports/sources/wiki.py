@@ -29,6 +29,8 @@ from __future__ import annotations
 
 import re
 
+from ...rss.markdown import code_spans, protect, reference_label, restore
+
 _WIKILINK_PIPE_RE = re.compile(r"\[\[([^\]|]+)\|([^\]]+)\]\]")  # [[target|display]]
 _WIKILINK_RE = re.compile(r"\[\[([^\]]+)\]\]")                   # [[Target]]
 _DJOT_WIKILINK_RE = re.compile(r"\[([^\]]+)\]\[\]")              # [display][]
@@ -36,43 +38,24 @@ _DJOT_WIKILINK_RE = re.compile(r"\[([^\]]+)\]\[\]")              # [display][]
 # (and the blank line after the heading) in multiline mode.
 _ASCIIDOC_HEADING_RE = re.compile(
     r"^(={1,6})[ \t]+(.+?)[ \t]*=*[ \t]*$", re.MULTILINE)
-# Code: a fence of backticks or tildes (to its closing fence, or to the
-# end of an unclosed one), or an inline code span.
-_CODE_RE = re.compile(
-    r"^[ \t]*(`{3,}|~{3,})[^\n]*\n[\s\S]*?(?:^[ \t]*\1[`~]*[ \t]*$|\Z)"
-    r"|(?<!`)(`+)(?!`)[^\n]+?(?<!`)\2(?!`)",
-    re.MULTILINE)
 # A reference definition: "[label]: destination".
 _REFERENCE_DEF_RE = re.compile(r"^[ ]{0,3}\[([^\]]+)\]:[ \t]*\S", re.MULTILINE)
-
-
-def _label(text: str) -> str:
-    """A reference label as Markdown matches it: case and runs of
-    whitespace do not count."""
-    return re.sub(r"\s+", " ", text).strip().casefold()
 
 
 def normalize_wiki_content(content: str) -> str:
     """Normalise a kind-30818 wiki body to clean Markdown."""
     text = str(content or "")
 
-    # Protect code from every rewrite below.
-    fences: list[str] = []
-
-    def _stash(match: re.Match) -> str:
-        fences.append(match.group(0))
-        return f"\x00F{len(fences) - 1}\x00"
-
-    text = _CODE_RE.sub(_stash, text)
-    defined = {_label(m.group(1)) for m in _REFERENCE_DEF_RE.finditer(text)}
+    # Code is kept from every rewrite below.
+    code: list[str] = []
+    text = protect(text, code_spans(text), code)
+    defined = {reference_label(m.group(1)) for m in _REFERENCE_DEF_RE.finditer(text)}
 
     text = _WIKILINK_PIPE_RE.sub(lambda m: m.group(2).strip(), text)
     text = _WIKILINK_RE.sub(lambda m: m.group(1).strip(), text)
     text = _DJOT_WIKILINK_RE.sub(
-        lambda m: m.group(0) if _label(m.group(1)) in defined else m.group(1), text)
+        lambda m: m.group(0) if reference_label(m.group(1)) in defined else m.group(1), text)
     text = _ASCIIDOC_HEADING_RE.sub(
         lambda m: f"{'#' * len(m.group(1))} {m.group(2).strip()}", text)
 
-    text = re.sub(
-        r"\x00F(\d+)\x00", lambda m: fences[int(m.group(1))], text)
-    return text.strip()
+    return restore(text, code).strip()

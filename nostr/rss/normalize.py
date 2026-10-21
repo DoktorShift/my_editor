@@ -17,14 +17,15 @@ from __future__ import annotations
 import html
 import re
 from dataclasses import dataclass
-from typing import Iterable, Optional, Tuple
-from urllib.parse import urlsplit
+from typing import Iterable, List, Optional, Tuple
 
 from markdownify import ATX, markdownify as _markdownify
 
-from .clean import clean_html, code_language
+from .clean import APPEARED_FIRST, clean_html, code_language
 from .dtag import derive_identifier
-from .parser import FeedItem, whole_url
+from .markdown import escape, unescape, without_code_blocks
+from .parser import FeedItem
+from .urls import is_web, whole_url
 
 
 _SOURCE_FOOTER_SEPARATOR = "\n\n---\n\n"
@@ -33,15 +34,25 @@ _SOURCE_FOOTER_SEPARATOR = "\n\n---\n\n"
 @dataclass(frozen=True)
 class ArticleTemplate:
     """Inputs for ``build_article``. The signing pubkey is supplied by
-    the caller; everything else comes from the feed item."""
+    the caller; everything else comes from the feed item.
+
+    The article's own Markdown (``body``) and its attribution line
+    (``footer``, "" when there is none) are kept apart, so a step that
+    replaces or measures the body never has to find the line again."""
 
     slug: str
-    content: str
+    body: str
+    footer: str
     title: str
     summary: str
     image: str
     published_at: Optional[int]
     hashtags: Tuple[str, ...]
+
+    @property
+    def content(self) -> str:
+        """The Markdown published: the body, then the attribution line."""
+        return (self.body + self.footer).strip()
 
 
 def html_to_markdown(html: str, *, base_url: Optional[str] = None) -> str:
@@ -65,25 +76,42 @@ def html_to_markdown(html: str, *, base_url: Optional[str] = None) -> str:
     )
 
 
-# WordPress's default category, as its translations name it: a post
-# nobody filed is not about "uncategorized".
+# WordPress's default category, as its translations name it
+# (translate.wordpress.org), written as a hashtag: a post nobody filed
+# is not about "uncategorized".
 _UNFILED = frozenset({
-    "uncategorized", "uncategorised", "allgemein", "sincategoría",
-    "sincategoria", "nonclassé", "nonclasse", "senzacategoria",
-    "geencategorie", "semcategoria", "bezkategorii", "okategoriserade",
+    "uncategorized", "uncategorised", "allgemein", "sincategoría", "nonclassé",
+    "senzacategoria", "geencategorie", "nietgecategoriseerd", "semcategoria",
+    "bezkategorii", "okategoriserade", "безрубрики", "未分類", "ikke-kategoriseret",
+    "ukategorisert", "nezařazené",
 })
+# How a teaser ends: WordPress's excerpt "[…]", an ellipsis, the "more"
+# link of WordPress ("(more…)") and of its themes ("Continue reading")
+# and their translations.
+_ELLIPSIS = r"\[(?:…|\.\.\.)\]|…|\.\.\.|\(more…\)"
+_CONTINUE = (r"continue reading|read more|weiterlesen|lire la suite|continuer la lecture|"
+             r"poursuivre la lecture|leer más|seguir leyendo|sigue leyendo|"
+             r"continuar leyendo|continua a leggere|leggi tutto|lees verder|"
+             r"continue lendo|leia mais|czytaj dalej")
+# In a summary: the ellipsis, and what follows it up to a "Continue
+# reading" ("… „Title“ weiterlesen").
+_READ_MORE = re.compile(r"\s*(?:%s)(?:[^\n]{0,120}?\b(?:%s)\b[^\n]*)?\s*$"
+                        % (_ELLIPSIS, _CONTINUE), re.IGNORECASE)
+# At the end of a body: the ellipsis, a link that says to read on, or a
+# last line that says only that.
+_TEASER_END = re.compile(
+    r"(?:%s|\[[^\]\n]*\b(?:%s)\b[^\]\n]*\]\([^)]*\)|(?:^|\n)\W*(?:%s)\W*)\s*$"
+    % (_ELLIPSIS, _CONTINUE, _CONTINUE), re.IGNORECASE)
 
 _SUMMARY_CHARS = 280
+# A first paragraph shorter than this, before a longer one, is a kicker
+# or a label ("TEIL 00"), not the opening sentence.
+_KICKER_CHARS = 25
 _SPACE = re.compile(r"\s+")
 _TAG = re.compile(r"<[^>]+>")
 _SPACE_BEFORE_MARK = re.compile(r"\s+([.,;:!?)])")
 _EMAIL = re.compile(r"^[^@\s()<>]+@[^@\s()<>]+\.[^@\s()<>]+$")
 _EMAIL_WITH_NAME = re.compile(r"^\S+@\S+\s*\((.+)\)$")
-_READ_MORE = re.compile(r"\s*(\[(…|\.\.\.|&hellip;)\]|…|\.\.\.)\s*"
-                        r"(continue reading.*|read more.*|weiterlesen.*)?$",
-                        re.IGNORECASE)
-_APPEARED_FIRST = re.compile(r"\s*\b(The post|Der Beitrag)\b.+\b(appeared first on|"
-                             r"erschien zuerst auf)\b.*$", re.IGNORECASE)
 _MD_IMAGE = re.compile(r"!\[[^\]]*\]\([^)]*\)")
 _MD_LINK = re.compile(r"\[([^\]]*)\]\([^)]*\)")
 # A line's block marks (heading, quote, list item), emphasis, and an
@@ -92,7 +120,6 @@ _MD_LINK = re.compile(r"\[([^\]]*)\]\([^)]*\)")
 _MD_MARKS = re.compile(r"^[ \t]*(?:[#>]+|[-+]|\d+[.)])[ \t]+|(?<!\\)[*_`~]+|<(https?://[^>]+)>",
                        re.MULTILINE)
 _BARE_URL = re.compile(r"https?://\S+")
-_MD_ESCAPE = re.compile(r"\\([\\`*_{}\[\]()#+\-.!<>|~])")
 
 
 def hashtag(raw: str) -> str:
@@ -116,13 +143,18 @@ def _merge_hashtags(
     return tuple(seen)
 
 
+def plain_text(html_text: Optional[str]) -> str:
+    """HTML as the words it shows, on one line."""
+    return _SPACE.sub(" ", html.unescape(_TAG.sub(" ", html_text or ""))).strip()
+
+
 def author_name(raw: Optional[str]) -> str:
     """The name to credit a post to, or "" when the source names nobody.
 
     RSS writes an author as an e-mail address, often with the name after
     it (``jane@example.com (Jane Doe)``): the name is kept, an address
     alone is never published."""
-    value = _SPACE.sub(" ", html.unescape(_TAG.sub(" ", raw or ""))).strip()
+    value = plain_text(raw)
     match = _EMAIL_WITH_NAME.match(value)
     if match:
         value = match.group(1).strip()
@@ -135,9 +167,11 @@ def plain_summary(summary_html: Optional[str]) -> str:
     """A feed's summary as the plain text NIP-23 asks for: no tags, no
     entities, one line, without the "[…]" a teaser ends on or the
     "The post X appeared first on Y." line SEO plugins add."""
-    text = _SPACE.sub(" ", html.unescape(_TAG.sub(" ", summary_html or ""))).strip()
+    text = plain_text(summary_html)
     text = _SPACE_BEFORE_MARK.sub(r"\1", text)
-    text = _APPEARED_FIRST.sub("", text).strip()
+    plugin_line = APPEARED_FIRST.search(text)
+    if plugin_line and len(text) - plugin_line.end() < 120:
+        text = text[:plugin_line.start()].strip()
     trimmed = _READ_MORE.sub("", text).strip()
     if trimmed != text and trimmed:
         text = trimmed + "…"
@@ -147,51 +181,25 @@ def plain_summary(summary_html: Optional[str]) -> str:
 def summary_from_body(markdown: str) -> str:
     """A summary made of the article's opening words, for a post whose
     source gives none: what a reader sees first, cut at a word. Code,
-    headings, tables and a line that is only an address are skipped."""
+    headings, tables and a line that is only an address are skipped, and
+    so is a short kicker before the first real sentence ("TEIL 00")."""
     paragraphs = []
-    for block in re.split(r"\n\s*\n", _without_code(markdown or "")):
+    for block in re.split(r"\n\s*\n", without_code_blocks(markdown or "")):
         stripped = block.strip()
         if not stripped or stripped.startswith(("#", "|", "---", "*Originally")):
             continue
         text = _MD_MARKS.sub(lambda m: m.group(1) or "",
                              _MD_LINK.sub(r"\1", _MD_IMAGE.sub(" ", stripped)))
-        text = _MD_ESCAPE.sub(r"\1", text)
-        text = _SPACE.sub(" ", text).strip()
-        if _BARE_URL.fullmatch(text):
-            continue  # a video's or a link's own line says nothing about the post
-        if text:
+        text = _SPACE.sub(" ", unescape(text)).strip()
+        if text and not _BARE_URL.fullmatch(text):
             paragraphs.append(text)
-        if sum(len(p) for p in paragraphs) >= _SUMMARY_CHARS // 2:
+    start = next((i for i, text in enumerate(paragraphs) if len(text) >= _KICKER_CHARS), 0)
+    words: List[str] = []
+    for text in paragraphs[start:]:
+        words.append(text)
+        if sum(len(w) for w in words) >= _SUMMARY_CHARS // 2:
             break
-    return _shorten(" ".join(paragraphs))
-
-
-_FENCE = re.compile(r"^ {0,3}(`{3,}|~{3,})")
-
-
-def _without_code(markdown: str) -> str:
-    """``markdown`` without its fenced code blocks (a blank line inside
-    one, or a whole one in a paragraph, is no paragraph of prose)."""
-    out, fence = [], ""
-    for line in markdown.split("\n"):
-        match = _FENCE.match(line)
-        if fence:
-            if match and match.group(1)[0] == fence[0] and len(match.group(1)) >= len(fence) \
-                    and not line.strip()[len(match.group(1)):].strip():
-                fence = ""
-            continue
-        if match:
-            fence = match.group(1)
-            continue
-        out.append(line)
-    return "\n".join(out)
-
-
-_TEASER_END = re.compile(
-    r"(\[(…|\.\.\.)\]|…|\.\.\.|\[?(continue reading|read more|read the full|"
-    r"weiterlesen|mehr lesen|lire la suite|leer más|seguir leyendo|"
-    r"continua a leggere|lees verder)[^\n]*?(\]\([^)]*\))?)\s*$",
-    re.IGNORECASE)
+    return _shorten(" ".join(words))
 
 
 def ends_as_teaser(markdown: str) -> bool:
@@ -210,21 +218,15 @@ def _shorten(text: str) -> str:
 
 def source_link_footer(link: str, author: Optional[str] = None) -> str:
     """Footer block appended to a feed item's body when ``link`` is set,
-    crediting the post's author when the source names one.
-
-    Public so other callers (notably the long-form resolver) can compute
-    its length to decide whether the pre-footer body is "thin", without
-    re-implementing the format.
-    """
+    crediting the post's author when the source names one."""
     name = author_name(author)
     if name:
-        credit = _MD_SPECIAL.sub(r"\\\g<0>", name)
+        credit = escape(name)
         return (f"{_SOURCE_FOOTER_SEPARATOR}*Originally published by {credit} "
                 f"at [{link}]({link})*")
     return f"{_SOURCE_FOOTER_SEPARATOR}*Originally published at [{link}]({link})*"
 
 
-_MD_SPECIAL = re.compile(r"[\\`*_\[\]<>]")
 
 
 def item_to_article(
@@ -252,10 +254,9 @@ def item_to_article(
         markdown = str(item.content_markdown).strip()
     else:
         markdown = html_to_markdown(item.content_html, base_url=item.link).strip()
-    markdown = _without_title_heading(markdown, item.title)
-    body = markdown
-    if append_source_link and item.link:
-        markdown = (markdown + source_link_footer(item.link, item.author)).strip()
+    body = _without_title_heading(markdown, item.title)
+    footer = source_link_footer(item.link, item.author) if append_source_link and item.link \
+        else ""
 
     slug = derive_identifier(
         guid=item.guid,
@@ -266,7 +267,8 @@ def item_to_article(
 
     return ArticleTemplate(
         slug=slug,
-        content=markdown,
+        body=body,
+        footer=footer,
         title=item.title or "",
         summary=plain_summary(item.summary) or summary_from_body(body),
         image=cover_address(item.image, item.link),
@@ -296,5 +298,5 @@ def cover_address(image: Optional[str], page: Optional[str]) -> str:
     """The cover as a whole web address (made whole against the post's
     page), or "" for anything else (a ``data:`` picture, a bare path
     with no page to place it)."""
-    value = whole_url(image, page) or ""
-    return value.strip() if urlsplit(value.strip()).scheme in ("http", "https") else ""
+    value = (whole_url(image, page) or "").strip()
+    return value if is_web(value) else ""

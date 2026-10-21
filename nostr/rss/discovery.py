@@ -194,10 +194,8 @@ _HEAD_CONTENT = frozenset({"html", "title", "meta", "link", "style", "script",
                            "base", "noscript", "template"})
 
 # A page listing one section of a site: a WordPress category, tag or
-# author archive (and the words other platforms use for the same).
-_SECTION_PAGE = re.compile(
-    r"/(?:category|categories|tag|tags|topic|topics|author|series|label|"
-    r"kategorie|schlagwort|categorie|categoria|etiqueta)/", re.IGNORECASE)
+# author archive (WordPress's bases in every language).
+_SECTION_PAGE = re.compile(r"/(?:category|tag|author)/", re.IGNORECASE)
 _COMMENTS_FEED = re.compile(r"comment|kommentar", re.IGNORECASE)
 
 
