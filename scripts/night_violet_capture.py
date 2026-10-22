@@ -58,6 +58,9 @@ state_checks = []
 
 def capture(widget, name, dark, *, close=True):
     if args.only and name not in args.only:
+        # Constructors queue UI callbacks; drain them before destroying a
+        # skipped fixture, just as the normal exposed-window path does.
+        QTest.qWait(350)
         if hasattr(widget, "_all_editors"):
             for editor in widget._all_editors():
                 editor.document().setModified(False)
