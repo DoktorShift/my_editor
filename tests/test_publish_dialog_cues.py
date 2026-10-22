@@ -35,11 +35,15 @@ def qt_app():
 
 def edge(button):
     # The ordinary border is one pixel; the keyboard ring is two pixels.
-    return button.grab().toImage().pixelColor(0, button.height() // 2)
+    image = button.grab().toImage()
+    scale = image.devicePixelRatio()
+    return image.pixelColor(round(.5 * scale), round(button.height() * scale / 2))
 
 
 def middle(button):
-    return button.grab().toImage().pixelColor(4, button.height() // 2)
+    image = button.grab().toImage()
+    scale = image.devicePixelRatio()
+    return image.pixelColor(round(4 * scale), round(button.height() * scale / 2))
 
 
 @pytest.mark.parametrize("dark", [True, False])

@@ -45,6 +45,7 @@ from tests.test_drafts_panel import healthy_store, make_profile
 from tests.test_media_library import FakeLoader, FakeStore, media
 
 app = QApplication([])
+i18n.install_qt_translations(app)
 app.setStyle(theme.AppStyle("Fusion"))
 theme.install_style_sheet_guard(app)
 args.output.mkdir(parents=True, exist_ok=True)
@@ -65,13 +66,13 @@ def capture(widget, name, dark, *, close=True):
     widget.activateWindow()
     QTest.qWait(350)
     filename = f"{name}-{'dark' if dark else 'light'}.png"
-    assert widget.grab().save(str(args.output / filename))
     record = dict(file=filename, logical_size=[widget.width(), widget.height()],
                   scale=widget.devicePixelRatioF(), platform=app.platformName())
     if args.native and sys.platform == "darwin":
-        # Flush the grab-triggered paint to Cocoa before the compositor capture.
-        widget.repaint()
-        QTest.qWait(150)
+        # Capture the real compositor first. QWidget.grab() repaints into a
+        # separate backing store and must not precede the native evidence.
+        QTest.qWaitForWindowExposed(widget, 5000)
+        QTest.qWait(1800)
         from ctypes import c_void_p
         from rubicon.objc import ObjCInstance
         view = ObjCInstance(c_void_p(int(widget.winId())))
@@ -80,6 +81,7 @@ def capture(widget, name, dark, *, close=True):
                                  str(args.output / ("native-" + filename))], capture_output=True)
         record["native_capture"] = result.returncode == 0
         record["native_error"] = result.stderr.decode()
+    assert widget.grab().save(str(args.output / filename))
     captures.append(record)
     if hasattr(widget, "_all_editors"):
         for ed in widget._all_editors():
