@@ -36,7 +36,8 @@ def test_no_module_but_tab_details_touches_a_tabs_details():
     found = []
     for path in sorted(ROOT.rglob("*.py")):
         relative = path.relative_to(ROOT)
-        if relative.parts[0] in ("tests", ".venv", "build", "dist") or path.name == "tab_details.py":
+        if relative.parts[0] in ("tests", ".venv", ".claude", ".git", "build", "dist") \
+                or path.name == "tab_details.py":
             continue
         for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
             if raw.search(line):

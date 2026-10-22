@@ -57,8 +57,8 @@ from functools import lru_cache
 from typing import Callable, List, Optional, Tuple
 
 from PySide6.QtGui import (
-    QFont, QTextBlockFormat, QTextCharFormat, QTextDocument, QTextFormat, QTextImageFormat,
-    QTextListFormat, QTextTable,
+    QFont, QTextBlockFormat, QTextCharFormat, QTextCursor, QTextDocument, QTextFormat,
+    QTextImageFormat, QTextListFormat, QTextTable,
 )
 
 from doc_walk import (
@@ -96,6 +96,21 @@ PASTE_FEATURES = QTextDocument.MarkdownFeature(
 
 MARKDOWN = "markdown"
 NOTE = "note"
+
+# A soft line break: lines of one paragraph that follow each other in the
+# file ("hard-wrapped" prose, a picture on the line under its words). The
+# editor holds it as a line separator whose character format carries this
+# property, shows it as a new line, and writes it back as the plain line
+# end it was, so a note keeps its line layout. A line break typed here
+# (Shift+Return) has no such property and is written as Markdown's hard
+# break. (editor.HtmlEditor keeps the property off what is typed after one.)
+SOFT_BREAK_PROPERTY = QTextFormat.Property.UserProperty + 0x5B1
+# How a soft break travels through the writer, between reading the
+# document and writing the lines (a character of Unicode's private area).
+_SOFT = "\ue0b1"
+# What marks a soft break while Qt reads the Markdown: a word joiner at the
+# end of a line made a hard break, which becomes the soft break once read.
+_SOFT_MARK = "\u2060"
 
 # Indent per nesting level of a list. Four columns is past the content of
 # both "- " and "1. " markers, and short of the four extra columns that
@@ -195,6 +210,8 @@ def _spans_of(runs, image_target: Optional[ImageTarget]) -> List[_Span]:
         text = text.replace(OBJECT_REPLACEMENT, "")
         if not text:
             continue
+        if fmt.boolProperty(SOFT_BREAK_PROPERTY):
+            text = text.replace(LINE_SEPARATOR, _SOFT)
         href = fmt.anchorHref() if fmt.isAnchor() else ""
         spans.append(_Span(text=text, bold=_is_bold(fmt), italic=fmt.fontItalic(),
                            strike=fmt.fontStrikeOut(), code=_is_code(fmt),
@@ -513,7 +530,8 @@ def _inline_markdown(spans: List[_Span], hard_break: str = "  \n") -> str:
                                      strike=all(s.strike for s in group)))
                 out.append(_apart(bare, "".join(out), following))
                 continue
-            words = "".join(s.text for s in group).replace(LINE_SEPARATOR, " ")
+            words = "".join(s.text for s in group).replace(LINE_SEPARATOR, " ").replace(
+                _SOFT, " ")
             address = _own_address(words.strip(), span.href)
             if address and not any(s.bold or s.italic or s.strike for s in group):
                 out.append(_autolink(address, span.href, "".join(out), following))
@@ -530,8 +548,11 @@ def _inline_markdown(spans: List[_Span], hard_break: str = "  \n") -> str:
         i += 1
     # A line break at the very end of a block breaks nothing, and Markdown
     # drops it; trailing spaces there mean nothing either.
-    text = "".join(out).rstrip(LINE_SEPARATOR + " ")
-    return text.replace(LINE_SEPARATOR, hard_break)
+    text = "".join(out).rstrip(LINE_SEPARATOR + _SOFT + " ")
+    # A soft break is the line end it was; where a hard one is a space (a
+    # heading), so is a soft one.
+    soft = "\n" if hard_break.endswith("\n") else hard_break
+    return text.replace(LINE_SEPARATOR, hard_break).replace(_SOFT, soft)
 
 
 def _styled(span: _Span) -> str:
@@ -685,7 +706,7 @@ def _inline_note(spans: List[_Span]) -> str:
             while i < len(spans) and spans[i].href == span.href and not spans[i].raw:
                 group.append(spans[i].text)
                 i += 1
-            label = "".join(group).replace(LINE_SEPARATOR, " ").strip()
+            label = "".join(group).replace(LINE_SEPARATOR, " ").replace(_SOFT, " ").strip()
             href = span.href
             if _is_nostr_reference(href):
                 following = spans[i] if i < len(spans) else None
@@ -697,7 +718,7 @@ def _inline_note(spans: List[_Span]) -> str:
             continue
         out.append(span.text)
         i += 1
-    return "".join(out).replace(LINE_SEPARATOR, "\n")
+    return "".join(out).replace(LINE_SEPARATOR, "\n").replace(_SOFT, "\n")
 
 
 def _note_lines(block: _Block) -> str:
@@ -791,26 +812,91 @@ _LIST_LINE = re.compile(r"^\s*(?:[-*+]|\d+[.)])\s")
 _BLOCK_START = re.compile(r"^\s*(?:[-*+]\s|\d+[.)]\s|>|#|\||```|~~~|    |\t)")
 
 
-def _soft_wrapped(markdown: str) -> bool:
-    """Lines following each other inside one paragraph, or a list item
-    continued after a blank line: Qt joins the first and moves the second
-    out of the list."""
+def _soft_breaks(markdown: str) -> Tuple[bool, List[int]]:
+    """Where lines of one paragraph follow each other (soft line breaks):
+    ``(lossy, lines)``, ``lines`` the numbers of the lines a soft break
+    ends. ``lossy`` when a break is one the editor cannot hold: inside an
+    indented paragraph or a list item, after a backslash break, or a list
+    item continued after a blank line (Qt joins the first and moves the
+    second out of the list), or where a line may be a table's."""
     lines = markdown.split("\n")
-    fence = False
+    # Lines in fenced code, the fences among them: code keeps its lines.
+    coded, fence = [], ""
+    for line in lines:
+        found_fence = _FENCE_LINE.match(line)
+        if fence:
+            coded.append(True)
+            if found_fence and found_fence.group(1)[0] == fence[0] \
+                    and len(found_fence.group(1)) >= len(fence) \
+                    and not found_fence.group(2).strip():
+                fence = ""
+        elif found_fence:
+            coded.append(True)
+            fence = found_fence.group(1)
+        else:
+            coded.append(False)
+    found: List[int] = []
     for index in range(1, len(lines)):
         line, before = lines[index], lines[index - 1]
-        if line.lstrip().startswith(("```", "~~~")):
-            fence = not fence
-        if fence:
+        if coded[index] or coded[index - 1]:
             continue
         if (line.strip() and before.strip() and not _BLOCK_START.match(line)
                 and not _BLOCK_START.match(before) and not before.endswith("  ")
                 and not set(line.strip()) <= set("=-")):
-            return True
+            # (A pipe may be a table without its outer pipes.)
+            if (line[:1] in (" ", "\t") or before[:1] in (" ", "\t")
+                    or before.endswith("\\") or _SOFT_MARK in before
+                    or "|" in line or "|" in before):
+                return True, []
+            found.append(index - 1)
         if (line.startswith(("  ", "\t")) and line.strip() and not before.strip()
                 and index >= 2 and _LIST_LINE.match(lines[index - 2])):
-            return True
-    return False
+            return True, []
+    return False, found
+
+
+def _soft_wrapped(markdown: str) -> bool:
+    """Whether the Markdown has soft line breaks the editor cannot hold
+    (see _soft_breaks)."""
+    return _soft_breaks(markdown)[0]
+
+
+def _marked_soft_breaks(markdown: str) -> Tuple[str, int]:
+    """The Markdown with each soft line break the editor holds made a hard
+    break with a mark (_SOFT_MARK) before it, and how many there are."""
+    lossy, found = _soft_breaks(markdown)
+    if lossy or not found:
+        return markdown, 0
+    lines = markdown.split("\n")
+    for index in found:
+        lines[index] = lines[index] + _SOFT_MARK + "  "
+    return "\n".join(lines), len(found)
+
+
+def _join_soft_breaks(doc: QTextDocument) -> int:
+    """Each marked hard break Qt read (a block ending in _SOFT_MARK) made
+    one line of the paragraph again: the mark and the block's end become
+    a line separator carrying SOFT_BREAK_PROPERTY. How many were joined."""
+    joined = 0
+    position = 0
+    while True:
+        cursor = doc.find(_SOFT_MARK, position)
+        if cursor.isNull():
+            return joined
+        start = cursor.selectionStart()
+        block = doc.findBlock(start)
+        cursor.setPosition(start)
+        if start + 1 == block.position() + block.length() - 1 and block.next().isValid():
+            # The mark and the paragraph's end, in the next block's place.
+            fmt = QTextCharFormat(cursor.charFormat())
+            cursor.setPosition(start + 2, QTextCursor.MoveMode.KeepAnchor)
+            fmt.setProperty(SOFT_BREAK_PROPERTY, True)
+            cursor.insertText(LINE_SEPARATOR, fmt)
+            joined += 1
+        else:
+            cursor.setPosition(start + 1, QTextCursor.MoveMode.KeepAnchor)
+            cursor.removeSelectedText()
+        position = start + 1
 
 
 def _fingerprint(doc) -> list:
@@ -870,8 +956,21 @@ def read_markdown(doc: QTextDocument, markdown: str, features=READ_FEATURES) -> 
     the app reads Markdown it wrote or accepted (an opened file or draft,
     the publish preview, a paste), so what was typed comes back as typed.
     Replaces what ``doc`` held."""
+    _read_counting(doc, markdown, features)
+
+
+def _read_counting(doc: QTextDocument, markdown: str, features=READ_FEATURES) -> Tuple[int, int]:
+    """read_markdown, saying how many soft line breaks the Markdown has
+    that the editor holds, and how many it holds. The editor's reading
+    (READ_FEATURES) keeps them; a preview or a paste reads them as
+    Markdown readers do, as spaces."""
+    marked = 0
+    if features == READ_FEATURES:
+        markdown, marked = _marked_soft_breaks(markdown)
     doc.setMarkdown(literal_footnotes(markdown), features)
+    joined = _join_soft_breaks(doc) if marked else 0
     normalize_after_markdown_load(doc)
+    return marked, joined
 
 
 def _tab_in_fence(markdown: str) -> bool:
@@ -916,7 +1015,9 @@ def holds_faithfully(markdown: str) -> bool:
     # Read as the editor reads it (footnotes as their text, code in cells
     # without the escape of its pipes).
     first = QTextDocument()
-    read_markdown(first, markdown)
+    marked, joined = _read_counting(first, markdown)
+    if joined != marked:
+        return False            # a soft break Qt did not read as marked
     second = QTextDocument()
     read_markdown(second, document_to_markdown(first, _image_as_read))
     return _fingerprint(first) == _fingerprint(second)
@@ -936,9 +1037,9 @@ def image_markdown(alt: str, url: str) -> str:
 
 def link_markdown(words: str, url: str) -> str:
     """``[words](url)``, with a bracket, a "<" or a backslash in the words
-    escaped and an address that holds a space or a parenthesis written as
-    ``<url>``."""
-    words = re.sub(r"([\\\[\]<])", r"\\\1", words)
+    escaped (the address itself stands in for missing words) and an
+    address that holds a space or a parenthesis written as ``<url>``."""
+    words = re.sub(r"([\\\[\]<])", r"\\\1", words or url)
     return f"[{words}]({_destination(url)})"
 
 

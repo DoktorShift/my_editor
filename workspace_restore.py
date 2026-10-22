@@ -10,12 +10,14 @@ tell the person about the version a launch runs. MainWindow keeps thin
 calls into it and provides what its own tab openers already do:
 
     tabs                          the QTabWidget
-    open_path(path)               the new tab's editor or PDF viewer, or None
+    open_path(path)               the new tab's editor, PDF viewer or file viewer, or None
     new_tab()                     the new untitled tab's editor
     show_welcome_tab()            the welcome tab's editor
     _restore_one_backup(record)   the recovered tab's editor, or None
     _editor_from_widget(widget)   the editor inside a tab, or None
     _pdf_viewer_from_widget(w)    the PDF viewer a tab is, or None
+    _viewer_from_widget(w)        the file viewer a tab is (viewer_tabs.py), or None
+    _sheet_from_widget(w)         the spreadsheet a tab is (sheet_tab.py), or None
     _compose_tab_title(editor)    the title a tab shows
 
 Unsaved content always lives in its crash-recovery backup (recovery.py);
@@ -39,7 +41,7 @@ from recovery import (
 )
 from update_check import version_tuple
 from welcome import is_pristine_welcome
-from workspace import DOCUMENT, PDF, WELCOME, TabState, are_tags
+from workspace import DOCUMENT, FILE, PDF, SHEET, WELCOME, TabState, are_tags
 
 
 # -- writing the tabs down -----------------------------------------------------
@@ -108,8 +110,13 @@ class Capture:
         untitled tab that was not saved is left out.
         """
         slot = next(i for i, (e, _) in enumerate(self._entries) if e is ed)
-        tab = capture_editor_tab(ed) if saved else None
         path = getattr(ed, "_file_path", None)
+        if getattr(ed, "kind", None) == SHEET:
+            # A sheet comes back as its file, saved or not.
+            self._entries[slot][1] = TabState(kind=SHEET, path=path) if path else None
+            self._asked.add(slot)
+            return
+        tab = capture_editor_tab(ed) if saved else None
         if tab is None and path:
             tab = TabState(kind=DOCUMENT, path=path)
         self._entries[slot][1] = tab
@@ -131,13 +138,23 @@ class Capture:
 def capture_tabs(window) -> Capture:
     """Write down every tab of the window (see Capture)."""
     entries, current = [], 0
+    sheet_of = getattr(window, "_sheet_from_widget", lambda _widget: None)
     for i in range(window.tabs.count()):
         widget = window.tabs.widget(i)
         viewer = window._pdf_viewer_from_widget(widget)
-        ed = window._editor_from_widget(widget) if viewer is None else None
+        file_viewer = window._viewer_from_widget(widget) if viewer is None else None
+        ed = (window._editor_from_widget(widget)
+              if viewer is None and file_viewer is None else None)
         if viewer is not None:
             viewer.save_view_state()
             entry = [None, TabState(kind=PDF, path=viewer._file_path)]
+        elif file_viewer is not None:
+            file_viewer.save_view_state()
+            entry = [None, TabState(kind=FILE, path=file_viewer._file_path)]
+        elif (sheet := sheet_of(widget)) is not None:
+            # Unsaved changes in a sheet live nowhere else: asked about.
+            entry = ([sheet, None] if sheet.is_modified()
+                     else [None, TabState(kind=SHEET, path=sheet._file_path)])
         elif ed is not None:
             entry = [ed, capture_editor_tab(ed)]
         else:
@@ -188,10 +205,15 @@ def resume(window, ws, *, draft_type) -> frozenset:
 
 
 def resume_tab(window, tab: TabState, *, draft_type):
-    """Reopen one tab. Returns its editor (or PDF viewer), or None when it
+    """Reopen one tab. Returns its editor (or PDF or file viewer), or None when it
     could not come back."""
     if tab.kind == PDF:
         if tab.path and os.path.isfile(tab.path):
+            return window.open_path(tab.path)
+        return None
+    if tab.kind in (FILE, SHEET):
+        # A document package (a Numbers file saved as a folder) too.
+        if tab.path and os.path.exists(tab.path):
             return window.open_path(tab.path)
         return None
     if tab.kind == WELCOME:

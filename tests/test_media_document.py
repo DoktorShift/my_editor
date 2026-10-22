@@ -73,6 +73,7 @@ class _Window:
 
     _blob_cache_root = MainWindow._blob_cache_root
     _image_roots_for = MainWindow._image_roots_for
+    _library_roots = MainWindow._library_roots
     _image_target_for_file_save = MainWindow._image_target_for_file_save
     _foreign_image_target = MainWindow._foreign_image_target
     _encode_document_image = MainWindow._encode_document_image

@@ -66,10 +66,13 @@ r["matches_after"] = [len(w._search_matches), getattr(w, "_matches_of", None) is
 
 # Split's width check, put off until the loop is free, goes with its editor.
 calls = []
-w._width_settled = lambda e: calls.append(1)
 other = w.new_tab()
+# Counted for the closed tab's editor only: Split now fits (the library
+# panes fold for it), so the tab left in front checks its own width too.
+w._width_settled = lambda e: calls.append(1) if e is other else None
 w.act_view_split.trigger()
 app.processEvents()
+del calls[:]                               # only what follows the close counts
 w._width_changed(other)
 container = w.tabs.currentWidget()
 other.document().setModified(False)

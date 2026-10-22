@@ -291,6 +291,41 @@ def test_a_document_keeps_its_permissions(tmp_path):
     assert stat.S_IMODE(os.stat(path).st_mode) == 0o640
 
 
+windows_only = pytest.mark.skipif(sys.platform != "win32",
+                                  reason="access lists and read-only files of Windows")
+
+
+@windows_only
+def test_a_document_keeps_its_access_list_on_windows(tmp_path):
+    from tests.access_lists import access_list, let_everyone_read
+    path = tmp_path / "shared.md"
+    path.write_bytes(b"old")
+    let_everyone_read(path)
+    before = access_list(path)
+    assert "Everyone:(R)" in before
+    save_document(path, b"new")
+    assert path.read_bytes() == b"new"
+    assert access_list(path) == before
+    assert leftovers(tmp_path) == []
+
+
+@windows_only
+def test_a_read_only_document_stays_as_it_is_on_windows(tmp_path):
+    # Windows replaces no read-only file: the save is refused, the
+    # document stays as it was and read-only, and nothing is left beside it.
+    path = tmp_path / "kept.md"
+    path.write_bytes(b"old")
+    os.chmod(path, stat.S_IREAD)
+    try:
+        with pytest.raises(PermissionError):
+            save_document(path, b"new")
+        assert path.read_bytes() == b"old"
+        assert not os.stat(path).st_mode & stat.S_IWRITE
+        assert leftovers(tmp_path) == []
+    finally:
+        os.chmod(path, stat.S_IREAD | stat.S_IWRITE)
+
+
 @posix_only
 def test_a_new_document_gets_the_usual_permissions(tmp_path):
     path = tmp_path / "new.md"

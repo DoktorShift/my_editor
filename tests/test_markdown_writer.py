@@ -480,7 +480,11 @@ def test_markdown_the_editor_can_hold(source):
     "[![badge](https://x.example/b.png)](https://x.example)\n",
     "> # a heading in a quote\n",
     "- item\n\n  second paragraph of the item\n- two\n",
-    "Line one\nLine two of the same paragraph\n",
+    # Soft line breaks the editor cannot hold as lines: in an indented
+    # paragraph, after a backslash break, where a line may be a table's.
+    "  Indented line one\n  line two\n",
+    "Line one\\\nline two\n",
+    "a | b\nc | d\n",
     # Review M6 (CP3): what the editor's own reader changes.
     "```make\nall:\n\tcc main.c\n```\n",                      # a tab in code
     "| a | b |\n| :--- | ---: |\n| 1 | 2 |\n",                    # alignment
@@ -516,3 +520,62 @@ def test_undo_right_after_opening_a_draft_keeps_it():
     MainWindow._load_draft_content(ed, draft(INNER_KIND_LONG_FORM, "# Title\n\nBody\n"))
     ed.document().undo()
     assert "Body" in ed.toPlainText()
+
+
+# -- soft line breaks: lines of one paragraph, kept as lines ------------------------------
+
+from markdown_writer import SOFT_BREAK_PROPERTY, _image_as_read, read_markdown  # noqa: E402
+
+SOFT_WRAPPED = [
+    "Line one\nLine two of the same paragraph\n",
+    "# Plan for October\n\nFinish the chapter on harbours and send it to Anna.\n"
+    "![Beach](Pictures/Beach.png)\n",
+    "Hard-wrapped **bold\nwords** and a [link that\nwraps](https://x.example).\n\nNext.\n",
+    "One\ntwo\nthree\n\nAnd a second paragraph\nof two lines.\n",
+]
+
+
+@pytest.mark.parametrize("source", SOFT_WRAPPED)
+def test_a_soft_wrapped_paragraph_opens_formatted_and_keeps_its_lines(source):
+    assert holds_faithfully(source)
+    doc = QTextDocument()
+    read_markdown(doc, source)
+    assert document_to_markdown(doc, _image_as_read) == source
+
+
+def test_a_soft_break_shows_as_a_new_line_of_the_paragraph():
+    doc = QTextDocument()
+    read_markdown(doc, "Line one\nline two\n")
+    assert doc.blockCount() == 1
+    assert doc.begin().text() == "Line one\u2028line two"
+
+
+def test_a_line_break_typed_after_a_soft_one_is_a_hard_break():
+    from PySide6.QtCore import Qt
+    from PySide6.QtTest import QTest
+    from editor import HtmlEditor
+    ed = HtmlEditor()
+    ed.show()
+    read_markdown(ed.document(), "first line\nsecond line\n")
+    cursor = ed.textCursor()
+    cursor.setPosition(len("first line") + 1)        # just after the soft break
+    ed.setTextCursor(cursor)
+    QTest.keyClick(ed, Qt.Key.Key_Return, Qt.KeyboardModifier.ShiftModifier)
+    ed.insertPlainText("new")
+    breaks = [fmt.boolProperty(SOFT_BREAK_PROPERTY) for text, fmt in _runs(ed.document())
+              for char in text if char == "\u2028"]
+    assert breaks == [True, False]
+    assert document_to_markdown(ed.document()) == "first line\n  \nnewsecond line\n"
+    ed.close()
+
+
+def _runs(doc):
+    from doc_walk import iter_block_runs, iter_blocks
+    return [run for block in iter_blocks(doc) for run in iter_block_runs(block)]
+
+
+def test_a_preview_reads_a_soft_break_as_readers_do():
+    from nostr.preview import MARKDOWN_FEATURES
+    doc = QTextDocument()
+    read_markdown(doc, "Line one\nline two\n", MARKDOWN_FEATURES)
+    assert "\u2028" not in doc.toPlainText() and "\n" not in doc.toPlainText()

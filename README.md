@@ -25,8 +25,18 @@ headings, lists, checklists, quotes, tables, footnotes and code blocks, links,
 a slash menu, Markdown shortcuts as you type, and Write, Preview and Split
 views. Spelling is checked as you type with your system's own checker. Choose
 your font and its size, zoom the text, and pick light, dark or automatic
-appearance, tabs, line numbers, and lined / dotted / grid backgrounds with a
-paper mode for a real sheet-of-paper feel. In English or German.
+appearance, tabs, line numbers, and lined / dotted / grid backgrounds. Text
+runs across the whole window, or on a page of its own in Paper Mode. In English
+or German.
+
+**Your folders, every file.** Add your folders to the sidebar and see everything
+in them, as in the Finder: notes, pictures, films, sound, PDFs, spreadsheets and
+office documents, in a list or a gallery, with search and Quick Look on `Space`.
+Move, rename and delete the real files (into the Trash), and the links in your
+notes follow. Pictures, films, sound and Word or Writer documents open in viewers
+of their own, with Open in your app, Insert into Note and Import as Note.
+Spreadsheets (`.xlsx`, `.ods`, `.csv`, `.tsv`) open as tables you can edit, with
+formulas in your language. Side panels open beside the text, never over it.
 
 **Private when you need it.** Lock any document with a password: it is
 encrypted in place in the open age format (it opens without MyEditor too), and

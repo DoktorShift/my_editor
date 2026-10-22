@@ -20,14 +20,15 @@ from typing import List, Optional, Tuple
 from send2trash import send2trash
 import shiboken6
 from PySide6.QtCore import (
-    QBuffer, QByteArray, QDateTime, QEvent, QIODevice, QObject, Qt, QLocale, QMarginsF, QSize,
+    QBuffer, QByteArray, QDateTime, QEvent, QIODevice, QObject, Qt, QLocale,
+    QMarginsF, QSize,
     QTimer,
-    QUrl, QFileSystemWatcher,
+    QUrl, QFileSystemWatcher, QMimeData,
 )
 from PySide6.QtNetwork import QLocalServer
 from PySide6.QtGui import (
     QAction, QActionGroup, QKeySequence, QTextCursor, QTextDocument, QTextCharFormat, QColor,
-    QImage, QPageLayout, QPageSize, QPixmap, QGuiApplication, QDesktopServices,
+    QImage, QPageLayout, QPageSize, QPixmap, QGuiApplication, QDesktopServices, QFontMetrics,
     QTextImageFormat
 )
 from PySide6.QtPrintSupport import QPrintDialog, QPrintPreviewDialog
@@ -51,7 +52,8 @@ from format_toolbar import FormatToolbar, tooltip_for
 from selection_bar import SelectionBar
 from speech import Speech
 from atomic_file import (
-    decode_text_as_written, encode_text_document, newline_of, read_json, save_document,
+    decode_text_as_written, encode_text_document, newline_of, one_writer,
+    read_json, save_document,
     save_text_document, with_newlines, write_json,
 )
 import locked_files
@@ -63,6 +65,7 @@ from dictation import models as dictation_models, on_device, setup as dictation_
 from dictation.indicator import DictationIndicator
 from dictation.preferences import Preferences
 import file_paths
+import folder_library
 import i18n
 from i18n import N_, _, ngettext, pgettext
 from commands import (
@@ -95,7 +98,14 @@ from markdown_writer import (
     document_to, document_to_markdown, has_local_only_formatting, holds_faithfully,
     image_markdown, read_markdown,
 )
-from editor import CARET_STYLES, DEFAULT_CARET_STYLE, HtmlEditor
+from editor import CARET_STYLES, DEFAULT_CARET_STYLE, PROSE_INSET, HtmlEditor
+import panel_layout
+from side_panels import RIGHT, PanelSplitter, SidePanels, inner_room
+import library_actions
+import link_rewrite
+import regular_files
+from library_window import FILE_LIST_PANEL, SIDEBAR_PANEL, LibraryWindow
+from sheet_window import SheetWindow
 import link_url
 import paste
 import rich_text
@@ -131,6 +141,14 @@ import printing
 from window_grid import BandAligner
 from nostr import web_readers
 from pdf_viewer import PdfViewerTab, reader_keys as pdf_reader_keys
+import background
+import default_apps
+import file_kinds
+import file_links
+import office_preview
+import viewer_tabs
+from media_tabs import image_keys
+from viewer_tabs import FileViewerTab
 from rmarkdown import KnitRunner, MediaLink, derive_title, document_to_rmd, media_dir_for
 from rmd_setup_dialog import RmdSetupDialog
 import rmd_toolchain
@@ -141,10 +159,25 @@ _RICH_DOC_EXTS = ('.html', '.htm', '.md', '.markdown')
 # language of its own (a log, a table, a configuration) is kept as it is.
 _PROSE_TEXT_EXTS = ('.txt', '.text')
 
-# Extensions accepted for drag-and-drop and file open.
+# Extensions that open in a tab of their own when dropped on the window.
 # .rmd opens as SOURCE (plain text + markdown highlighting), like RStudio.
-# .pdf opens read-only in the built-in PDF viewer, not in an editor.
+# .pdf opens read-only in the built-in PDF viewer, not in an editor. Any
+# other file a person drops opens too, in the tab its kind has
+# (open_path), unless it goes into the document (a picture, a film).
 _SUPPORTED_EXTS = {'.md', '.html', '.htm', '.txt', '.rmd', '.pdf'}
+
+
+def _is_file_on_disk(path: str) -> bool:
+    """Whether ``path`` is a file a tab can show: a file, or a document
+    package the Finder shows as one (a Numbers or Pages document)."""
+    return os.path.isfile(path) or file_kinds.is_package(path)
+
+
+# The side panels' names (side_panels.py; their widths are kept by name).
+ARTICLE_DETAILS_PANEL = "article_details"
+DRAFTS_PANEL = "drafts"
+# Settings key: the window's place and size (QWidget.saveGeometry, base64).
+WINDOW_GEOMETRY_KEY = "window_geometry"
 
 # Image extensions accepted on drag-and-drop. These never overlap with
 # _SUPPORTED_EXTS so the dispatcher stays simple. SVG is absent: it is
@@ -300,16 +333,6 @@ def _number(n: int) -> str:
     return i18n.display_locale().toString(n)
 
 
-def _file_stamp(path: str) -> Optional[tuple]:
-    """The size and modification time of the file at ``path``, which a
-    write to it changes; None when there is no file to read them of."""
-    try:
-        status = os.stat(path)
-    except (OSError, ValueError):
-        return None
-    return status.st_size, status.st_mtime_ns
-
-
 # --------------------------------------------------------------------------- #
 # Per-tab Nostr-draft binding                                                 #
 # --------------------------------------------------------------------------- #
@@ -448,6 +471,17 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.setWindowTitle("")
         self.resize(1100, 720)
+        # Where and how large it was last time (side panels it grew for
+        # left out: closeEvent).
+        self._restore_window_geometry()
+        # The note a file viewer's Insert into Note goes to (_on_tab_changed).
+        self._last_note_editor = None
+        # The folder sidebar and the file list (library_window.py), once built.
+        self._library_window: Optional[LibraryWindow] = None
+        # The spreadsheets' tabs (sheet_window.py).
+        self._sheet_window = SheetWindow(self)
+        # The documents an Import as Note is making a note of right now.
+        self._importing: set[str] = set()
 
         theme_pref = load_settings().get("theme")
         if theme_pref == "dark":
@@ -475,7 +509,7 @@ class MainWindow(QMainWindow):
         self._watcher = QFileSystemWatcher(self)
         self._watcher.fileChanged.connect(self._on_file_changed)
         self._watcher.directoryChanged.connect(self._on_folder_changed)
-        # Each file as this window last saved it (_file_stamp): while it is
+        # Each file as this window last saved it (regular_files.file_stamp): while it is
         # so, what the watcher reports is that save, not a change made outside.
         self._saved_stamps: dict[str, Optional[tuple]] = {}
 
@@ -510,6 +544,33 @@ class MainWindow(QMainWindow):
         corner_row.addWidget(self.plus_btn)
         corner_row.addWidget(self.profile_chip)
         self.tabs.setCornerWidget(corner, Qt.TopRightCorner)
+        # The sidebar's button at the start of the tab row, where Safari
+        # and Finder keep theirs: there on every kind of tab (the format
+        # toolbar is not, on a PDF or a picture), and reached with Tab.
+        self._sidebar_toggle = QToolButton()
+        self._sidebar_toggle.setCheckable(True)
+        self._sidebar_toggle.setAutoRaise(True)
+        self._sidebar_toggle.setAccessibleName(_("Sidebar"))
+        self._sidebar_toggle.setFocusPolicy(Qt.FocusPolicy.TabFocus)
+        self._sidebar_toggle.setIconSize(QSize(format_icons.SIZE, format_icons.SIZE))
+        self._sidebar_toggle.clicked.connect(
+            lambda: self._library_window.toggle_pane(SIDEBAR_PANEL))
+        # And the file list's, beside it.
+        self._file_list_toggle = QToolButton()
+        self._file_list_toggle.setCheckable(True)
+        self._file_list_toggle.setAutoRaise(True)
+        self._file_list_toggle.setAccessibleName(_("File List"))
+        self._file_list_toggle.setFocusPolicy(Qt.FocusPolicy.TabFocus)
+        self._file_list_toggle.setIconSize(QSize(format_icons.SIZE, format_icons.SIZE))
+        self._file_list_toggle.clicked.connect(
+            lambda: self._library_window.toggle_pane(FILE_LIST_PANEL))
+        leading = QWidget()
+        leading_row = QHBoxLayout(leading)
+        leading_row.setContentsMargins(2, 0, 0, 0)
+        leading_row.setSpacing(0)
+        leading_row.addWidget(self._sidebar_toggle)
+        leading_row.addWidget(self._file_list_toggle)
+        self.tabs.setCornerWidget(leading, Qt.TopLeftCorner)
 
         self.status = QStatusBar()
         self.setStatusBar(self.status)
@@ -904,7 +965,7 @@ class MainWindow(QMainWindow):
         # also skip the crash backup of the very file named on the command
         # line, and the clean tab would later overwrite it.
         resumed, adopted = self._resume_workspace()
-        if initial_path and os.path.isfile(initial_path):
+        if initial_path and _is_file_on_disk(initial_path):
             self.open_path(initial_path)
 
         restored = self._restore_backups(skip=adopted)
@@ -926,6 +987,12 @@ class MainWindow(QMainWindow):
         # Paste follows what is on the clipboard, as it follows the focus.
         QApplication.clipboard().dataChanged.connect(self._update_clipboard_commands)
         QApplication.instance().focusChanged.connect(self._update_window_commands)
+        library = self._library_window
+        QApplication.instance().focusChanged.connect(library.focus_moved)
+        self.tabs.currentChanged.connect(library.update_file_commands)
+        self._file_list.view.selectionModel().selectionChanged.connect(
+            library.update_file_commands)
+        library.update_file_commands()
         self._update_status_bar()
         self._start_ipc_server()
         QTimer.singleShot(0, lambda ws=resumed: self._announce_version_change(ws))
@@ -933,6 +1000,8 @@ class MainWindow(QMainWindow):
         # Downloads an earlier update could not delete (the Windows
         # installer runs from its folder after MyEditor has quit).
         QTimer.singleShot(5000, sweep_stale_downloads)
+        # Reading views' temporary folders a crash left behind.
+        QTimer.singleShot(6000, viewer_tabs.sweep_stale_temp_folders)
 
 
     # ----------------------------------------------------------------------
@@ -1311,8 +1380,9 @@ class MainWindow(QMainWindow):
         """Writing in the font chosen in Settings, code and plain text in
         the monospace font (Monospace as the writing font, View > Use
         Monospace Font for Writing, sets writing that way too); both at the
-        app's text size (text_size.py). Prose, in either font, keeps to a
-        readable width; code runs across the window."""
+        app's text size (text_size.py). Prose, in either font, runs across
+        the window with a quiet border, and on a readable page in Paper
+        Mode; code runs across the window."""
         writing = (self.writing_family != fonts.MONOSPACE
                    and (self._editor_kind(editor) == "rich"
                         or getattr(editor, "_markdown_source", False)))
@@ -1320,7 +1390,7 @@ class MainWindow(QMainWindow):
         font = (fonts.writing_font(size.pixels(fonts.WRITING_PIXEL_SIZE), self.writing_family)
                 if writing else fonts.code_font(size.pixels(fonts.CODE_PIXEL_SIZE)))
         editor.set_writing_font(writing, font)
-        editor.set_readable_width(self._is_prose(editor))
+        editor.set_prose(self._is_prose(editor))
         headers = getattr(self, "_article_headers", None)
         if headers is not None:
             headers.update(editor)               # its head in the new font
@@ -1478,28 +1548,42 @@ class MainWindow(QMainWindow):
         letting Qt fall back to the working directory also keeps the
         bytes inside the decode allowlist.
         """
-        data = self._local_image_bytes(editor, name)
+        data = self._local_image_bytes(editor, name, MainWindow._picture_roots(self))
         return image_safety.decode_image_bytes(data) if data else None
 
     @staticmethod
-    def _has_local_image(editor, name: str) -> bool:
+    def _has_local_image(editor, name: str, library_roots=()) -> bool:
         """Whether a picture named relative to the editor's own file is
         there (without reading it: asked while painting)."""
         path = getattr(editor, "_file_path", "") or ""
         if not path:
             return False
-        root = os.path.dirname(os.path.abspath(path))
-        found = image_safety.ImageRootPolicy((root,)).resolve(name)
+        found = image_safety.ImageRootPolicy(
+            MainWindow._image_roots(path, library_roots)).resolve(name)
         return found is not None and found.is_file()
 
     @staticmethod
-    def _local_image_bytes(editor, name: str) -> Optional[bytes]:
+    def _local_image_bytes(editor, name: str, library_roots=()) -> Optional[bytes]:
         """The bytes of a picture named relative to the editor's own file."""
         path = getattr(editor, "_file_path", "") or ""
         if not path:
             return None
+        return image_safety.ImageRootPolicy(
+            MainWindow._image_roots(path, library_roots)).read(name) or None
+
+    @staticmethod
+    def _image_roots(path: str, library_roots=()) -> tuple:
+        """Where a note's pictures may be read from: its own folder, and the
+        sidebar folder holding it (``library_roots``), for pictures linked
+        where they lie (file_links.link_root)."""
         root = os.path.dirname(os.path.abspath(path))
-        return image_safety.ImageRootPolicy((root,)).read(name) or None
+        return (root, file_links.link_root(path, library_roots))
+
+    def _picture_roots(self) -> tuple:
+        """The sidebar's folders, for the pictures of the notes inside them
+        (none for a window without a library)."""
+        roots = getattr(self, "_library_roots", None)
+        return tuple(roots()) if callable(roots) else ()
 
     # ----------------------------------------------------------------------
     # EDITOR / TAB HELPERS
@@ -1592,7 +1676,7 @@ class MainWindow(QMainWindow):
         toolbar, so neither is repeated here."""
         self._update_editor_commands()
         ed = self.current_editor()
-        if self.current_pdf_viewer() is not None or not ed:
+        if self.current_reader() is not None or not ed:
             self._line_label.setText("")
             if not ed:
                 self._words_label.setText("")
@@ -1616,11 +1700,14 @@ class MainWindow(QMainWindow):
         app's name after it; a Mac shows unsaved changes in the close
         button ([*] is Qt's placeholder for them)."""
         ed = self.current_editor()
-        viewer = self.current_pdf_viewer()
+        viewer = self.current_reader()
+        sheet = self._sheet_from_widget(self.tabs.currentWidget())
         if ed is not None:
             name, modified = self._document_name(ed), ed.document().isModified()
+        elif sheet is not None:
+            name, modified = sheet.document_title(), sheet.is_modified()
         elif viewer is not None:
-            name, modified = os.path.basename(viewer._file_path), False
+            name, modified = os.path.basename(viewer._file_path.rstrip("/\\")), False
         else:
             self.setWindowModified(False)
             self.setWindowTitle(APP_DISPLAY_NAME)
@@ -1640,16 +1727,16 @@ class MainWindow(QMainWindow):
         if not count or not wrap and index >= count:
             return
         self.tabs.setCurrentIndex(index % count)
-        target = self._pane_focus_target(self._central_splitter.widget(0))
+        target = self._pane_focus_target(self._editor_side)
         if target is not None:
             target.setFocus(Qt.FocusReason.TabFocusReason)
 
     def _panes(self) -> list:
         """The panes shown, in the order F6 visits them: the document,
         Article Details, the Drafts panel."""
-        panes = [self._central_splitter.widget(0)]
-        return panes + [pane for pane in (self._article_details_panel, self._drafts_panel)
-                        if pane is not None and pane.isVisible()]
+        splitter = self._central_splitter
+        return [pane for pane in (splitter.widget(i) for i in range(splitter.count()))
+                if pane is self._editor_side or pane.isVisible()]
 
     def _move_to_pane(self, step: int) -> None:
         """F6 (Shift+F6): the keyboard focus to the next (previous) pane."""
@@ -1666,9 +1753,14 @@ class MainWindow(QMainWindow):
     def _pane_focus_target(self, pane):
         """Where the keys go in ``pane``: the document of the tab in front;
         else the pane's list, or its first control reached with Tab."""
-        if pane is self._central_splitter.widget(0):
+        if pane is self._editor_side:
             viewer = self.current_pdf_viewer()
-            return viewer.view if viewer is not None else self.current_editor()
+            if viewer is not None:
+                return viewer.view
+            # A file viewer, or a sheet, takes the keys itself (a picture's
+            # its scroll area, through its focus proxy).
+            other = self.current_reader() or self._sheet_from_widget(self.tabs.currentWidget())
+            return other if other is not None else self.current_editor()
         for view in pane.findChildren(QAbstractItemView):
             if view.isVisible() and view.focusPolicy() & Qt.FocusPolicy.TabFocus:
                 return view
@@ -1696,9 +1788,15 @@ class MainWindow(QMainWindow):
         self._update_knit_actions()
         self._update_print_actions()
         self._update_zoom_commands()
+        # The note a file viewer's Insert into Note goes to: the one in
+        # front last.
+        front = self.current_editor()
+        if front is not None and self._keeps_pictures(front):
+            self._last_note_editor = front
         # The global find bar searches editors only; a PDF tab carries
-        # its own find bar, so retire the editor one when switching over.
-        if self.findbar.isVisible() and self.current_pdf_viewer() is not None:
+        # its own find bar, and a file viewer has no text to find, so
+        # retire the editor one when switching over.
+        if self.findbar.isVisible() and self.current_editor() is None:
             self.findbar.setVisible(False)
             self.findbar.set_match_info("")
             self._clear_search_highlights()
@@ -1771,10 +1869,15 @@ class MainWindow(QMainWindow):
                 toolbar.describe_history(imports.undo_text(), redo_words())
             return
         undo_name = redo_name = ""
+        sheet = self.current_sheet()
         if field is not None:
             # Never the document behind (T1 of the CP3 fixes review: Undo
             # with a dialog's About field focused undid the document).
             can_undo, can_redo = _field_history(field)
+        elif sheet is not None:
+            stack = sheet.undo_stack
+            can_undo, can_redo = stack.canUndo(), stack.canRedo()
+            undo_name, redo_name = stack.undoText(), stack.redoText()
         else:
             ed = self.current_editor()
             editing = ed is not None and not self._shows_preview_only(ed)
@@ -1859,8 +1962,16 @@ class MainWindow(QMainWindow):
             self.act_paste.setEnabled(False)
             self.act_paste_plain.setEnabled(False)
             return
-        elif self.current_pdf_viewer() is not None:
-            selected, editable, pastes, plain = True, False, False, False   # Copy only
+        elif self.current_reader() is not None:
+            # Copy only: the PDF's selected text, a viewer's file.
+            selected, editable, pastes, plain = True, False, False, False
+        elif self.current_sheet() is not None:
+            # The cells selected (there is always one); a paste takes
+            # cells or words.
+            editable = not self.current_sheet().read_only
+            selected, plain = True, False
+            pastes = editable and clipboard is not None and (
+                clipboard.hasText() or clipboard.hasFormat("application/x-myeditor-cells"))
         else:
             ed = self.current_editor()
             selected = ed is not None and ed.textCursor().hasSelection()
@@ -2305,6 +2416,16 @@ class MainWindow(QMainWindow):
                 ("add_column_after", _("Add Column After")),
                 ("delete_row", _("Delete Row")), ("delete_column", _("Delete Column")),
                 ("delete_table", _("Delete Table")))]
+        # A workbook's sheets: Format > Sheet, while a spreadsheet is in
+        # front (as Numbers has them in its Table menu); the sheet bar's
+        # context menu has them too.
+        self.act_sheet_commands = [
+            add(Command(f"format.sheet.{name}", title, FORMAT,
+                        keywords=(_("spreadsheet"), _("workbook"))),
+                triggered=lambda n=name: self._sheet_window.sheet_command(n))
+            for name, title in (
+                ("add", _("Add Sheet")), ("duplicate", _("Duplicate Sheet")),
+                ("rename", _("Rename Sheet")), ("delete", _("Delete Sheet\u2026")))]
         # Text colors stay in the document and in local files; Markdown
         # has none, so they never reach Nostr.
         self.act_colors = []
@@ -2566,12 +2687,50 @@ class MainWindow(QMainWindow):
                                           QKeySequence.StandardKey.FullScreen,
                                           listed_as=_("Full screen")),
                                   triggered=self._toggle_fullscreen)
-        # View > Show Sidebar, for the window in front that has one (the
-        # Imports window); dimmed while this window is in front. Its own
-        # key (Control-Command-S) belongs to that window.
+        # View > Show Sidebar (Control-Command-S, Finder's and Mail's key):
+        # the folder sidebar, or the Imports window's sidebar while that
+        # window is in front (it has the same key on its own action).
         self.act_window_sidebar = add(Command("view.sidebar", _("Show Sidebar"), VIEW,
+                                              platform_keys("Meta+Ctrl+S", None),
                                               listed_as=_("Show or hide the sidebar")),
-                                      triggered=self._toggle_window_sidebar, enabled=False)
+                                      triggered=self._toggle_window_sidebar)
+        # View > Show File List: the column of files beside the sidebar.
+        # Control-Command-L on a Mac, beside the sidebar's Control-Command-S.
+        self.act_file_list = add(Command("view.file_list", _("Show File List"), VIEW,
+                                         platform_keys("Meta+Ctrl+L", None),
+                                         listed_as=_("Show or hide the file list")),
+                                 triggered=lambda: self._library_window.toggle_pane(
+                                     FILE_LIST_PANEL))
+        # File > Add Folder to Sidebar…: a folder kept in the sidebar, as the
+        # Finder's File > Add to Sidebar (Control-Command-T) keeps one.
+        # The library's files from the menu bar, as the Finder's File menu
+        # has them (the list's context menu has the same): on the files
+        # selected in the file list while it has the keys, else on the
+        # file of the tab in front where that makes sense.
+        self.act_new_folder = add(Command("file.new_folder", _("New Folder"), FILE,
+                                          keywords=(_("library"),)),
+                                  triggered=lambda: self._library_window.new_folder_command())
+        self.act_rename_file = add(Command("file.rename", _("Rename\u2026"), FILE),
+                                   triggered=lambda: self._library_window.rename_command())
+        self.act_duplicate_file = add(Command("file.duplicate", _("Duplicate"), FILE),
+                                      triggered=lambda: self._library_window.duplicate_command())
+        self.act_trash_file = add(Command("file.move_to_trash", _("Move to Trash"), FILE,
+                                          platform_keys("Ctrl+Backspace", "Delete")),
+                                  triggered=lambda: self._library_window.trash_command())
+        self.act_reveal_file = add(Command("file.reveal", default_apps.reveal_label(), FILE),
+                                   triggered=lambda: self._library_window.reveal_command())
+        # Space in the file list, as in the Finder (Command-Y is Redo here).
+        self.act_quick_look = add(Command("file.quick_look", _("Quick Look"), FILE),
+                                  triggered=lambda: self._library_window.quick_look_command())
+        # File > Open as Text: a CSV table, an SVG picture or an RTF
+        # document shown in a viewer or a sheet, opened as its text.
+        self.act_open_as_text = add(Command("file.open_as_text", _("Open as Text"), FILE,
+                                            keywords=(_("source"), _("plain text"))),
+                                    triggered=lambda: self._open_tab_as_text())
+        self.act_add_folder = add(Command("file.add_folder", _("Add Folder to Sidebar\u2026"),
+                                          FILE, platform_keys("Meta+Ctrl+T", None),
+                                          keywords=(_("library"), _("location"))),
+                                  triggered=lambda: self._library_window.add_folder())
 
         # Nostr. Only the ones that need an account are marked: Create
         # Account, Connect Signer, Restore and the membership window are
@@ -2758,6 +2917,10 @@ class MainWindow(QMainWindow):
             "the PDF reader",
             [keys for _s, _w, act, tab_keys, view_keys in pdf_reader_keys() if act is not None
              for keys in tab_keys + view_keys], yielding=editor_only)
+        # The picture viewer's zoom keys are the text size's, off there too.
+        self.commands.refuse_clashes(
+            "the picture viewer", [keys for _w, _act, tab_keys in image_keys()
+                                   for keys in tab_keys], yielding=editor_only)
 
         # Help
         self.act_welcome = add(Command("help.welcome", _("Welcome"), HELP),
@@ -2788,6 +2951,16 @@ class MainWindow(QMainWindow):
         m_file = self.menuBar().addMenu(_("&File"))
         m_file.addAction(self.act_new)
         m_file.addAction(self.act_open)
+        m_file.addAction(self.act_open_as_text)
+        m_file.addAction(self.act_add_folder)
+        m_file.addAction(self.act_new_folder)
+        m_file.addSeparator()
+        m_file.addAction(self.act_quick_look)
+        m_file.addAction(self.act_reveal_file)
+        m_file.addAction(self.act_duplicate_file)
+        m_file.addAction(self.act_rename_file)
+        m_file.addAction(self.act_trash_file)
+        m_file.aboutToShow.connect(lambda: self._library_window.update_file_commands())
         m_file.addSeparator()
         self.m_recent = m_file.addMenu(_("Recent Files"))
         self._populate_recent_menu()
@@ -2910,6 +3083,11 @@ class MainWindow(QMainWindow):
             if index in (2, 4, 6):
                 self.m_table.addSeparator()     # rows | columns | delete | the table
             self.m_table.addAction(action)
+        self.m_sheet = m_format.addMenu(_("Sheet"))
+        for index, action in enumerate(self.act_sheet_commands):
+            if index == 3:
+                self.m_sheet.addSeparator()     # delete apart
+            self.m_sheet.addAction(action)
         m_format.addSeparator()
         m_format.addAction(self.act_reset_format)
         self.m_format = m_format
@@ -2918,6 +3096,10 @@ class MainWindow(QMainWindow):
         self.m_view = m_view
         # Full screen is named for the window in front as the menu opens.
         m_view.aboutToShow.connect(self._name_full_screen)
+        # The panes first, as Apple's View menus have them.
+        m_view.addAction(self.act_window_sidebar)
+        m_view.addAction(self.act_file_list)
+        m_view.addSeparator()
         m_view.addAction(self.act_view_write)
         m_view.addAction(self.act_view_preview)
         m_view.addAction(self.act_view_split)
@@ -2950,8 +3132,6 @@ class MainWindow(QMainWindow):
         m_language = m_view.addMenu(_("Language"))
         for action in self.act_languages:
             m_language.addAction(action)
-        m_view.addSeparator()
-        m_view.addAction(self.act_window_sidebar)
         # Article Details, while a Nostr account is in use (D-1).
         self._view_nostr_separator = m_view.addSeparator()
         m_view.addAction(self.act_article_details)
@@ -3064,6 +3244,9 @@ class MainWindow(QMainWindow):
         # the panel itself renders the "Connect a Nostr profile" empty
         # state without taking visual space beyond a thin border.
         editor_side = QWidget()
+        # The document's side: the splitter's panes are found by it, never
+        # by their place (panes join at either side of it).
+        self._editor_side = editor_side
         v = QVBoxLayout(editor_side)
         v.setContentsMargins(0, 0, 0, 0)
         v.setSpacing(0)
@@ -3086,6 +3269,7 @@ class MainWindow(QMainWindow):
         # The switch sits right of the toolbar, outside it, so a narrow
         # window never hides it in the toolbar's chevron.
         self._view_switch_holder = self.format_toolbar.add_trailing(self.view_switch)
+        self.format_toolbar.add_trailing(self._build_paper_toggle())
         self.format_toolbar.add_trailing(self._build_pane_toggles())
         self.format_bar = QWidget()
         bar_row = QHBoxLayout(self.format_bar)
@@ -3151,11 +3335,16 @@ class MainWindow(QMainWindow):
             signal.connect(self._update_imports_row)
         self._update_imports_row()
 
-        self._central_splitter = QSplitter(Qt.Horizontal)
+        # The text in the middle, the side panels beside it, with thin
+        # dividers people drag (side_panels.py).
+        self._central_splitter = PanelSplitter(Qt.Horizontal)
         self._central_splitter.setObjectName("central_splitter")
         self._central_splitter.setHandleWidth(1)
         self._central_splitter.setChildrenCollapsible(False)
         self._central_splitter.addWidget(editor_side)
+        self._side_panels = SidePanels(
+            self, self._central_splitter, editor_side, screen_room=self._screen_room,
+            text_floor=self._min_text_width, parent=self)
         # The inspector beside the document, the drafts panel at the edge.
         self._article_details_panel = ArticleDetailsPanel(
             media_store=self._media_store, media_visibility=self._media_visibility,
@@ -3180,14 +3369,18 @@ class MainWindow(QMainWindow):
         self._article_from_text.setSingleShot(True)
         self._article_from_text.setInterval(preview_pane.RENDER_DELAY_MS)
         self._article_from_text.timeout.connect(self._show_article_from_text)
-        self._central_splitter.addWidget(self._article_details_panel)
-        self._central_splitter.addWidget(self._drafts_panel)
-        # Editor takes all stretch; the panels start hidden.
-        self._central_splitter.setStretchFactor(0, 1)
-        self._central_splitter.setStretchFactor(1, 0)
-        self._central_splitter.setStretchFactor(2, 0)
-        self._article_details_panel.hide()
-        self._drafts_panel.hide()
+        # The panels start hidden; the text takes what the window grows or
+        # shrinks by. At the left the folder sidebar, then the file list.
+        library = self._library_window = LibraryWindow(self)
+        self._library = library.library
+        self._library_sidebar = library.sidebar
+        self._file_list = library.files
+        self._side_panels.register(
+            ARTICLE_DETAILS_PANEL, self._article_details_panel, side=RIGHT, collapse_rank=1,
+            default_width=ARTICLE_DETAILS_WIDTH, on_fold=self._article_details_folded)
+        self._side_panels.register(
+            DRAFTS_PANEL, self._drafts_panel, side=RIGHT, collapse_rank=1,
+            default_width=DEFAULT_PANEL_WIDTH, on_fold=self._drafts_folded)
 
         self.setCentralWidget(self._central_splitter)
         # The panels' headers line up with the toolbar and the tab row,
@@ -3196,10 +3389,39 @@ class MainWindow(QMainWindow):
             side=editor_side, toolbar=self.format_bar, tabs=self.tabs,
             panels=(self._drafts_panel.align_bands, self._align_article_details_band),
             parent=self)
+        self._band_aligner.add_panel(self._file_list.align_bands)
         self._band_aligner.align()
+        self._library_window.show_panes_at_start()
 
     def _align_article_details_band(self, toolbar_height: int, _search_height: int) -> None:
         self._article_details_panel.align_band(toolbar_height)
+
+    def _build_paper_toggle(self) -> QToolButton:
+        """Paper Mode from the toolbar, beside the view switch: the text on
+        a page of its own, or across the whole width. The button is View >
+        Paper Mode's (checked while it is on), so the two never differ."""
+        button = QToolButton()
+        button.setDefaultAction(self.act_paper_mode)
+        button.setAccessibleName(_("Paper Mode"))
+        button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonIconOnly)
+        button.setIconSize(QSize(format_icons.SIZE, format_icons.SIZE))
+        button.setFocusPolicy(Qt.FocusPolicy.TabFocus)
+        self.act_paper_mode.setIconVisibleInMenu(False)
+        self.act_paper_mode.setToolTip(tooltip_for(self.act_paper_mode))
+        self._paper_toggle = button
+        self._paint_paper_toggle()
+        return button
+
+    def _paint_paper_toggle(self) -> None:
+        ink = QColor(DARK_FG if self.is_dark_theme else LIGHT_FG)
+        if getattr(self, "_sidebar_toggle", None) is not None:
+            self._sidebar_toggle.setIcon(format_icons.sidebar(ink))
+            self._sidebar_toggle.setToolTip(tooltip_for(self.act_window_sidebar, _("Sidebar")))
+            self._file_list_toggle.setIcon(format_icons.bulleted_list(ink))
+            self._file_list_toggle.setToolTip(tooltip_for(self.act_file_list, _("File List")))
+        if getattr(self, "_paper_toggle", None) is None:
+            return
+        self.act_paper_mode.setIcon(format_icons.page(ink))
 
     def _build_pane_toggles(self) -> QWidget:
         """Article Details and the Drafts panel, shown and hidden from the
@@ -3396,14 +3618,24 @@ class MainWindow(QMainWindow):
         idx = self.tabs.tabBar().tabAt(pos)
         if idx < 0:
             return
-        ed = self._editor_from_widget(self.tabs.widget(idx))
-        has_path = bool(getattr(ed, '_file_path', None))
+        widget = self.tabs.widget(idx)
+        ed = self._editor_from_widget(widget)
+        # A file viewer's file is on disk: it can be renamed and put in the
+        # Trash from its tab as a document's can.
+        viewer = self._viewer_from_widget(widget) or self._sheet_from_widget(widget)
+        has_path = bool(getattr(ed, '_file_path', None)) or viewer is not None
 
         menu = QMenu(self)
         rename_action = menu.addAction(_("Rename"))
         rename_action.setEnabled(has_path)
         if not has_path:
             rename_action.setToolTip(_("Save the file first before renaming"))
+
+        as_text_action = None
+        if self._opens_as_text_too(widget):
+            as_text_action = menu.addAction(_("Open as Text"))
+            as_text_action.triggered.connect(
+                lambda _checked=False, w=widget: self._open_tab_as_text(w))
 
         menu.addSeparator()
 
@@ -3413,12 +3645,39 @@ class MainWindow(QMainWindow):
             delete_action.setToolTip(_("No file on disk to delete"))
 
         action = menu.exec(self.tabs.tabBar().mapToGlobal(pos))
+        path = self._tab_file_path(widget)
+        if (action in (rename_action, delete_action) and path
+                and self._library.library_for(path) is not None):
+            # A file in a sidebar folder: renamed or put in the Trash by the
+            # library, so the links to it follow and its tab with it.
+            self._library_file_action(widget, path, rename=action == rename_action)
+            return
         if action == rename_action:
-            self._rename_tab(idx, ed)
+            if viewer is not None:
+                self._rename_viewer_tab(idx, viewer)
+            else:
+                self._rename_tab(idx, ed)
         elif action == delete_action:
-            self._delete_tab_file(idx, ed)
+            self._delete_tab_file(idx, viewer if viewer is not None else ed)
+
+    def _library_file_action(self, widget, path: str, *, rename: bool) -> None:
+        """Rename, or move to the Trash, the file of a tab that lies in a
+        sidebar folder, through the library: the links in every folder
+        follow a rename (and the tab follows it, library_window.py); the
+        tab goes with a file put in the Trash, as Delete File… closes it."""
+        if rename:
+            library_actions.rename(self, self._library, path,
+                                   self._library_window.unsaved_notes,
+                                   say=self._library_window.says)
+            return
+        if library_actions.trash(self, self._library, [path]):
+            index = self.tabs.indexOf(widget)
+            if index >= 0:
+                self._discard_tab(index)
 
     def _delete_tab_file(self, idx: int, ed):
+        """Move the file of the tab at ``idx`` to the Trash and close the
+        tab. ``ed``: the tab's editor, or its file viewer."""
         file_path = ed._file_path
         file_name = os.path.basename(file_path)
 
@@ -3461,6 +3720,10 @@ class MainWindow(QMainWindow):
             return
 
         new_name = new_name.strip()
+        problem = folder_library.name_problem(new_name)
+        if problem is not None:
+            inform(self, title=_("Couldn't rename the file"), message=problem)
+            return
         new_path = file_paths.normalize(os.path.join(directory, new_name))
 
         # Any entry with that name is a clash, a link (even a broken one)
@@ -3473,12 +3736,15 @@ class MainWindow(QMainWindow):
             return
 
         try:
-            os.rename(old_path, new_path)
+            # In the file's turn: the folder library's link updates write
+            # notes in theirs (atomic_file.one_writer), never meanwhile.
+            with one_writer(old_path, new_path):
+                os.rename(old_path, new_path)
         except OSError as e:
             inform(self, title=_("Couldn't rename the file"), message=str(e))
             return
 
-        self._watcher.removePath(old_path)
+        self._unwatch(old_path)
         self._watcher.addPath(new_path)
         ed._file_path = new_path
         if hasattr(ed, '_backup'):
@@ -3487,6 +3753,124 @@ class MainWindow(QMainWindow):
         self._attach_highlighter(ed, new_path)
         self.tabs.setTabText(idx, new_name)
         ed.setAccessibleName(self._document_name(ed))
+        self._update_window_title()
+
+    def _rename_viewer_tab(self, idx: int, viewer) -> None:
+        """Rename the file a viewer shows, from its tab: the file on disk
+        takes the new name, and the tab shows it again under that name,
+        where it was (a viewer holds nothing typed, so it starts afresh)."""
+        old_path = viewer._file_path
+        old_name = os.path.basename(old_path.rstrip("/\\"))
+        new_name, ok = QInputDialog.getText(self, _("Rename File"), _("New filename:"),
+                                            text=old_name)
+        new_name = new_name.strip() if ok else ""
+        if not new_name or new_name == old_name:
+            return
+        problem = folder_library.name_problem(new_name)
+        if problem is not None:
+            inform(self, title=_("Couldn't rename the file"), message=problem)
+            return
+        new_path = file_paths.normalize(os.path.join(os.path.dirname(old_path), new_name))
+        if os.path.lexists(new_path) and not file_paths.is_case_change(old_path, new_path):
+            inform(self, title=_("\u201c{name}\u201d already exists").format(name=new_name),
+                   message=_("Choose a different name."))
+            return
+        try:
+            # In the file's turn: the folder library's link updates write
+            # notes in theirs (atomic_file.one_writer), never meanwhile.
+            with one_writer(old_path, new_path):
+                os.rename(old_path, new_path)
+        except OSError as e:
+            inform(self, title=_("Couldn't rename the file"), message=str(e))
+            return
+        self._retarget_tab(idx, new_path)
+
+    def _unwatch(self, path: str) -> None:
+        """Stop watching ``path``, under whatever spelling the watcher
+        holds it (a moved file's old path, a decomposed or other-case
+        name): the watched set stays exactly the open files."""
+        stale = [watched for watched in self._watcher.files() + self._watcher.directories()
+                 if link_rewrite.is_within(watched, path)
+                 and link_rewrite.is_within(path, watched)]
+        if not stale:
+            return
+        if not self._watcher.removePaths(stale):
+            return
+        # Qt cannot forget a path whose file has moved away already (its
+        # watcher on a Mac holds it by the file); a new watcher then takes
+        # over, watching exactly what is left.
+        self._replace_watcher([p for p in self._watcher.files() + self._watcher.directories()
+                               if p not in stale])
+
+    def _replace_watcher(self, paths) -> None:
+        old = self._watcher
+        self._watcher = QFileSystemWatcher(self)
+        self._watcher.fileChanged.connect(self._on_file_changed)
+        if paths:
+            self._watcher.addPaths(list(paths))
+        old.fileChanged.disconnect(self._on_file_changed)
+        old.deleteLater()
+
+    def _remember_recent(self, path: str) -> None:
+        """Put ``path`` in File > Open Recent, unless it is only being
+        looked at from the file list (show_from_list): a preview is not
+        an opening, as in the Finder and Notes."""
+        library = getattr(self, "_library_window", None)
+        if library is not None and library.previewing:
+            return
+        add_recent(path)
+        self._populate_recent_menu()
+
+    def _retarget_tab(self, index: int, new_path: str) -> None:
+        """The file of the tab at ``index`` is now at ``new_path`` (renamed
+        or moved, here or in the library): the tab goes on with it there.
+        A document and a sheet keep what is typed in them; a read-only
+        tab shows the file afresh in the same place."""
+        widget = self.tabs.widget(index)
+        old_path = self._tab_file_path(widget)
+        if old_path:
+            self._unwatch(old_path)
+        ed = self._editor_from_widget(widget)
+        sheet = self._sheet_from_widget(widget)
+        if ed is not None:
+            self._watcher.addPath(new_path)
+            ed._file_path = new_path
+            if hasattr(ed, '_backup'):
+                ed._backup.update_file_path(new_path)
+            # Another extension is another kind of file, as after Save As.
+            self._attach_highlighter(ed, new_path)
+            self.tabs.setTabText(index, self._compose_tab_title(ed))
+            self.tabs.setTabToolTip(index, new_path)
+            ed.setAccessibleName(self._document_name(ed))
+        elif sheet is not None:
+            self._watcher.addPath(new_path)
+            sheet.follow_move(new_path)
+            self._sheet_window.name_tab(sheet)
+        elif (self._reader_from_widget(widget) is not None
+              and file_kinds.kind_of_path(old_path or "") == file_kinds.kind_of_path(new_path)):
+            # A viewer or the PDF reader goes on in place, as it is (a
+            # preview tab stays the preview, the reading position stays).
+            reader = self._reader_from_widget(widget)
+            follow = getattr(reader, "follow_move", None)
+            if callable(follow):
+                follow(new_path)
+            else:
+                reader._file_path = new_path
+            self._watcher.addPath(new_path)
+            self.tabs.setTabText(index, os.path.basename(new_path.rstrip("/\\")))
+            self.tabs.setTabToolTip(index, new_path)
+        else:
+            # Another kind of file now (its extension changed): shown afresh
+            # in the tab's place.
+            front = self.tabs.currentWidget()
+            self._discard_tab(index)
+            tab = self.open_path(new_path)
+            new_index = self.tabs.indexOf(tab) if tab is not None else -1
+            if new_index >= 0 and new_index != index:
+                self.tabs.tabBar().moveTab(new_index, min(index, self.tabs.count() - 1))
+            # The tab in front stays in front.
+            if front is not widget and self.tabs.indexOf(front) >= 0:
+                self.tabs.setCurrentWidget(front)
         self._update_window_title()
 
     def _attach_close_button(self, idx: int, container: QWidget):
@@ -3504,14 +3888,14 @@ class MainWindow(QMainWindow):
     def close_tab(self, index: int):
         w = self.tabs.widget(index)
 
-        viewer = self._pdf_viewer_from_widget(w)
+        viewer = self._reader_from_widget(w)
         if viewer is not None:
             viewer.save_view_state()
-            self._watcher.removePath(viewer._file_path)
-            self.tabs.removeTab(index)
-            # The tab goes with its document, as a document's tab does.
-            viewer.release()
-            viewer.deleteLater()
+            self._discard_tab(index)
+            return
+        # SHEET TAB HOOK: a sheet with unsaved changes asks, as a
+        # document does, before _discard_tab.
+        if self._sheet_from_widget(w) is not None and not self._may_close_sheet(index):
             return
 
         editor = self._editor_from_widget(w)
@@ -3541,7 +3925,22 @@ class MainWindow(QMainWindow):
         asks first; Move to Trash has, about the file): what it set going
         stops, and the tab is deleted with its editor and document."""
         w = self.tabs.widget(index)
+        reader = self._reader_from_widget(w) or self._sheet_from_widget(w)
+        if reader is not None and getattr(reader, "is_busy", lambda: False)():
+            reader.after_job(lambda r=reader: self.tabs.indexOf(r) >= 0
+                             and self._discard_tab(self.tabs.indexOf(r)))
+            return
+        if reader is not None:
+            self._unwatch(reader._file_path)
+            self.tabs.removeTab(index)
+            # The tab goes with its file, as a document's tab does: what it
+            # holds (a player, a temporary folder) let go of first.
+            reader.release()
+            reader.deleteLater()
+            return
         editor = self._editor_from_widget(w)
+        if editor is not None and self._last_note_editor is editor:
+            self._last_note_editor = None
         if editor:
             self._drop_media_reads(editor)
             if getattr(editor, "_file_gone", False):
@@ -3562,7 +3961,7 @@ class MainWindow(QMainWindow):
         if editor:
             path = getattr(editor, '_file_path', None)
             if path:
-                self._watcher.removePath(path)
+                self._unwatch(path)
             # A draft tab might own a conflict banner - drop the dict
             # entry so we don't accumulate references to dead editors
             # across the session.
@@ -3610,6 +4009,33 @@ class MainWindow(QMainWindow):
         # to be asked here and then again, differently, by closeEvent.)
         return self.close()
 
+    def _unsaved_tabs(self) -> list:
+        """The tabs with unsaved changes, of every kind that saves (a
+        document, a spreadsheet), in tab order: what quitting, an update
+        restart and closing the window ask about and save."""
+        found = []
+        for i in range(self.tabs.count()):
+            widget = self.tabs.widget(i)
+            ed = self._editor_from_widget(widget)
+            sheet = self._sheet_from_widget(widget)
+            if (ed is not None and ed.document().isModified()
+                    or sheet is not None and sheet.is_modified()):
+                found.append(i)
+        return found
+
+    def _save_tabs(self, indexes) -> bool:
+        """Save the tabs at ``indexes``, each as File > Save would; False
+        as soon as one is not saved (cancelled, or it failed)."""
+        widgets = [self.tabs.widget(i) for i in indexes]
+        for widget in widgets:
+            index = self.tabs.indexOf(widget)
+            if index < 0:
+                continue
+            self.tabs.setCurrentIndex(index)
+            if not self.save():
+                return False
+        return True
+
     def _resolve_unsaved_before_closing(self) -> bool:
         """Save, discard or keep unsaved documents. True means close."""
         editors = [ed for i in range(self.tabs.count())
@@ -3618,16 +4044,14 @@ class MainWindow(QMainWindow):
         # Library's alike, and every Save As still downloading.
         uploading = self._uploading(*editors) + self._library_uploads()
         saving = self._media_saves()
-        unsaved = [i for i in range(self.tabs.count())
-                   if (ed := self._editor_from_widget(self.tabs.widget(i)))
-                   and ed.document().isModified()]
+        unsaved = self._unsaved_tabs()
         if not unsaved:
             # Nothing to save: what is still uploading or saving is the question.
             return self._may_leave_uploads(uploading, quitting=True, saving=saving)
         words = self._save_question_words(uploading, quitting=True, saving=saving)
         if len(unsaved) == 1:
-            ed = self._editor_from_widget(self.tabs.widget(unsaved[0]))
-            name = os.path.basename(ed._file_path) if getattr(ed, "_file_path", None) else _("Untitled")
+            path = self._tab_file_path(self.tabs.widget(unsaved[0]))
+            name = os.path.basename(path) if path else _("Untitled")
             answer = _ask_save_changes(
                 self, _("Do you want to save the changes you made to \u201c{name}\u201d?").format(
                     name=name), message=words)
@@ -3641,10 +4065,7 @@ class MainWindow(QMainWindow):
         if answer == "cancel":
             return False
         if answer == "save":
-            for i in unsaved:
-                self.tabs.setCurrentIndex(i)
-                if not self.save() and self.current_editor().document().isModified():
-                    return False
+            return self._save_tabs(unsaved)
         return True
 
     def _editor_from_widget(self, w) -> HtmlEditor | None:
@@ -3660,12 +4081,72 @@ class MainWindow(QMainWindow):
     def current_pdf_viewer(self) -> PdfViewerTab | None:
         return self._pdf_viewer_from_widget(self.tabs.currentWidget())
 
+    def _viewer_from_widget(self, w) -> FileViewerTab | None:
+        """The file viewer a tab is (a picture, a film, sound, an office
+        file, any other file: viewer_tabs.py), or None."""
+        return w if isinstance(w, FileViewerTab) else None
+
+    def current_file_viewer(self) -> FileViewerTab | None:
+        return self._viewer_from_widget(self.tabs.currentWidget())
+
+    def _reader_from_widget(self, w):
+        """The read-only tab ``w`` is: the PDF reader or a file viewer;
+        None for a document's tab. A read-only tab holds nothing typed:
+        nothing to save, Copy only, reloaded in place when its file
+        changes, and named by its file."""
+        viewer = self._pdf_viewer_from_widget(w)
+        return viewer if viewer is not None else self._viewer_from_widget(w)
+
+    def current_reader(self):
+        return self._reader_from_widget(self.tabs.currentWidget())
+
+    def _sheet_from_widget(self, w):
+        """The spreadsheet a tab is (sheet_tab.SheetTab), or None. A sheet
+        is the one tab besides a document that is edited: it has unsaved
+        changes (is_modified, modification_changed), saves (save,
+        save_as), and has its own Undo and Redo (undo_stack). sheet_tab.py
+        is read when the first spreadsheet opens, so until then there is
+        none."""
+        module = sys.modules.get("sheet_tab")
+        return w if module is not None and isinstance(w, module.SheetTab) else None
+
+    def current_sheet(self):
+        return self._sheet_from_widget(self.tabs.currentWidget())
+
+    def _sheet_tabs(self) -> list:
+        """Every sheet tab, in tab order."""
+        return [sheet for i in range(self.tabs.count())
+                if (sheet := self._sheet_from_widget(self.tabs.widget(i))) is not None]
+
+    def _may_close_sheet(self, index: int) -> bool:
+        """Ask about a sheet's unsaved changes before its tab closes (save,
+        discard or keep it open), as close_tab asks about a document's.
+        True: it may close."""
+        sheet = self._sheet_from_widget(self.tabs.widget(index))
+        if sheet is not None and sheet.is_busy():
+            # A large change (a save) is running: the tab closes after it.
+            sheet.after_job(lambda s=sheet: self.tabs.indexOf(s) >= 0
+                            and self.close_tab(self.tabs.indexOf(s)))
+            return False
+        if sheet is None or not sheet.is_modified():
+            return True
+        answer = _ask_save_changes(
+            self, _("Do you want to save the changes you made to \u201c{name}\u201d?").format(
+                name=os.path.basename(sheet._file_path)))
+        if answer == "cancel":
+            return False
+        if answer == "save":
+            self.tabs.setCurrentIndex(index)
+            return self._sheet_window.save(sheet)
+        return True
+
     def _tab_file_path(self, w) -> str | None:
-        """The file backing a tab, regardless of tab kind (editor / PDF)."""
+        """The file backing a tab, whatever kind of tab it is (a
+        document, the PDF reader, a file viewer, a sheet)."""
         ed = self._editor_from_widget(w)
         if ed is not None:
             return getattr(ed, '_file_path', None)
-        viewer = self._pdf_viewer_from_widget(w)
+        viewer = self._reader_from_widget(w) or self._sheet_from_widget(w)
         return viewer._file_path if viewer is not None else None
 
     def _notice_from_widget(self, w) -> DocumentNotice | None:
@@ -3710,8 +4191,20 @@ class MainWindow(QMainWindow):
             event.acceptProposedAction()
 
     def _handle_dropped_urls(self, urls):
+        """Files dropped on the window, or on a document. A picture goes
+        into the document in front (a film or sound too, uploaded, while
+        a Nostr account is in use); any other file opens in the tab its
+        kind has, as does a picture dropped while no document is in
+        front. A saved note links a file from its own folders where the
+        file lies instead (a note, text or PDF still opens)."""
         unsupported = []
         image_paths = []
+        in_place = []
+        ed = self.current_editor()
+        # A saved note takes a file from its own folders as a link to where
+        # the file lies (file_links.py); a file from elsewhere as before.
+        note = (getattr(ed, "_file_path", None)
+                if ed is not None and self._keeps_pictures(ed) else None)
         for url in urls:
             if not url.isLocalFile():
                 # A tile dragged out of the Media Library, or its link
@@ -3723,16 +4216,22 @@ class MainWindow(QMainWindow):
             # A URL's path has forward slashes, also on Windows.
             path = file_paths.normalize(url.toLocalFile())
             ext = os.path.splitext(path)[1].lower()
-            if ext in _SUPPORTED_EXTS:
+            if (note and ext not in _SUPPORTED_EXTS
+                    and file_links.links_in_place(note, path, self._library_roots())):
+                in_place.append(path)
+            elif ext in _SUPPORTED_EXTS:
                 self.open_path(path)
-            elif ext in _IMAGE_EXTS:
+            elif ext in _IMAGE_EXTS and (ed is not None or not self.tabs.count()):
                 image_paths.append(path)
-            elif media_files.is_audio_or_video(path) and self._may_insert_audio_video(
-                    self.current_editor()):
-                self._add_media_file(self.current_editor(), path)
+            elif media_files.is_audio_or_video(path) and self._may_insert_audio_video(ed):
+                self._add_media_file(ed, path)
+            elif _is_file_on_disk(path):
+                self.open_path(path)
             else:
                 unsupported.append(os.path.basename(path))
 
+        if in_place:
+            self._insert_links_in_place(ed, in_place, N_("Drag"))
         if image_paths:
             self._handle_dropped_images(image_paths)
 
@@ -3885,8 +4384,10 @@ class MainWindow(QMainWindow):
         else:
             ed.setPlainText(content)
 
-    def open_path(self, path: str):
-        """Open ``path`` in a new tab and make it current.
+    def open_path(self, path: str, *, as_text: bool = False):
+        """Open ``path`` in a new tab and make it current; ``as_text`` opens
+        a file of another kind that is text (a CSV table, an SVG picture,
+        an RTF document) in the editor, as its text.
 
         Returns the new tab's editor, or its PDF viewer. Returns None when
         no tab was opened: the file is open already (its tab becomes
@@ -3904,16 +4405,31 @@ class MainWindow(QMainWindow):
                 # forward: nothing to warn about.
                 self.tabs.setCurrentIndex(i)
                 return None
+        if not os.path.lexists(path):
+            # Said once, whatever kind of tab the file would have had.
+            self._cannot_open(path)
+            return None
 
-        if path.lower().endswith('.pdf'):
+        kind = file_kinds.kind_of_path(path)
+        if as_text:
+            pass
+        elif kind == file_kinds.PDF:
             return self._open_pdf_tab(path)
+        elif kind == file_kinds.SHEET:
+            # The spreadsheets MyEditor edits open in a sheet tab; the
+            # others (.xls, .numbers) are shown as a preview.
+            sheet = self._sheet_window.open(path)
+            if sheet is not None:
+                return sheet
+        if not as_text and self._opens_in_viewer(path, kind):
+            return self._open_viewer_tab(path)
 
         try:
             opened = MainWindow._read_document(self, path)
         except (OSError, ValueError) as e:
-            inform(self, title=_("Couldn't open \u201c{name}\u201d").format(
-                       name=os.path.basename(path)),
-                   message=str(e))
+            self._cannot_open(path, _("This item is not a file MyEditor can read.")
+                              if os.path.exists(path) and not regular_files.is_regular_file(path)
+                              else str(e))
             return None
         if opened is None:
             return None                     # locked, and no password given
@@ -3939,20 +4455,24 @@ class MainWindow(QMainWindow):
         self._attach_close_button(idx, container)
         ed._backup = self._new_backup(ed, path)
         self._watcher.addPath(path)
-        add_recent(path)
-        self._populate_recent_menu()
+        self._remember_recent(path)
         ed.setFocus()
         self._update_window_title()
         return ed
+
+    def _cannot_open(self, path: str, message: Optional[str] = None) -> None:
+        """Say that the file at ``path`` could not be opened, and why: by
+        default that it is not there."""
+        inform(self, title=_("Couldn't open \u201c{name}\u201d").format(
+                   name=os.path.basename(path)),
+               message=message if message is not None else _("The file could not be found."))
 
     def _open_pdf_tab(self, path: str) -> Optional[PdfViewerTab]:
         """Open ``path`` read-only in the built-in PDF viewer; returns the
         viewer, or None when the file could not be read."""
         viewer = PdfViewerTab(path, is_dark=self.is_dark_theme)
         if not viewer.load_ok:
-            inform(self, title=_("Couldn't open \u201c{name}\u201d").format(
-                       name=os.path.basename(path)),
-                   message=str(viewer.load_error))
+            self._cannot_open(path, str(viewer.load_error))
             viewer.deleteLater()
             return None
         viewer.page_changed.connect(self._on_pdf_page_changed)
@@ -3964,12 +4484,302 @@ class MainWindow(QMainWindow):
         # Watch the file so a regenerated PDF (LaTeX build, re-export)
         # refreshes in place at the same reading position.
         self._watcher.addPath(path)
-        add_recent(path)
-        self._populate_recent_menu()
+        self._remember_recent(path)
         viewer.setFocus()
         self._update_window_title()
         self._update_status_bar()
         return viewer
+
+    def _opens_in_viewer(self, path: str, kind: Optional[str] = None) -> bool:
+        """Whether ``path`` opens in a file viewer (viewer_tabs.py) rather
+        than the editor: pictures, films, sound, documents, presentations,
+        the spreadsheets MyEditor only shows (.xls, .numbers), and any
+        other file but text. A note, a text file, a script and a file of
+        no known kind that reads as text open in the editor, as they
+        always have; the spreadsheets MyEditor edits open in a sheet tab
+        (sheet_window.py)."""
+        kind = kind or file_kinds.kind_of_path(path)
+        if kind in (file_kinds.NOTE, file_kinds.TEXT, file_kinds.PDF):
+            return False
+        if os.path.isdir(path):
+            return file_kinds.is_package(path)
+        if kind == file_kinds.OTHER:
+            return not regular_files.reads_as_text(path)
+        return True
+
+    def _tab_in_front(self):
+        return self.tabs.currentWidget()
+
+    def _opens_as_text_too(self, widget) -> bool:
+        """Whether the tab ``widget`` shows a file that is text, in a viewer
+        or a sheet (a CSV table, an SVG picture, an RTF document), so it
+        can be opened as its text instead."""
+        if self._editor_from_widget(widget) is not None:
+            return False
+        if self._reader_from_widget(widget) is None and self._sheet_from_widget(widget) is None:
+            return False
+        path = self._tab_file_path(widget)
+        return bool(path) and self._is_text_file(path)
+
+    @staticmethod
+    def _is_text_file(path: str) -> bool:
+        kind = file_kinds.kind_of_path(path)
+        return (kind not in (file_kinds.NOTE, file_kinds.TEXT, file_kinds.PDF)
+                and os.path.isfile(path) and regular_files.reads_as_text(path))
+
+    def _open_tab_as_text(self, widget=None) -> None:
+        """File > Open as Text: the file of the tab in front (or ``widget``)
+        opened in the editor as its text, in the same place; a sheet with
+        unsaved changes asks first."""
+        widget = widget if widget is not None else self.tabs.currentWidget()
+        index = self.tabs.indexOf(widget)
+        if index < 0 or not self._opens_as_text_too(widget):
+            return
+        if self._sheet_from_widget(widget) is not None and not self._may_close_sheet(index):
+            return
+        path = self._tab_file_path(widget)
+        self._discard_tab(index)
+        self._open_path_as_text(path, place=index)
+
+    def _open_file_as_text(self, path: str) -> None:
+        """``path`` as its text: its viewer or sheet tab, if it has one,
+        becomes an editor's tab in the same place."""
+        index = self._tab_index_of(path)
+        if index >= 0:
+            self._open_tab_as_text(self.tabs.widget(index))
+        else:
+            self._open_path_as_text(path)
+
+    def _open_path_as_text(self, path: str, place: int = -1) -> None:
+        """Open ``path`` in the editor as its text (closing a viewer or
+        sheet tab that shows it is the caller's part)."""
+        tab = self.open_path(path, as_text=True)
+        index = self._tab_index_of(path)
+        if tab is not None and 0 <= place < self.tabs.count() and index >= 0:
+            self.tabs.tabBar().moveTab(index, place)
+
+    def _open_viewer_tab(self, path: str) -> Optional[FileViewerTab]:
+        """Open ``path`` read-only in the viewer its kind has (a picture, a
+        player, a reading view, a preview, else a card that says what the
+        file is) and return it; None when the file is not there."""
+        if not os.path.exists(path):
+            self._cannot_open(path)
+            return None
+        viewer = viewer_tabs.viewer_for(path, self.is_dark_theme)
+        if viewer is None:
+            # A file another tab owns (a spreadsheet the sheet tab could
+            # not take), opened here all the same: the card that says
+            # what it is.
+            viewer = viewer_tabs.FileInfoTab(path, self.is_dark_theme)
+        self._wire_file_viewer(viewer)
+        idx = self.tabs.addTab(viewer, viewer.document_title())
+        self.tabs.setTabToolTip(idx, path)
+        self.tabs.setCurrentIndex(idx)
+        self._attach_close_button(idx, viewer)
+        # Saved again by its app, it shows what was saved.
+        self._watcher.addPath(path)
+        self._remember_recent(path)
+        viewer.setFocus()
+        self._update_window_title()
+        self._update_status_bar()
+        return viewer
+
+    def _wire_file_viewer(self, viewer: FileViewerTab) -> None:
+        """What a viewer asks for, done by the window: open its file in the
+        app this computer opens it with, or in another; show it in the
+        Finder; put it into a note; make a note of it; install pandoc for
+        a better reading view. The tab reads its file's path when asked,
+        so a renamed file is the one acted on."""
+        viewer.set_reveal_label(default_apps.reveal_label())
+        viewer.open_requested.connect(
+            lambda v=viewer: self._open_in_default_app(v._file_path))
+        viewer.open_with_requested.connect(
+            lambda position, v=viewer: self._show_open_with_menu(v._file_path, position))
+        viewer.reveal_requested.connect(lambda v=viewer: self._reveal_file(v._file_path))
+        viewer.insert_into_note_requested.connect(
+            lambda v=viewer: self._insert_file_into_note(v._file_path))
+        viewer.import_as_note_requested.connect(
+            lambda v=viewer: self._import_as_note(v._file_path))
+        viewer.pandoc_install_requested.connect(self._offer_pandoc_install)
+        self._name_default_app(viewer)
+
+    def _name_default_app(self, viewer: FileViewerTab) -> None:
+        """"Open in Numbers": the default app's name on the viewer's button.
+        The system is asked once per kind of file, off this thread (it can
+        take a moment), so opening a tab never waits for it."""
+        path = viewer._file_path
+        known, name = default_apps.known_default_app(path)
+        if known:
+            viewer.set_default_app(name)
+            return
+
+        def named(found):
+            if shiboken6.isValid(viewer):
+                viewer.set_default_app(found)
+
+        background.run(lambda: default_apps.default_app_name(path), named,
+                       lambda _error: None, receiver=viewer)
+
+    def _open_in_default_app(self, path: str) -> None:
+        if not default_apps.open_with_default(path):
+            self.status.showMessage(_("\u201c{name}\u201d could not be opened.").format(
+                name=os.path.basename(path.rstrip("/\\"))), 5000)
+
+    def _show_open_with_menu(self, path: str, position) -> None:
+        """The viewer's Open With menu at ``position``: the apps that open
+        the file, the default one first, then Other… to choose any app."""
+        QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+        try:
+            apps = default_apps.other_apps(path)
+        finally:
+            QApplication.restoreOverrideCursor()
+        menu = QMenu(self)
+        # Back to the text, from a viewer or a sheet.
+        also = ([(_("{app} (as Text)").format(app=APP_DISPLAY_NAME),
+                  lambda: self._open_file_as_text(path))]
+                if self._is_text_file(path) else [])
+        library_actions.fill_open_with(menu, path, self, apps=apps, also=also)
+        # Shown without waiting for it (the window keeps it until the next).
+        self._open_with_menu = menu
+        menu.popup(position)
+
+    def _reveal_file(self, path: str) -> None:
+        if not default_apps.reveal(path):
+            self.status.showMessage(_("\u201c{name}\u201d could not be shown.").format(
+                name=os.path.basename(path.rstrip("/\\"))), 5000)
+
+    def _library_roots(self) -> tuple:
+        """The folders added to the sidebar (library_window.py); none while
+        the window is still being built."""
+        library = getattr(self, "_library_window", None)
+        return library.roots() if library is not None else ()
+
+    def _tab_index_of(self, path: str) -> int:
+        for i in range(self.tabs.count()):
+            if file_paths.same_file(self._tab_file_path(self.tabs.widget(i)), path):
+                return i
+        return -1
+
+    def _note_for_insert(self):
+        """The note Insert into Note goes to: the one in front last, while
+        its tab is open; else None."""
+        ed = self._last_note_editor
+        if ed is None or not shiboken6.isValid(ed) or self._editor_widget_index(ed) < 0:
+            return None
+        return ed
+
+    def _insert_file_into_note(self, path: str) -> None:
+        """A viewer's Insert into Note: the file into the note in front
+        last (a new one when there is none), at its caret, and that note
+        to the front. A saved note links a file from its own folders where
+        the file lies; an untitled one, or a file from elsewhere, takes a
+        picture into the note as a picture dropped there goes in (into
+        its own media folder when saved), and a film or sound uploaded
+        while a Nostr account is in use."""
+        ed = self._note_for_insert()
+        if ed is None:
+            ed = self.new_tab()
+        index = self._editor_widget_index(ed)
+        if index >= 0:
+            self.tabs.setCurrentIndex(index)
+        note = getattr(ed, "_file_path", None)
+        if file_links.links_in_place(note, path, self._library_roots()):
+            self._insert_links_in_place(ed, [path])
+        elif file_links.is_picture(path):
+            self._handle_dropped_images([path], N_("Image"))
+        elif media_files.is_audio_or_video(path) and self._may_insert_audio_video(ed):
+            self._add_media_file(ed, path)
+        else:
+            self.status.showMessage(
+                _("To link \u201c{name}\u201d, save the note in the folder that holds "
+                  "it.").format(name=os.path.basename(path)), 6000)
+        ed.setFocus()
+
+    def _insert_links_in_place(self, ed, paths, step: Optional[str] = None) -> None:
+        """Files from the note's own folders into the note at its caret,
+        each as a link to where it lies, relative to the note: a picture
+        shown in the text (saved as ``![name](place)``), any other file as
+        a link called by its name, which a note shown as its Markdown text
+        takes as the Markdown itself (file_links.file_markdown). One step
+        of Undo called ``step`` (an N_ word; by default Image or Link)."""
+        note = ed._file_path
+        rich = self._editor_kind(ed) == "rich"
+        pictures = all(file_links.is_picture(path) for path in paths)
+        step = step or (N_("Image") if pictures else N_("Link"))
+        cursor = ed.textCursor()
+        with ed.undo_step(step):
+            for number, path in enumerate(paths):
+                picture = file_links.is_picture(path)
+                if number and not picture:
+                    cursor.insertText(" ")
+                destination = file_links.relative_destination(note, path)
+                name = os.path.basename(path.rstrip("/\\"))
+                if picture:
+                    fmt = QTextImageFormat()
+                    fmt.setName(destination)
+                    fmt.setProperty(QTextImageFormat.ImageAltText,
+                                    os.path.splitext(name)[0] or name)
+                    cursor.insertImage(fmt)
+                elif not rich:
+                    cursor.insertText(file_links.file_markdown(note, path))
+                else:
+                    rich_text.set_link(cursor, name, destination)
+                    cursor.setPosition(cursor.selectionEnd())
+                    ed.setTextCursor(cursor)
+                    ed.setCurrentCharFormat(rich_text.without_link(ed.currentCharFormat()))
+                    cursor = ed.textCursor()
+        ed.setTextCursor(cursor)
+
+    def _import_as_note(self, path: str) -> None:
+        """A document's Import as Note: a Markdown note made next to it
+        (office_preview.import_as_markdown, off this thread), opened once
+        it is there. The document stays as it is."""
+        importing = self._importing
+        if path in importing:
+            return
+        importing.add(path)
+        name = os.path.basename(path)
+        self.status.showMessage(_("Importing \u201c{name}\u201d\u2026").format(name=name))
+
+        def done(note_path):
+            importing.discard(path)
+            self.status.showMessage(_("Made the note \u201c{name}\u201d.").format(
+                name=os.path.basename(note_path)), 5000)
+            self.open_path(note_path)
+
+        def failed(error):
+            importing.discard(path)
+            self.status.clearMessage()
+            inform(self, title=_("Couldn't import \u201c{name}\u201d").format(name=name),
+                   message=str(error))
+
+        background.run(lambda: office_preview.import_as_markdown(path), done, failed,
+                       receiver=self)
+
+    def _offer_pandoc_install(self) -> None:
+        """A reading view's offer of pandoc: the toolchain window that
+        installs it from its official source; once it is there, every
+        reading view reads its document again with it."""
+        RmdSetupDialog(is_dark=self.is_dark_theme, parent=self).exec()
+        if rmd_toolchain.find_pandoc()[1] == "missing":
+            return
+        for i in range(self.tabs.count()):
+            viewer = self._viewer_from_widget(self.tabs.widget(i))
+            if isinstance(viewer, viewer_tabs.DocumentReadingTab):
+                viewer.reload()
+
+    def _copy_viewer_file(self, viewer: FileViewerTab) -> None:
+        """Edit > Copy in a file viewer: the file itself, as the Finder
+        copies it (pasted in a folder, a copy of it; in a note, its
+        place), and a picture's pixels besides, for apps that take a
+        picture."""
+        data = QMimeData()
+        data.setUrls([QUrl.fromLocalFile(viewer._file_path)])
+        data.setText(viewer._file_path)
+        pixmap = getattr(getattr(viewer, "canvas", None), "pixmap", None)
+        if isinstance(pixmap, QPixmap) and not pixmap.isNull():
+            data.setImageData(pixmap.toImage())
+        QApplication.clipboard().setMimeData(data)
 
     def _on_pdf_page_changed(self):
         if self.sender() is self.tabs.currentWidget():
@@ -4290,6 +5100,13 @@ class MainWindow(QMainWindow):
         if self.current_pdf_viewer() is not None:
             self.status.showMessage(_("PDFs open read-only; there is nothing to save."), 3000)
             return True
+        if self.current_file_viewer() is not None:
+            self.status.showMessage(
+                _("This file is shown read-only; there is nothing to save."), 3000)
+            return True
+        sheet = self.current_sheet()
+        if sheet is not None:
+            return self._sheet_window.save(sheet)
         path = self.current_path()
         if not path:
             # No local file backs this tab. If it's a draft tab (opened
@@ -4339,6 +5156,11 @@ class MainWindow(QMainWindow):
         return os.path.splitext(current_path)[0] + new_ext
 
     def save_as(self, initial_path: str = "", initial_filter: str = "") -> bool:
+        sheet = self.current_sheet()
+        if sheet is not None:
+            return self._sheet_window.save_as(sheet)
+        if self.current_reader() is not None:
+            return False
         path, selected_filter = QFileDialog.getSaveFileName(
             self, _("Save As"), initial_path,
             ".txt (*.txt);; .html (*.html);; .pdf (*.pdf);; .md (*.md);; .rtf (*.rtf);; .Rmd (*.Rmd)",
@@ -4370,7 +5192,7 @@ class MainWindow(QMainWindow):
         ok = self._save_to(path)
         if ok:
             if old_path and old_path != path:
-                self._watcher.removePath(old_path)
+                self._unwatch(old_path)
             self._watcher.addPath(path)
             self.set_current_path(path)
             ed = self.current_editor()
@@ -4471,7 +5293,7 @@ class MainWindow(QMainWindow):
             # The watcher reports this write after it, however long it took
             # (sealing a locked document takes a while): finding the file as
             # written here, _on_file_changed knows the change is this save.
-            self._saved_stamps[path] = _file_stamp(path)
+            self._saved_stamps[path] = regular_files.file_stamp(path)
 
     def _say_saved(self, ed, path: str, left_out=()) -> None:
         """Say a document was saved, and whether audio or video in it is
@@ -4575,14 +5397,17 @@ class MainWindow(QMainWindow):
         if os.path.exists(path):
             self._watcher.addPath(path)
 
-        stamp = _file_stamp(path)
+        stamp = regular_files.file_stamp(path)
         if stamp is not None and stamp == self._saved_stamps.get(path):
             return                          # the file as this window saved it
 
         # A regenerated PDF reloads in place: the viewer holds no user
         # edits, so there is nothing to protect behind a prompt.
+        # A file viewer's file, saved again by its app, shows the same way;
+        # a sheet reads it again, or asks first when it has changes.
         for i in range(self.tabs.count()):
-            viewer = self._pdf_viewer_from_widget(self.tabs.widget(i))
+            widget = self.tabs.widget(i)
+            viewer = self._reader_from_widget(widget) or self._sheet_from_widget(widget)
             if viewer is not None and viewer._file_path == path:
                 viewer.schedule_reload()
                 return
@@ -4760,8 +5585,9 @@ class MainWindow(QMainWindow):
         when it has no password). A locked one opens with ``lock`` (the
         password it had when read before) or asks for its password (unless
         ``ask`` is False); None when it is not given. Raises OSError, and
-        ValueError for text that is not UTF-8."""
-        with open(path, "rb") as f:
+        ValueError for text that is not UTF-8. Only a regular file is read:
+        a pipe or a device named like a note would never end."""
+        with regular_files.open_regular_file(path) as f:
             data = f.read()
         if locked_files.is_locked(data):
             opened = MainWindow._unlock(self, os.path.basename(path), data, lock, ask=ask)
@@ -4817,6 +5643,8 @@ class MainWindow(QMainWindow):
                 data = lock.seal(data)
             finally:
                 QApplication.restoreOverrideCursor()
+        # In the file's turn (atomic_file.one_writer): a link update of the
+        # folder library is either done before or sees this save.
         save_document(path, data)
 
     def _choose_password(self) -> None:
@@ -4867,7 +5695,7 @@ class MainWindow(QMainWindow):
         ed = self.current_editor()
         locked = getattr(ed, "_lock", None) is not None
         self.act_password.setText(_("Change Password…") if locked else _("Set Password…"))
-        self.act_password.setEnabled(ed is not None and self.current_pdf_viewer() is None)
+        self.act_password.setEnabled(ed is not None and self.current_reader() is None)
 
     def _reload_from_disk(self, ed, *, quiet: bool = False) -> bool:
         """``ed`` as its file is now on disk, the caret and the view where
@@ -4939,7 +5767,10 @@ class MainWindow(QMainWindow):
         absolute cache path.
         """
         doc_dir = os.path.dirname(os.path.abspath(save_path))
-        return (doc_dir, self._blob_cache_root())
+        # And the folders a note links pictures in where they lie, so an
+        # export carries them too (file_links.link_root).
+        linked = file_links.link_root(save_path, self._library_roots())
+        return (doc_dir, linked, self._blob_cache_root())
 
     def _markdown_reference_for(self, target):
         """Wrap a destination function so plain text gets ![alt](dest)."""
@@ -5831,8 +6662,10 @@ class MainWindow(QMainWindow):
                       "Your changes will be lost if you don’t save them."))
 
     def _save_tab_of(self, ed) -> bool:
-        """Save the document in ``ed``'s tab, the way Save does."""
+        """Save the document (or sheet) in ``ed``'s tab, the way Save does."""
         index = self._editor_widget_index(ed)
+        if index < 0:
+            index = self.tabs.indexOf(ed)
         if index < 0:
             return False
         self.tabs.setCurrentIndex(index)
@@ -5842,13 +6675,7 @@ class MainWindow(QMainWindow):
         """The record of the tabs could not be written, so the restart brings
         back only saved files: ask about every unsaved document. Returns
         True if it is safe to proceed, False if the user cancelled."""
-        has_unsaved = False
-        for i in range(self.tabs.count()):
-            ed = self._editor_from_widget(self.tabs.widget(i))
-            if ed and ed.document().isModified():
-                has_unsaved = True
-                break
-        if not has_unsaved:
+        if not self._unsaved_tabs():
             return True
         r = _ask_save_changes(
             self, _("Save your changes before updating?"),
@@ -5857,12 +6684,7 @@ class MainWindow(QMainWindow):
         if r == "cancel":
             return False
         if r == "save":
-            for i in range(self.tabs.count()):
-                ed = self._editor_from_widget(self.tabs.widget(i))
-                if ed and ed.document().isModified():
-                    self.tabs.setCurrentIndex(i)
-                    if not self.save():
-                        return False
+            return self._save_tabs(self._unsaved_tabs())
         return True
 
     def _check_for_updates_manual(self):
@@ -6094,7 +6916,8 @@ class MainWindow(QMainWindow):
                 # What changed meanwhile is asked again.
                 self._update_knit_actions()
                 self._update_format_buttons()
-        self.act_window_sidebar.setEnabled(in_front)
+        # The folder sidebar's, or the Imports window's: always there.
+        self.act_window_sidebar.setEnabled(True)
         # File > Close names what it closes (HIG; Mail's Close Window): the
         # Imports window has no tabs. A sheet blocks its window: it is not
         # closed under it.
@@ -6104,15 +6927,18 @@ class MainWindow(QMainWindow):
         self._name_full_screen()
         if in_front:
             shown = imports.act_sidebar.isChecked()
-            self.act_window_sidebar.setText(_("Hide Sidebar") if shown else _("Show Sidebar"))
         else:
-            self.act_window_sidebar.setText(_("Show Sidebar"))
+            panels = getattr(self, "_side_panels", None)
+            shown = panels is not None and panels.is_open(SIDEBAR_PANEL)
+        self.act_window_sidebar.setText(_("Hide Sidebar") if shown else _("Show Sidebar"))
 
     def _toggle_window_sidebar(self) -> None:
         imports = self._imports_in_front()
         if imports is not None:
             imports.act_sidebar.trigger()
             self._update_window_commands()
+            return
+        self._library_window.toggle_pane(SIDEBAR_PANEL)
 
     def _imports_in_front(self):
         """The Imports window while it is the window in front, or one of its
@@ -6144,6 +6970,10 @@ class MainWindow(QMainWindow):
         if field is not None:
             field.undo()
             return
+        sheet = self.current_sheet()
+        if sheet is not None:
+            sheet.undo_stack.undo()
+            return
         ed = self.current_editor()
         if ed and not self._shows_preview_only(ed):
             ed.undo()
@@ -6152,6 +6982,10 @@ class MainWindow(QMainWindow):
         field = _text_field(QApplication.focusWidget())
         if field is not None:
             field.redo()
+            return
+        sheet = self.current_sheet()
+        if sheet is not None and self._imports_in_front() is None:
+            sheet.undo_stack.redo()
             return
         ed = self.current_editor()
         if ed and self._imports_in_front() is None and not self._shows_preview_only(ed):
@@ -6380,6 +7214,10 @@ class MainWindow(QMainWindow):
         self._update_format_buttons()
 
     def _editor_table_command(self, name: str) -> None:
+        sheet = self.current_sheet()
+        if sheet is not None:
+            self._sheet_window.table_command(sheet, name)
+            return
         ed = self.current_editor()
         if ed is not None:
             ed.table_command(name)
@@ -6516,6 +7354,16 @@ class MainWindow(QMainWindow):
             if name == "copy":
                 viewer.view.copy_selection()
             return
+        file_viewer = self.current_file_viewer()
+        if file_viewer is not None:
+            if name == "copy":
+                self._copy_viewer_file(file_viewer)
+            return
+        sheet = self.current_sheet()
+        if sheet is not None:
+            {"cut": sheet.cut, "copy": sheet.copy, "paste": sheet.paste,
+             "delete": sheet.clear_selection, "select_all": sheet.grid.selectAll}[name]()
+            return
         ed = self.current_editor()
         if ed is None:
             return
@@ -6608,19 +7456,38 @@ class MainWindow(QMainWindow):
         if in_table:
             for action in self._block_actions:
                 action.setEnabled(False)
+        sheet = self.current_sheet()
         for action in self.act_table_commands:
-            action.setEnabled(in_table)
-        self.act_select_all.setEnabled(bool(kind))
+            action.setEnabled(in_table or sheet is not None
+                              and not action.objectName().endswith("delete_table"))
+        self.act_select_all.setEnabled(bool(kind) or sheet is not None)
+        # A sheet takes the Edit menu's commands (Undo and Redo by its steps,
+        # Cut, Copy, Paste and Delete by its cells) and Format > Sheet.
+        if sheet is not None:
+            self.act_delete.setEnabled(not sheet.read_only)
+        # A text table (CSV, TSV) is one sheet: no sheets to add or name.
+        workbook = (sheet is not None and not sheet.read_only and sheet.book is not None
+                    and not sheet.book.is_text_table)
+        for action in getattr(self, "act_sheet_commands", ()):
+            action.setEnabled(workbook)
         # Code files only: a document's code blocks are always colored.
         self.act_toggle_syntax_hl.setEnabled(kind != "rich")
-        for action in (self.act_find, self.act_replace, self.act_find_next, self.act_find_prev):
-            action.setEnabled(not reading)
+        # Find acts on a document's text, and on a PDF (its own find bar);
+        # Replace on a document's only. A picture, a file shown as a card
+        # and a sheet have nothing Find reaches.
+        pdf = self.current_pdf_viewer() is not None
+        for action in (self.act_find, self.act_find_next, self.act_find_prev):
+            action.setEnabled(bool(kind) and not reading or pdf)
+        self.act_replace.setEnabled(bool(kind) and not reading)
+        # Save As makes a copy of what is edited here: a document or a sheet.
+        self.act_save_as.setEnabled(bool(kind) or sheet is not None)
+        self.act_open_as_text.setEnabled(bool(self._opens_as_text_too(self._tab_in_front())))
         self.act_underline.setEnabled(bool(self._keeps_underline(self.current_editor()))
                                       and not reading and not in_code)
         self._update_clipboard_commands()
         self._update_size_commands()
         self._update_password_command()
-        if kind:
+        if kind or sheet is not None:
             self._update_undo_redo_buttons()
 
     def _keeps_pictures(self, ed) -> bool:
@@ -6773,13 +7640,15 @@ class MainWindow(QMainWindow):
         if getattr(self, 'view_switch', None) is not None:
             self.view_switch.set_dark(self.is_dark_theme)
         self._paint_pane_toggles()
+        self._paint_paper_toggle()
         if hasattr(self, 'update_button'):
             self.update_button.update_theme(self.is_dark_theme)
         for i in range(self.tabs.count()):
-            notice = self._notice_from_widget(self.tabs.widget(i))
+            widget = self.tabs.widget(i)
+            notice = self._notice_from_widget(widget)
             if notice is not None:
                 notice.apply_theme(self.is_dark_theme)
-            viewer = self._pdf_viewer_from_widget(self.tabs.widget(i))
+            viewer = self._reader_from_widget(widget) or self._sheet_from_widget(widget)
             if viewer is not None:
                 viewer.update_theme(self.is_dark_theme)
         # The drafts panel and any mounted conflict banners each carry
@@ -6792,6 +7661,8 @@ class MainWindow(QMainWindow):
         if getattr(self, "_article_details_panel", None) is not None:
             self._article_details_panel.set_dark(self.is_dark_theme)
             self._article_headers.set_dark(self.is_dark_theme, self._all_editors())
+        if getattr(self, "_library_window", None) is not None:
+            self._library_window.update_theme(self.is_dark_theme)
         self._redraw_media_cards()
         for banner in getattr(self, "_tab_conflict_banners", {}).values():
             banner.apply_theme(self.is_dark_theme)
@@ -6913,6 +7784,52 @@ class MainWindow(QMainWindow):
     def _split_fits(ed) -> bool:
         return ed._view_splitter.width() >= SPLIT_MIN_WIDTH
 
+    # The panes Split folds away when the text has no room for two
+    # columns, in this order (as panel_layout folds them: the file list
+    # first); they come back when Split is left.
+    _SPLIT_FOLDS = (FILE_LIST_PANEL, SIDEBAR_PANEL)
+
+    def _room_by_folding(self) -> list:
+        """(pane, width it gives the text) for each library pane open now,
+        in the order Split folds them."""
+        panels = getattr(self, "_side_panels", None)
+        if panels is None:
+            return []
+        handle = self._central_splitter.handleWidth()
+        return [(name, panels.width_of(name) + handle) for name in self._SPLIT_FOLDS
+                if panels.is_open(name)]
+
+    def _split_can_fit(self, ed) -> bool:
+        """Whether Split fits, now or once the library panes fold away."""
+        if self._split_fits(ed):
+            return True
+        room = ed._view_splitter.width() + sum(w for _n, w in self._room_by_folding())
+        return room >= SPLIT_MIN_WIDTH
+
+    def _fold_for_split(self, ed) -> None:
+        """Fold the file list, then the sidebar, as far as Split needs."""
+        width = ed._view_splitter.width()
+        folded = self.__dict__.setdefault("_folded_for_split", [])
+        for name, gives in self._room_by_folding():
+            if width >= SPLIT_MIN_WIDTH:
+                break
+            self._side_panels.fold(name)
+            folded.append(name)
+            width += gives
+        if folded:
+            # The text takes the room now, not at the next turn of the loop.
+            self._central_splitter.refresh()
+            QApplication.sendPostedEvents(None, QEvent.Type.LayoutRequest)
+            self._library_window.sync_commands()
+
+    def _unfold_after_split(self) -> None:
+        folded = self.__dict__.get("_folded_for_split") or []
+        self._folded_for_split = []
+        for name in folded:
+            self._side_panels.unfold(name)
+        if folded:
+            self._library_window.sync_commands()
+
     def _shows_preview_only(self, ed) -> bool:
         return ed is not None and self._shown_view(ed) == PREVIEW
 
@@ -6921,6 +7838,11 @@ class MainWindow(QMainWindow):
         while Split is the choice, Write and Preview flip the side shown,
         and Split comes back when there is room."""
         ed = self.current_editor()
+        if (mode == SPLIT and ed is not None and getattr(ed, "_view_splitter", None) is not None
+                and not self._split_fits(ed)):
+            self._fold_for_split(ed)
+        if mode != SPLIT:
+            self._unfold_after_split()
         if (mode != SPLIT and self.view_mode == SPLIT and ed is not None
                 and getattr(ed, "_view_splitter", None) is not None
                 and not self._split_fits(ed)):
@@ -6974,7 +7896,7 @@ class MainWindow(QMainWindow):
         if not rich:
             return
         fits = self._split_fits(ed)
-        self.act_view_split.setEnabled(fits)
+        self.act_view_split.setEnabled(self._split_can_fit(ed))
         self.act_view_split.setToolTip("" if fits else
                                        _("Make the window wider to show both"))
         {WRITE: self.act_view_write, PREVIEW: self.act_view_preview,
@@ -7151,7 +8073,7 @@ class MainWindow(QMainWindow):
                 continue
             doc = ed.document()
             if url in set(iter_image_names(doc)):
-                doc.addResource(QTextDocument.ImageResource, QUrl(url), image)
+                ed.add_picture_resource(url, image)
                 doc.markContentsDirty(0, doc.characterCount())
             pane = getattr(ed, "_preview_pane", None)
             if pane is not None and pane.isVisible():
@@ -7297,7 +8219,7 @@ class MainWindow(QMainWindow):
             pass
         listed = data.get("paths")
         listed = listed if isinstance(listed, list) else []
-        paths = [p for p in listed if isinstance(p, str) and os.path.isfile(p)]
+        paths = [p for p in listed if isinstance(p, str) and _is_file_on_disk(p)]
         if not paths:
             return False
         missing = len(listed) - len(paths)
@@ -7396,7 +8318,7 @@ class MainWindow(QMainWindow):
                     ed._backup.release()
                 else:
                     ed._backup.delete()
-            viewer = self._pdf_viewer_from_widget(self.tabs.widget(i))
+            viewer = self._reader_from_widget(self.tabs.widget(i))
             if viewer is not None:
                 viewer.save_view_state()
         # Publish any pending changes to the list of sources before the
@@ -7427,7 +8349,25 @@ class MainWindow(QMainWindow):
             self._session_pool.close_all()
         if hasattr(self, "_relay_pool"):
             self._relay_pool.close_all()
+        library = getattr(self, "_library_window", None)
+        # No note left half way through its links, said while it lasts.
+        if library is not None:
+            library.finish_link_updates()
+        self._remember_window_geometry()
+        if library is not None:
+            library.close()
+        self._release_file_tabs()
         event.accept()
+
+    def _release_file_tabs(self) -> None:
+        """Every viewer, PDF and sheet tab lets go of what it holds as the
+        window goes (a reading view's temporary folder, its pandoc job
+        still waiting, a player, a workbook)."""
+        for i in range(self.tabs.count()):
+            widget = self.tabs.widget(i)
+            holder = self._reader_from_widget(widget) or self._sheet_from_widget(widget)
+            if holder is not None:
+                holder.release()
 
     # ----------------------------------------------------------------------
     # NOSTR - profile chip menu + connect flow
@@ -8187,14 +9127,20 @@ class MainWindow(QMainWindow):
         self._article_headers.update(self.current_editor())
         if shown and self.nostr_state.active:
             self._fill_article_details_panel()
-            panel.show()
-            self._give_panel_room(panel, ARTICLE_DETAILS_WIDTH)
+            self._side_panels.open(ARTICLE_DETAILS_PANEL)
         else:
             if panel.isAncestorOf(QApplication.focusWidget()):
                 ed = self.current_editor()
                 if ed is not None:
                     ed.setFocus()
-            panel.hide()
+            self._side_panels.close(ARTICLE_DETAILS_PANEL)
+
+    def _article_details_folded(self, folded: bool) -> None:
+        """Article Details folded away to make room, or back: its command
+        and toolbar button say so, without opening or closing it again."""
+        blocked = self.act_article_details.blockSignals(True)
+        self.act_article_details.setChecked(not folded)
+        self.act_article_details.blockSignals(blocked)
 
     def _fill_article_details_panel(self) -> None:
         """Article Details shows the article in the tab in front: its details
@@ -8619,7 +9565,7 @@ class MainWindow(QMainWindow):
         if not adopt:
             return self._asset_manager.get(beside[name]) if name in beside else None
         beside.pop(name, None)
-        data = self._local_image_bytes(ed, name)
+        data = self._local_image_bytes(ed, name, MainWindow._picture_roots(self))
         alt = os.path.splitext(os.path.basename(name))[0] or "image"
         asset = self._asset_manager.adopt_bytes(data, alt=alt) if data else None
         if asset is not None:
@@ -8634,7 +9580,8 @@ class MainWindow(QMainWindow):
         asset = self._asset_named(ed, name)
         if asset is None and (parse_asset_key(name) is not None
                               or image_safety.is_portable_image_source(name)
-                              or not self._has_local_image(ed, name)):
+                              or not self._has_local_image(
+                                  ed, name, MainWindow._picture_roots(self))):
             # On the web (someone else's), or nowhere: nothing to upload.
             return None
         if asset is not None and asset.is_uploaded:
@@ -9348,9 +10295,7 @@ class MainWindow(QMainWindow):
         if data:
             # Priming the document means the first paint needs no
             # resolver round trip and no decode on the paint path.
-            editor.document().addResource(
-                QTextDocument.ImageResource, QUrl(asset.key), QByteArray(data)
-            )
+            editor.add_picture_resource(asset.key, QByteArray(data))
 
         fmt = QTextImageFormat()
         fmt.setName(asset.key)
@@ -9386,7 +10331,7 @@ class MainWindow(QMainWindow):
             doc = ed.document()
             if key not in set(iter_image_names(doc)):
                 continue
-            doc.addResource(QTextDocument.ImageResource, QUrl(key), payload)
+            ed.add_picture_resource(key, payload)
             doc.markContentsDirty(0, doc.characterCount())
             # Its preview drew a frame where the picture was not here yet.
             pane = getattr(ed, "_preview_pane", None)
@@ -9477,11 +10422,8 @@ class MainWindow(QMainWindow):
     def _show_drafts_panel(self) -> None:
         if self._drafts_panel is None:
             return
-        self._drafts_panel.show()
-        # If the panel currently has zero width (its first appearance),
-        # split the central area so the panel gets its default width
-        # while the editor keeps the remainder.
-        self._give_panel_room(self._drafts_panel, DEFAULT_PANEL_WIDTH)
+        # Beside the text, the window grown for it (side_panels.py).
+        self._side_panels.open(DRAFTS_PANEL)
         self.act_nostr_drafts.setChecked(True)
         self._drafts_toggle.setChecked(True)
         self._draft_sync.refresh()
@@ -9489,28 +10431,73 @@ class MainWindow(QMainWindow):
         self._follow_account_in_published()
         self._update_refresh_command()
 
-    def _give_panel_room(self, panel, width: int) -> None:
-        """A side panel shown for the first time gets ``width`` from the
-        document's side; later, the width the person dragged it to."""
-        splitter = self._central_splitter
-        index = splitter.indexOf(panel)
-        sizes = splitter.sizes()
-        if index < 0 or sizes[index] > 0:
+    def _drafts_folded(self, folded: bool) -> None:
+        """The Drafts panel folded away to make room, or back."""
+        self.act_nostr_drafts.setChecked(not folded)
+        self._drafts_toggle.setChecked(not folded)
+        self._update_refresh_command()
+
+    # -- room for side panels (side_panels.py, panel_layout.py) ---------------
+
+    def _screen_room(self) -> panel_layout.Rect:
+        """The room the window's screen gives the window's inside: the
+        screen's room for windows, less the window's own frame."""
+        screen = self.screen() or QGuiApplication.primaryScreen()
+        room = screen.availableGeometry()
+        return inner_room(
+            self, panel_layout.Rect(room.x(), room.y(), room.width(), room.height()))
+
+    def _min_text_width(self) -> int:
+        """The narrowest the text gives way to for side panels: a line of
+        72 characters of the font in front, with its border at full
+        width, or Paper Mode's page with some ground beside it."""
+        ed = self.current_editor()
+        metrics = QFontMetrics(ed.font() if ed is not None else fonts.writing_font())
+        if self.paper_mode:
+            inset = int(ed.document().documentMargin()) if ed is not None else 4
+        else:
+            inset = PROSE_INSET
+        return panel_layout.min_text_width(self.paper_mode, metrics.averageCharWidth(), inset)
+
+    def _restore_window_geometry(self) -> None:
+        self._had_window_geometry = False
+        stored = load_settings().get(WINDOW_GEOMETRY_KEY)
+        if not isinstance(stored, str) or not stored:
             return
-        room = min(width, max(sizes[0] - 360, 240))
-        sizes[0] -= room
-        sizes[index] = room
-        splitter.setSizes(sizes)
+        self._had_window_geometry = True
+        try:
+            data = QByteArray.fromBase64(stored.encode("ascii"))
+        except UnicodeEncodeError:
+            return
+        if not self.restoreGeometry(data):
+            self.resize(1100, 720)
+
+    def _remember_window_geometry(self) -> None:
+        """Write down where the window is and how large, as it would be
+        without the side panels it grew for that the next launch does not
+        open again (Article Details, Drafts); the sidebar and the file
+        list come back as they were, and with them the room they took."""
+        self._side_panels.flush()
+        passing = (ARTICLE_DETAILS_PANEL, DRAFTS_PANEL)
+        rect = self._side_panels.geometry_without_panels(passing)
+        if rect != self.geometry():
+            # The window is closing: it gives back the room unseen, its
+            # panels hidden first (with them it could not be that narrow).
+            self.hide()
+            self._side_panels.hide_all(passing)
+            self.setGeometry(rect)
+        save_setting(WINDOW_GEOMETRY_KEY,
+                     bytes(self.saveGeometry().toBase64()).decode("ascii"))
 
     def _hide_drafts_panel(self) -> None:
         if self._drafts_panel is None:
             return
         if self._drafts_panel.isAncestorOf(QApplication.focusWidget()):
             # Its keys go back to the document, as Article Details' do.
-            target = self._pane_focus_target(self._central_splitter.widget(0))
+            target = self._pane_focus_target(self._editor_side)
             if target is not None:
                 target.setFocus()
-        self._drafts_panel.hide()
+        self._side_panels.close(DRAFTS_PANEL)
         self.act_nostr_drafts.setChecked(False)
         self._drafts_toggle.setChecked(False)
         self._update_refresh_command()
