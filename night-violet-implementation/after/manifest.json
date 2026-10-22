@@ -1,0 +1,936 @@
+{
+  "revision": "a22a18f1709c46dade63abf8481e11422c5d6415",
+  "dirty": false,
+  "capture_script_sha256": "ac8bc14acb975f8a8de6cb88ad9e9059d608a81244181685ab1832a68d2690c6",
+  "os": "macOS-15.6-arm64-arm-64bit",
+  "qt": "6.11.2",
+  "language": "en",
+  "captures": [
+    {
+      "file": "imports-light.png",
+      "logical_size": [
+        1180,
+        760
+      ],
+      "scale": 1.0,
+      "platform": "cocoa",
+      "native_capture": true,
+      "native_error": ""
+    },
+    {
+      "file": "publishing-light.png",
+      "logical_size": [
+        760,
+        408
+      ],
+      "scale": 1.0,
+      "platform": "cocoa",
+      "native_capture": true,
+      "native_error": ""
+    },
+    {
+      "file": "editor-drafts-light.png",
+      "logical_size": [
+        1180,
+        760
+      ],
+      "scale": 1.0,
+      "platform": "cocoa",
+      "native_capture": true,
+      "native_error": ""
+    },
+    {
+      "file": "membership-light.png",
+      "logical_size": [
+        560,
+        586
+      ],
+      "scale": 1.0,
+      "platform": "cocoa",
+      "native_capture": true,
+      "native_error": ""
+    },
+    {
+      "file": "media-light.png",
+      "logical_size": [
+        860,
+        560
+      ],
+      "scale": 1.0,
+      "platform": "cocoa",
+      "native_capture": true,
+      "native_error": ""
+    },
+    {
+      "file": "publish-note-light.png",
+      "logical_size": [
+        600,
+        440
+      ],
+      "scale": 1.0,
+      "platform": "cocoa",
+      "native_capture": true,
+      "native_error": ""
+    },
+    {
+      "file": "save-destination-light.png",
+      "logical_size": [
+        440,
+        379
+      ],
+      "scale": 1.0,
+      "platform": "cocoa",
+      "native_capture": true,
+      "native_error": ""
+    },
+    {
+      "file": "save-draft-light.png",
+      "logical_size": [
+        757,
+        243
+      ],
+      "scale": 1.0,
+      "platform": "cocoa",
+      "native_capture": true,
+      "native_error": ""
+    },
+    {
+      "file": "profile-light.png",
+      "logical_size": [
+        520,
+        697
+      ],
+      "scale": 1.0,
+      "platform": "cocoa",
+      "native_capture": true,
+      "native_error": ""
+    },
+    {
+      "file": "connect-light.png",
+      "logical_size": [
+        508,
+        702
+      ],
+      "scale": 1.0,
+      "platform": "cocoa",
+      "native_capture": true,
+      "native_error": ""
+    },
+    {
+      "file": "create-account-light.png",
+      "logical_size": [
+        520,
+        229
+      ],
+      "scale": 1.0,
+      "platform": "cocoa",
+      "native_capture": true,
+      "native_error": ""
+    },
+    {
+      "file": "restore-account-light.png",
+      "logical_size": [
+        520,
+        195
+      ],
+      "scale": 1.0,
+      "platform": "cocoa",
+      "native_capture": true,
+      "native_error": ""
+    },
+    {
+      "file": "backup-account-light.png",
+      "logical_size": [
+        520,
+        438
+      ],
+      "scale": 1.0,
+      "platform": "cocoa",
+      "native_capture": true,
+      "native_error": ""
+    },
+    {
+      "file": "cover-crop-light.png",
+      "logical_size": [
+        640,
+        680
+      ],
+      "scale": 1.0,
+      "platform": "cocoa",
+      "native_capture": true,
+      "native_error": ""
+    },
+    {
+      "file": "media-servers-light.png",
+      "logical_size": [
+        440,
+        459
+      ],
+      "scale": 1.0,
+      "platform": "cocoa",
+      "native_capture": true,
+      "native_error": ""
+    },
+    {
+      "file": "reader-light.png",
+      "logical_size": [
+        480,
+        640
+      ],
+      "scale": 1.0,
+      "platform": "cocoa",
+      "native_capture": true,
+      "native_error": ""
+    },
+    {
+      "file": "follow-source-light.png",
+      "logical_size": [
+        500,
+        237
+      ],
+      "scale": 2.0,
+      "platform": "cocoa",
+      "native_capture": true,
+      "native_error": ""
+    },
+    {
+      "file": "import-file-light.png",
+      "logical_size": [
+        500,
+        338
+      ],
+      "scale": 2.0,
+      "platform": "cocoa",
+      "native_capture": true,
+      "native_error": ""
+    },
+    {
+      "file": "import-link-light.png",
+      "logical_size": [
+        500,
+        207
+      ],
+      "scale": 2.0,
+      "platform": "cocoa",
+      "native_capture": true,
+      "native_error": ""
+    },
+    {
+      "file": "import-options-light.png",
+      "logical_size": [
+        349,
+        250
+      ],
+      "scale": 2.0,
+      "platform": "cocoa",
+      "native_capture": false,
+      "native_error": "could not create image from window\n"
+    },
+    {
+      "file": "membership-payment-light.png",
+      "logical_size": [
+        520,
+        472
+      ],
+      "scale": 2.0,
+      "platform": "cocoa",
+      "native_capture": true,
+      "native_error": ""
+    },
+    {
+      "file": "quick-look-light.png",
+      "logical_size": [
+        560,
+        480
+      ],
+      "scale": 2.0,
+      "platform": "cocoa",
+      "native_capture": true,
+      "native_error": ""
+    },
+    {
+      "file": "share-media-light.png",
+      "logical_size": [
+        380,
+        159
+      ],
+      "scale": 2.0,
+      "platform": "cocoa",
+      "native_capture": true,
+      "native_error": ""
+    },
+    {
+      "file": "review-images-light.png",
+      "logical_size": [
+        600,
+        460
+      ],
+      "scale": 2.0,
+      "platform": "cocoa",
+      "native_capture": true,
+      "native_error": ""
+    },
+    {
+      "file": "source-settings-light.png",
+      "logical_size": [
+        500,
+        411
+      ],
+      "scale": 2.0,
+      "platform": "cocoa",
+      "native_capture": true,
+      "native_error": ""
+    },
+    {
+      "file": "import-progress-light.png",
+      "logical_size": [
+        320,
+        174
+      ],
+      "scale": 2.0,
+      "platform": "cocoa",
+      "native_capture": true,
+      "native_error": ""
+    },
+    {
+      "file": "draft-relays-light.png",
+      "logical_size": [
+        480,
+        431
+      ],
+      "scale": 2.0,
+      "platform": "cocoa",
+      "native_capture": true,
+      "native_error": ""
+    },
+    {
+      "file": "article-details-light.png",
+      "logical_size": [
+        340,
+        760
+      ],
+      "scale": 2.0,
+      "platform": "cocoa",
+      "native_capture": true,
+      "native_error": ""
+    },
+    {
+      "file": "reference-light.png",
+      "logical_size": [
+        420,
+        156
+      ],
+      "scale": 2.0,
+      "platform": "cocoa",
+      "native_capture": true,
+      "native_error": ""
+    },
+    {
+      "file": "mentions-light.png",
+      "logical_size": [
+        360,
+        242
+      ],
+      "scale": 2.0,
+      "platform": "cocoa",
+      "native_capture": true,
+      "native_error": ""
+    },
+    {
+      "file": "draft-conflict-light.png",
+      "logical_size": [
+        720,
+        45
+      ],
+      "scale": 2.0,
+      "platform": "cocoa",
+      "native_capture": true,
+      "native_error": ""
+    },
+    {
+      "file": "nostr-alert-light.png",
+      "logical_size": [
+        300,
+        169
+      ],
+      "scale": 2.0,
+      "platform": "cocoa",
+      "native_capture": true,
+      "native_error": ""
+    },
+    {
+      "file": "move-key-light.png",
+      "logical_size": [
+        520,
+        239
+      ],
+      "scale": 2.0,
+      "platform": "cocoa",
+      "native_capture": true,
+      "native_error": ""
+    },
+    {
+      "file": "settings-light.png",
+      "logical_size": [
+        558,
+        520
+      ],
+      "scale": 2.0,
+      "platform": "cocoa",
+      "native_capture": true,
+      "native_error": ""
+    },
+    {
+      "file": "published-light.png",
+      "logical_size": [
+        320,
+        480
+      ],
+      "scale": 2.0,
+      "platform": "cocoa",
+      "native_capture": true,
+      "native_error": ""
+    },
+    {
+      "file": "draft-preview-light.png",
+      "logical_size": [
+        422,
+        213
+      ],
+      "scale": 2.0,
+      "platform": "cocoa",
+      "native_capture": true,
+      "native_error": ""
+    },
+    {
+      "file": "draft-preview-full-light.png",
+      "logical_size": [
+        522,
+        702
+      ],
+      "scale": 2.0,
+      "platform": "cocoa",
+      "native_capture": true,
+      "native_error": ""
+    },
+    {
+      "file": "media-viewer-nostr-light.png",
+      "logical_size": [
+        480,
+        330
+      ],
+      "scale": 2.0,
+      "platform": "cocoa",
+      "native_capture": true,
+      "native_error": ""
+    },
+    {
+      "file": "media-viewer-local-light.png",
+      "logical_size": [
+        480,
+        330
+      ],
+      "scale": 2.0,
+      "platform": "cocoa",
+      "native_capture": true,
+      "native_error": ""
+    },
+    {
+      "file": "imports-dark.png",
+      "logical_size": [
+        1180,
+        760
+      ],
+      "scale": 2.0,
+      "platform": "cocoa",
+      "native_capture": true,
+      "native_error": ""
+    },
+    {
+      "file": "publishing-dark.png",
+      "logical_size": [
+        760,
+        408
+      ],
+      "scale": 2.0,
+      "platform": "cocoa",
+      "native_capture": true,
+      "native_error": ""
+    },
+    {
+      "file": "editor-drafts-dark.png",
+      "logical_size": [
+        1180,
+        760
+      ],
+      "scale": 2.0,
+      "platform": "cocoa",
+      "native_capture": true,
+      "native_error": ""
+    },
+    {
+      "file": "membership-dark.png",
+      "logical_size": [
+        560,
+        586
+      ],
+      "scale": 2.0,
+      "platform": "cocoa",
+      "native_capture": true,
+      "native_error": ""
+    },
+    {
+      "file": "media-dark.png",
+      "logical_size": [
+        860,
+        560
+      ],
+      "scale": 2.0,
+      "platform": "cocoa",
+      "native_capture": true,
+      "native_error": ""
+    },
+    {
+      "file": "publish-note-dark.png",
+      "logical_size": [
+        600,
+        440
+      ],
+      "scale": 2.0,
+      "platform": "cocoa",
+      "native_capture": true,
+      "native_error": ""
+    },
+    {
+      "file": "save-destination-dark.png",
+      "logical_size": [
+        440,
+        379
+      ],
+      "scale": 2.0,
+      "platform": "cocoa",
+      "native_capture": true,
+      "native_error": ""
+    },
+    {
+      "file": "save-draft-dark.png",
+      "logical_size": [
+        757,
+        243
+      ],
+      "scale": 2.0,
+      "platform": "cocoa",
+      "native_capture": true,
+      "native_error": ""
+    },
+    {
+      "file": "profile-dark.png",
+      "logical_size": [
+        520,
+        697
+      ],
+      "scale": 2.0,
+      "platform": "cocoa",
+      "native_capture": true,
+      "native_error": ""
+    },
+    {
+      "file": "connect-dark.png",
+      "logical_size": [
+        508,
+        676
+      ],
+      "scale": 2.0,
+      "platform": "cocoa",
+      "native_capture": true,
+      "native_error": ""
+    },
+    {
+      "file": "create-account-dark.png",
+      "logical_size": [
+        520,
+        229
+      ],
+      "scale": 2.0,
+      "platform": "cocoa",
+      "native_capture": true,
+      "native_error": ""
+    },
+    {
+      "file": "restore-account-dark.png",
+      "logical_size": [
+        520,
+        195
+      ],
+      "scale": 2.0,
+      "platform": "cocoa",
+      "native_capture": true,
+      "native_error": ""
+    },
+    {
+      "file": "backup-account-dark.png",
+      "logical_size": [
+        520,
+        438
+      ],
+      "scale": 2.0,
+      "platform": "cocoa",
+      "native_capture": true,
+      "native_error": ""
+    },
+    {
+      "file": "cover-crop-dark.png",
+      "logical_size": [
+        640,
+        680
+      ],
+      "scale": 2.0,
+      "platform": "cocoa",
+      "native_capture": true,
+      "native_error": ""
+    },
+    {
+      "file": "media-servers-dark.png",
+      "logical_size": [
+        440,
+        459
+      ],
+      "scale": 2.0,
+      "platform": "cocoa",
+      "native_capture": true,
+      "native_error": ""
+    },
+    {
+      "file": "reader-dark.png",
+      "logical_size": [
+        480,
+        640
+      ],
+      "scale": 2.0,
+      "platform": "cocoa",
+      "native_capture": true,
+      "native_error": ""
+    },
+    {
+      "file": "follow-source-dark.png",
+      "logical_size": [
+        500,
+        237
+      ],
+      "scale": 2.0,
+      "platform": "cocoa",
+      "native_capture": true,
+      "native_error": ""
+    },
+    {
+      "file": "import-file-dark.png",
+      "logical_size": [
+        500,
+        338
+      ],
+      "scale": 2.0,
+      "platform": "cocoa",
+      "native_capture": true,
+      "native_error": ""
+    },
+    {
+      "file": "import-link-dark.png",
+      "logical_size": [
+        500,
+        207
+      ],
+      "scale": 2.0,
+      "platform": "cocoa",
+      "native_capture": true,
+      "native_error": ""
+    },
+    {
+      "file": "import-options-dark.png",
+      "logical_size": [
+        349,
+        250
+      ],
+      "scale": 2.0,
+      "platform": "cocoa",
+      "native_capture": true,
+      "native_error": ""
+    },
+    {
+      "file": "membership-payment-dark.png",
+      "logical_size": [
+        520,
+        472
+      ],
+      "scale": 2.0,
+      "platform": "cocoa",
+      "native_capture": true,
+      "native_error": ""
+    },
+    {
+      "file": "quick-look-dark.png",
+      "logical_size": [
+        560,
+        480
+      ],
+      "scale": 2.0,
+      "platform": "cocoa",
+      "native_capture": true,
+      "native_error": ""
+    },
+    {
+      "file": "share-media-dark.png",
+      "logical_size": [
+        380,
+        159
+      ],
+      "scale": 2.0,
+      "platform": "cocoa",
+      "native_capture": true,
+      "native_error": ""
+    },
+    {
+      "file": "review-images-dark.png",
+      "logical_size": [
+        600,
+        460
+      ],
+      "scale": 2.0,
+      "platform": "cocoa",
+      "native_capture": true,
+      "native_error": ""
+    },
+    {
+      "file": "source-settings-dark.png",
+      "logical_size": [
+        500,
+        411
+      ],
+      "scale": 2.0,
+      "platform": "cocoa",
+      "native_capture": true,
+      "native_error": ""
+    },
+    {
+      "file": "import-progress-dark.png",
+      "logical_size": [
+        320,
+        174
+      ],
+      "scale": 2.0,
+      "platform": "cocoa",
+      "native_capture": true,
+      "native_error": ""
+    },
+    {
+      "file": "draft-relays-dark.png",
+      "logical_size": [
+        480,
+        431
+      ],
+      "scale": 2.0,
+      "platform": "cocoa",
+      "native_capture": true,
+      "native_error": ""
+    },
+    {
+      "file": "article-details-dark.png",
+      "logical_size": [
+        340,
+        760
+      ],
+      "scale": 2.0,
+      "platform": "cocoa",
+      "native_capture": true,
+      "native_error": ""
+    },
+    {
+      "file": "reference-dark.png",
+      "logical_size": [
+        420,
+        156
+      ],
+      "scale": 2.0,
+      "platform": "cocoa",
+      "native_capture": true,
+      "native_error": ""
+    },
+    {
+      "file": "mentions-dark.png",
+      "logical_size": [
+        360,
+        242
+      ],
+      "scale": 2.0,
+      "platform": "cocoa",
+      "native_capture": true,
+      "native_error": ""
+    },
+    {
+      "file": "draft-conflict-dark.png",
+      "logical_size": [
+        720,
+        45
+      ],
+      "scale": 2.0,
+      "platform": "cocoa",
+      "native_capture": true,
+      "native_error": ""
+    },
+    {
+      "file": "nostr-alert-dark.png",
+      "logical_size": [
+        300,
+        169
+      ],
+      "scale": 2.0,
+      "platform": "cocoa",
+      "native_capture": true,
+      "native_error": ""
+    },
+    {
+      "file": "move-key-dark.png",
+      "logical_size": [
+        520,
+        239
+      ],
+      "scale": 2.0,
+      "platform": "cocoa",
+      "native_capture": true,
+      "native_error": ""
+    },
+    {
+      "file": "settings-dark.png",
+      "logical_size": [
+        558,
+        520
+      ],
+      "scale": 2.0,
+      "platform": "cocoa",
+      "native_capture": true,
+      "native_error": ""
+    },
+    {
+      "file": "published-dark.png",
+      "logical_size": [
+        320,
+        480
+      ],
+      "scale": 2.0,
+      "platform": "cocoa",
+      "native_capture": true,
+      "native_error": ""
+    },
+    {
+      "file": "draft-preview-dark.png",
+      "logical_size": [
+        422,
+        213
+      ],
+      "scale": 2.0,
+      "platform": "cocoa",
+      "native_capture": true,
+      "native_error": ""
+    },
+    {
+      "file": "draft-preview-full-dark.png",
+      "logical_size": [
+        522,
+        702
+      ],
+      "scale": 2.0,
+      "platform": "cocoa",
+      "native_capture": true,
+      "native_error": ""
+    },
+    {
+      "file": "media-viewer-nostr-dark.png",
+      "logical_size": [
+        480,
+        330
+      ],
+      "scale": 2.0,
+      "platform": "cocoa",
+      "native_capture": true,
+      "native_error": ""
+    },
+    {
+      "file": "media-viewer-local-dark.png",
+      "logical_size": [
+        480,
+        330
+      ],
+      "scale": 2.0,
+      "platform": "cocoa",
+      "native_capture": true,
+      "native_error": ""
+    },
+    {
+      "file": "live-publishing-light.png",
+      "logical_size": [
+        760,
+        408
+      ],
+      "scale": 2.0,
+      "platform": "cocoa",
+      "native_capture": true,
+      "native_error": ""
+    },
+    {
+      "file": "live-reader-light.png",
+      "logical_size": [
+        480,
+        640
+      ],
+      "scale": 2.0,
+      "platform": "cocoa",
+      "native_capture": true,
+      "native_error": ""
+    },
+    {
+      "file": "live-publishing-dark.png",
+      "logical_size": [
+        760,
+        408
+      ],
+      "scale": 2.0,
+      "platform": "cocoa",
+      "native_capture": true,
+      "native_error": ""
+    },
+    {
+      "file": "live-reader-dark.png",
+      "logical_size": [
+        480,
+        640
+      ],
+      "scale": 2.0,
+      "platform": "cocoa",
+      "native_capture": true,
+      "native_error": ""
+    }
+  ],
+  "state_checks": [
+    {
+      "check": "open windows preserve content and selection",
+      "mode": "light",
+      "resolved_dark": false,
+      "passed": true
+    },
+    {
+      "check": "open windows preserve content and selection",
+      "mode": "dark",
+      "resolved_dark": true,
+      "passed": true
+    },
+    {
+      "check": "open windows preserve content and selection",
+      "mode": "system",
+      "resolved_dark": true,
+      "passed": true
+    },
+    {
+      "check": "native fullscreen, restore and resize",
+      "passed": true
+    }
+  ]
+}

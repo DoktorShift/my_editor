@@ -1,0 +1,144 @@
+{
+  "revision": "d6aaa7a66ad1a1aa9df767fdee092d5ff4bf33fa",
+  "dirty": false,
+  "capture_script_sha256": "e66045c8dc3ccd469b24c4b6170db9b2c107726ee7f973aaa3e1146dcae85328",
+  "os": "macOS-15.6-arm64-arm-64bit",
+  "qt": "6.11.2",
+  "language": "en",
+  "captures": [
+    {
+      "file": "media-servers-light.png",
+      "logical_size": [
+        440,
+        459
+      ],
+      "scale": 1.0,
+      "platform": "cocoa",
+      "native_capture": true,
+      "native_error": ""
+    },
+    {
+      "file": "reader-light.png",
+      "logical_size": [
+        480,
+        640
+      ],
+      "scale": 1.0,
+      "platform": "cocoa",
+      "native_capture": true,
+      "native_error": ""
+    },
+    {
+      "file": "membership-payment-light.png",
+      "logical_size": [
+        520,
+        472
+      ],
+      "scale": 1.0,
+      "platform": "cocoa",
+      "native_capture": true,
+      "native_error": ""
+    },
+    {
+      "file": "review-images-light.png",
+      "logical_size": [
+        600,
+        460
+      ],
+      "scale": 1.0,
+      "platform": "cocoa",
+      "native_capture": true,
+      "native_error": ""
+    },
+    {
+      "file": "draft-relays-light.png",
+      "logical_size": [
+        480,
+        431
+      ],
+      "scale": 1.0,
+      "platform": "cocoa",
+      "native_capture": true,
+      "native_error": ""
+    },
+    {
+      "file": "media-servers-dark.png",
+      "logical_size": [
+        440,
+        459
+      ],
+      "scale": 1.0,
+      "platform": "cocoa",
+      "native_capture": true,
+      "native_error": ""
+    },
+    {
+      "file": "reader-dark.png",
+      "logical_size": [
+        480,
+        640
+      ],
+      "scale": 1.0,
+      "platform": "cocoa",
+      "native_capture": true,
+      "native_error": ""
+    },
+    {
+      "file": "membership-payment-dark.png",
+      "logical_size": [
+        520,
+        472
+      ],
+      "scale": 1.0,
+      "platform": "cocoa",
+      "native_capture": true,
+      "native_error": ""
+    },
+    {
+      "file": "review-images-dark.png",
+      "logical_size": [
+        600,
+        460
+      ],
+      "scale": 1.0,
+      "platform": "cocoa",
+      "native_capture": true,
+      "native_error": ""
+    },
+    {
+      "file": "draft-relays-dark.png",
+      "logical_size": [
+        480,
+        431
+      ],
+      "scale": 1.0,
+      "platform": "cocoa",
+      "native_capture": true,
+      "native_error": ""
+    }
+  ],
+  "state_checks": [
+    {
+      "check": "open windows preserve content and selection",
+      "mode": "light",
+      "resolved_dark": false,
+      "passed": true
+    },
+    {
+      "check": "open windows preserve content and selection",
+      "mode": "dark",
+      "resolved_dark": true,
+      "passed": true
+    },
+    {
+      "check": "open windows preserve content and selection",
+      "mode": "system",
+      "resolved_dark": true,
+      "passed": true
+    },
+    {
+      "check": "native fullscreen, restore and resize",
+      "passed": true
+    }
+  ]
+}

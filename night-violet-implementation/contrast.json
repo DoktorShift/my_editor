@@ -1,0 +1,194 @@
+[
+  {
+    "mode": "Light",
+    "pair": "secondary on panel",
+    "foreground": "#625971",
+    "background": "#F5F0FC",
+    "ratio": 5.884,
+    "target": 4.5
+  },
+  {
+    "mode": "Light",
+    "pair": "secondary on strongest glow",
+    "foreground": "#625971",
+    "background": "#e0d2fd",
+    "ratio": 4.646,
+    "target": 4.5
+  },
+  {
+    "mode": "Light",
+    "pair": "white on gradient highlight",
+    "foreground": "#ffffff",
+    "background": "#8050DC",
+    "ratio": 5.123,
+    "target": 4.5
+  },
+  {
+    "mode": "Light",
+    "pair": "white on button endpoint",
+    "foreground": "#ffffff",
+    "background": "#7136DD",
+    "ratio": 6.414,
+    "target": 4.5
+  },
+  {
+    "mode": "Light",
+    "pair": "white on selected endpoint",
+    "foreground": "#ffffff",
+    "background": "#7136DD",
+    "ratio": 6.414,
+    "target": 4.5
+  },
+  {
+    "mode": "Light",
+    "pair": "field edge on field",
+    "foreground": "#8A7A9F",
+    "background": "#FFFFFF",
+    "ratio": 3.914,
+    "target": 3
+  },
+  {
+    "mode": "Light",
+    "pair": "focus on field",
+    "foreground": "#7136DD",
+    "background": "#FFFFFF",
+    "ratio": 6.414,
+    "target": 3
+  },
+  {
+    "mode": "Light",
+    "pair": "progress on track",
+    "foreground": "#7136DD",
+    "background": "#E7DCF8",
+    "ratio": 4.884,
+    "target": 3
+  },
+  {
+    "mode": "Light",
+    "pair": "payment text on orange",
+    "foreground": "#16131C",
+    "background": "#F7931A",
+    "ratio": 7.992,
+    "target": 4.5
+  },
+  {
+    "mode": "Light",
+    "pair": "payment amount on panel",
+    "foreground": "#8A4800",
+    "background": "#F5F0FC",
+    "ratio": 6.235,
+    "target": 4.5
+  },
+  {
+    "mode": "Light",
+    "pair": "error on strongest glow",
+    "foreground": "#A52A1D",
+    "background": "#e0d2fd",
+    "ratio": 5.021,
+    "target": 4.5
+  },
+  {
+    "mode": "Light",
+    "pair": "payment amount on strongest glow",
+    "foreground": "#8A4800",
+    "background": "#e0d2fd",
+    "ratio": 4.923,
+    "target": 4.5
+  },
+  {
+    "mode": "Dark",
+    "pair": "secondary on panel",
+    "foreground": "#B7ACC9",
+    "background": "#1E1828",
+    "ratio": 8.021,
+    "target": 4.5
+  },
+  {
+    "mode": "Dark",
+    "pair": "secondary on strongest glow",
+    "foreground": "#B7ACC9",
+    "background": "#3a2a60",
+    "ratio": 5.808,
+    "target": 4.5
+  },
+  {
+    "mode": "Dark",
+    "pair": "white on gradient highlight",
+    "foreground": "#ffffff",
+    "background": "#8050DC",
+    "ratio": 5.123,
+    "target": 4.5
+  },
+  {
+    "mode": "Dark",
+    "pair": "white on button endpoint",
+    "foreground": "#ffffff",
+    "background": "#6E40E2",
+    "ratio": 6.009,
+    "target": 4.5
+  },
+  {
+    "mode": "Dark",
+    "pair": "white on selected endpoint",
+    "foreground": "#ffffff",
+    "background": "#6A43D8",
+    "ratio": 6.163,
+    "target": 4.5
+  },
+  {
+    "mode": "Dark",
+    "pair": "field edge on field",
+    "foreground": "#827392",
+    "background": "#2A2436",
+    "ratio": 3.43,
+    "target": 3
+  },
+  {
+    "mode": "Dark",
+    "pair": "focus on field",
+    "foreground": "#B89CFF",
+    "background": "#2A2436",
+    "ratio": 6.579,
+    "target": 3
+  },
+  {
+    "mode": "Dark",
+    "pair": "progress on track",
+    "foreground": "#B89CFF",
+    "background": "#3D2E57",
+    "ratio": 5.349,
+    "target": 3
+  },
+  {
+    "mode": "Dark",
+    "pair": "payment text on orange",
+    "foreground": "#16131C",
+    "background": "#F7931A",
+    "ratio": 7.992,
+    "target": 4.5
+  },
+  {
+    "mode": "Dark",
+    "pair": "payment amount on panel",
+    "foreground": "#FFB561",
+    "background": "#1E1828",
+    "ratio": 9.892,
+    "target": 4.5
+  },
+  {
+    "mode": "Dark",
+    "pair": "error on strongest glow",
+    "foreground": "#FF8C82",
+    "background": "#3a2a60",
+    "ratio": 5.551,
+    "target": 4.5
+  },
+  {
+    "mode": "Dark",
+    "pair": "payment amount on strongest glow",
+    "foreground": "#FFB561",
+    "background": "#3a2a60",
+    "ratio": 7.163,
+    "target": 4.5
+  }
+]
