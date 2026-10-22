@@ -387,6 +387,31 @@ class PreviewReader(NostrPreview):
         super()._apply_colors()
         appearance.neutral(self, self._dark)
 
+    def show_markdown(self, markdown, *, names=None) -> None:
+        self._source = ("show_markdown", markdown, {"names": names})
+        super().show_markdown(markdown, names=names)
+
+    def show_note(self, text, *, author="", names=None) -> None:
+        self._source = ("show_note", text, {"author": author, "names": names})
+        super().show_note(text, author=author, names=names)
+
+    def set_dark(self, dark: bool) -> None:
+        changed = self._dark != dark
+        cursor = self.textCursor()
+        anchor, position = cursor.anchor(), cursor.position()
+        scroll = self.verticalScrollBar().value()
+        super().set_dark(dark)
+        if changed and hasattr(self, "_source"):
+            # Rendered documents contain explicit text/link colors. Changing
+            # only the widget palette leaves pale Dark text on a Light page.
+            method, text, options = self._source
+            getattr(self, method)(text, **options)
+            cursor = self.textCursor()
+            cursor.setPosition(anchor)
+            cursor.setPosition(position, cursor.MoveMode.KeepAnchor)
+            self.setTextCursor(cursor)
+            self.verticalScrollBar().setValue(scroll)
+
     def set_pictures(self, lookup: Optional[Callable[[str], Optional[QImage]]],
                      arrived=None) -> None:
         """Find the text's pictures with ``lookup`` (a picture by its name,

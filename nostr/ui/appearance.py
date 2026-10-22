@@ -151,6 +151,11 @@ def controls(dark: bool) -> str:
     QComboBox::down-arrow {{ image: none; }}
     QComboBox QAbstractItemView {{ background: {r.popover}; color: {r.text};
         border: 1px solid {r.edge}; selection-background-color: {r.soft}; selection-color: {r.text}; }}
+    QListWidget {{ background: {r.list}; color: {r.text}; border: 1px solid {r.edge};
+        selection-background-color: {r.selection}; selection-color: #FFFFFF; }}
+    QListWidget::item:selected {{ background: {r.selection}; color: #FFFFFF; }}
+    QListWidget::item:selected:!active {{ background: {r.soft}; color: {r.text}; }}
+    QListWidget::item:focus {{ border: 1px solid {r.focus}; }}
     QToolButton {{ color: {r.ink}; border: 1px solid transparent; border-radius: 5px; padding: 3px; }}
     QToolButton:hover {{ background: {r.hover}; }}
     QToolButton:pressed, QToolButton:checked {{ background: {r.soft}; }}
