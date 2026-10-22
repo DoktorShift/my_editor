@@ -45,6 +45,9 @@ from tests.test_drafts_panel import healthy_store, make_profile
 from tests.test_media_library import FakeLoader, FakeStore, media
 
 app = QApplication([])
+# This fixture opens independent windows in sequence. Closing one must not
+# request application shutdown while the next fixture is still being built.
+app.setQuitOnLastWindowClosed(False)
 i18n.install_qt_translations(app)
 app.setStyle(theme.AppStyle("Fusion"))
 theme.install_style_sheet_guard(app)
@@ -60,6 +63,8 @@ def capture(widget, name, dark, *, close=True):
                 editor.document().setModified(False)
         if close:
             widget.close()
+            widget.deleteLater()
+            QApplication.sendPostedEvents(None, QEvent.DeferredDelete)
         return
     widget.show()
     widget.raise_()
@@ -88,6 +93,8 @@ def capture(widget, name, dark, *, close=True):
             ed.document().setModified(False)
     if close:
         widget.close()
+        widget.deleteLater()
+        QApplication.sendPostedEvents(None, QEvent.DeferredDelete)
 
 
 def illustration(index=0):
