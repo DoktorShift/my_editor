@@ -85,7 +85,7 @@ class MediaViewer(QDialog):
         self._apply_message_color()
 
     def _apply_message_color(self) -> None:
-        color = (theme.error_text_color(self._is_dark) if self._message_failed
+        color = (appearance.roles(self._is_dark).error if self._message_failed
                  else appearance.roles(self._is_dark).muted)
         self.message.setStyleSheet(f"color: {color};" if self._nostr else "")
 

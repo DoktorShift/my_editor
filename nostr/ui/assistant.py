@@ -57,7 +57,6 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-import theme
 from . import appearance
 from alerts import answer_return_as_the_system_does
 from format_toolbar import Disclosure, PopupButton
@@ -87,8 +86,8 @@ def stylesheet(is_dark: bool) -> str:
     r = appearance.roles(is_dark)
     fg, muted, border, field = r.text, r.muted, r.edge, r.field
     accent = r.selection
-    ok = "#58C777" if is_dark else "#26783D"
-    err = theme.error_text_color(is_dark)
+    ok = r.success
+    err = r.error
     link, ring = r.ink, r.focus
     # A pull-down keeps room for its arrow after its title: the arrow, and
     # as much space again before it (a pixel less with the focus ring, so
@@ -138,7 +137,7 @@ def stylesheet(is_dark: bool) -> str:
     }}
     QPushButton#link:hover {{ text-decoration: underline; }}
     QPushButton#link:focus {{ border-color: {appearance.roles(is_dark).focus}; }}
-    QPushButton#link[tone="destructive"] {{ color: {theme.attention_color(is_dark)}; }}
+    QPushButton#link[tone="destructive"] {{ color: {r.error}; }}
     QPushButton#link:disabled {{ color: {muted}; }}
     QRadioButton {{ font-weight: 600; }}
     QProgressBar {{

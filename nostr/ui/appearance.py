@@ -49,7 +49,9 @@ class Roles:
     glow_alpha: int
     orange: str = "#F7931A"
     dusk: str = "#16131C"
-    amount: str = "#A85A00"
+    amount: str = "#8A4800"
+    error: str = "#A52A1D"
+    success: str = "#26783D"
     payment_pressed: str = "#DD7A0A"
     glow: str = "#8C5CFF"
 
@@ -68,7 +70,7 @@ _DARK = Roles(
     tab="#261E33", icon="#B89CFF", ink="#CDB9FF", selection="#6A43D8",
     button="#6E40E2", highlight="#8050DC", pressed="#5830BB", soft="#3D2E57",
     focus="#B89CFF", on_accent="#FFFFFF", disabled="#85798F", glow_alpha=66,
-    amount="#FFB561")
+    amount="#FFB561", error="#FF8C82", success="#58C777")
 
 
 def roles(dark: bool, *, increased_contrast: bool | None = None,
@@ -128,7 +130,7 @@ def accent_button_css(selector: str, dark: bool, *, payment: bool = False) -> st
 
 def controls(dark: bool) -> str:
     r = roles(dark)
-    error = theme.error_text_color(dark)
+    error = r.error
     return f"""
     QLabel {{ color: {r.text}; background: transparent; }}
     QLabel:disabled {{ color: {r.disabled}; }}
@@ -329,7 +331,7 @@ def popover(widget: QWidget, dark: bool) -> None:
     widget.setStyleSheet(controls(dark) + f"""
         QFrame#{widget.objectName()} {{ background: {r.popover}; border: 1px solid {r.edge}; border-radius: 8px; }}
         QLabel#imports_hint, QLabel#imports_job_counts, QLabel#imports_job_stage {{ color: {r.muted}; }}
-        QLabel#imports_job_problem {{ color: {theme.error_text_color(dark)}; }}
+        QLabel#imports_job_problem {{ color: {r.error}; }}
     """)
 
 

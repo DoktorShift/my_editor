@@ -57,6 +57,8 @@ def test_light_and_dark_composites_are_legible(dark):
         color.getRgb()[:3], bg.getRgb()[:3])))
     assert contrast(r.text, composite) >= 4.5
     assert contrast(r.muted, composite) >= 4.5
+    assert contrast(r.error, composite) >= 4.5
+    assert contrast(r.amount, composite) >= 4.5
 
 
 @pytest.mark.parametrize('dark', [False, True])

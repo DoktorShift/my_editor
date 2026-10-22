@@ -93,7 +93,22 @@ Actual native macOS captures exposed and corrected: mixed Light/Dark client and 
 
 `tests/test_night_violet.py` measures the shared text/secondary-text roles over panel/sidebar/list/field/control/hover/selection-soft backgrounds, both action-gradient endpoints, pressed fills, control boundaries, focus, payment text, progress and the strongest alpha-composited glow. Ordinary text targets 4.5:1; essential controls/icons target 3:1. Inactive selections use text on a quiet fill. QR and source image pixels are preserved independently of accent.
 
-Reference tertiary text (~2.75:1 Light / ~3.99:1 Dark on its panel) is replaced by `#625971` / `#B7ACC9`. The highlight endpoint is `#8050DC`, not the brighter reference endpoint. Light secondary text was darkened further after measuring the glow composite. Focus on accent uses white so it survives both gradient and pressed colors. Payment stays `#F7931A` with dusk text; the readable amount is `#A85A00` / `#FFB561`. The capture manifest and contrast table accompany the screenshot package.
+Reference tertiary text (~2.75:1 Light / ~3.99:1 Dark on its panel) is replaced by `#625971` / `#B7ACC9`. The highlight endpoint is `#8050DC`, not the brighter reference endpoint. Light secondary text was darkened further after measuring the glow composite. Focus on accent uses white so it survives both gradient and pressed colors. Payment stays `#F7931A` with dusk text; the readable amount is `#8A4800` / `#FFB561`. Nostr error text is `#A52A1D` / `#FF8C82`, strengthened for the glow background without changing local error roles.
+
+| Measured pair | Light | Dark |
+| --- | ---: | ---: |
+| Secondary text / panel | 5.88 | 8.02 |
+| Secondary text / strongest violet glow | 4.65 | 5.81 |
+| White / gradient highlight | 5.12 | 5.12 |
+| White / button endpoint | 6.41 | 6.01 |
+| Field boundary / field | 3.91 | 3.43 |
+| Focus / field | 6.41 | 6.58 |
+| Progress / track | 4.88 | 5.35 |
+| Dusk payment text / orange | 7.99 | 7.99 |
+| Payment amount / strongest violet glow | 4.92 | 7.16 |
+| Error text / strongest violet glow | 5.02 | 5.55 |
+
+The strongest violet composites resolve to `#E0D2FD` (Light) and `#3A2A60` (Dark). Ratios use `theme.contrast_ratio`; the machine-readable table accompanies the screenshots. Disabled controls retain distinct treatment and are not counted as ordinary enabled text.
 
 ## Verification and readiness
 
@@ -107,7 +122,7 @@ python scripts/i18n.py check
 python scripts/night_violet_capture.py --output /tmp/night-violet --native --extended
 ```
 
-The first integration run reported 8,739 passed, 14 skipped and 44 failed. Those failures identified test doubles missing the new optional context argument, old blue-color assertions, and one missing test import; they were corrected without removing behavioral checks. Sandbox-only failures involving subprocesses/local HTTP servers were rerun outside the sandbox. Subsequent focused runs passed (211 preview/settings/media, 209 media/context/membership, 190 appearance/keyboard). The final full-suite result and immutable evidence links are recorded in the delivery update below.
+The first integration run reported 8,739 passed, 14 skipped and 44 failed. Those failures identified test doubles missing the new optional context argument, old blue-color assertions, and one missing test import; they were corrected without removing behavioral checks. Sandbox-only failures involving subprocesses/local HTTP servers were rerun outside the sandbox. The second full run passed: **8,783 passed, 14 skipped, 3 dependency warnings, 642.13 seconds**. Subsequent focused runs passed (211 preview/settings/media, 209 media/context/membership, 190 appearance/keyboard), and the final contrast correction passed **533 affected tests**. The full run preceded the final visual refinements; exact-head platform CI is reported separately rather than mislabeling that run.
 
 Outstanding manual acceptance: VoiceOver/Full Keyboard Access with a human listener, real system accent/increased-contrast/Reduce Transparency changes, Windows and Linux desktop composition, and physical fractional-scale displays. Injected preference tests and offscreen rendering are not substitutes for those checks. Native macOS live Light/Dark/Automatic switching and window-state checks are recorded by the fixture; platform CI reports its actual rendering platform (Windows native, macOS/Linux offscreen). Keep the implementation PR **draft** until these remaining acceptance checks are resolved; no merge is authorized.
 

@@ -55,7 +55,6 @@ from PySide6.QtWidgets import QAbstractItemView, QListView, QStyle, QStyledItemD
 
 import format_icons
 import media_files
-import theme
 from . import appearance
 from i18n import _
 
@@ -399,7 +398,7 @@ class TileDelegate(QStyledItemDelegate):
         small.setPointSizeF(max(8.0, font.pointSizeF() - 1))
         painter.setFont(small)
         small_metrics = QFontMetrics(small)
-        painter.setPen(QColor(theme.attention_color(self._is_dark)) if tile.state == FAILED
+        painter.setPen(QColor(appearance.roles(self._is_dark).error) if tile.state == FAILED
                        else palette.color(QPalette.ColorRole.PlaceholderText))
         # A failure's first sentence says what happened; the rest (what
         # to do) is in the tooltip and in the line at the window's foot.

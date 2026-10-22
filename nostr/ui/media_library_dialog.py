@@ -1329,7 +1329,7 @@ class MediaLibraryDialog(QDialog):
 
 def _extra_css(is_dark: bool) -> str:
     muted = appearance.roles(is_dark).muted
-    return (f"QLabel#media_status[tone=\"error\"] {{ color: {theme.attention_color(is_dark)}; }}\n"
+    return (f"QLabel#media_status[tone=\"error\"] {{ color: {appearance.roles(is_dark).error}; }}\n"
             f"QLabel#media_status[tone=\"rest\"], QLabel#media_hint {{ color: {muted}; }}\n"
             "QLabel#media_hint, QLabel#media_status { font-size: 12px; }\n"
             "QLabel#media_empty { font-size: 14px; }\n"

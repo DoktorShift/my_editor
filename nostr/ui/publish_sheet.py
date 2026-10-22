@@ -42,7 +42,6 @@ from PySide6.QtWidgets import (
 )
 
 import announce
-import theme
 from . import appearance
 from constants import DARK_MUTED_FG, LIGHT_MUTED_FG
 from i18n import _
@@ -430,7 +429,7 @@ class StatusLine(QLabel):
         self._color()
 
     def _color(self) -> None:
-        color = (theme.error_text_color(self._is_dark) if self._error
+        color = (appearance.roles(self._is_dark).error if self._error
                  else DARK_MUTED_FG if self._is_dark else LIGHT_MUTED_FG)
         self.setStyleSheet(f"color: {color};")
 

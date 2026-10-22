@@ -25,7 +25,6 @@ from PySide6.QtGui import QFont, QFontInfo
 from PySide6.QtWidgets import QApplication
 
 import i18n
-import theme
 
 from ..draft_store import DraftRecord
 
@@ -44,7 +43,7 @@ def theme_tokens(dark: bool) -> dict:
                 disabled=r.disabled, row_fg=r.text, hover_bg=r.hover,
                 control_hover_bg=r.hover, control_pressed_bg=r.soft,
                 selected_bg=r.selection, selected_fg="#FFFFFF", accent=r.focus,
-                text_selection_bg=r.selection, error_fg=theme.error_text_color(dark),
+                text_selection_bg=r.selection, error_fg=r.error,
                 link=r.ink)
 
 
