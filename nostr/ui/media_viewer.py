@@ -87,6 +87,9 @@ class MediaViewer(QDialog):
     def _apply_message_color(self) -> None:
         color = (appearance.roles(self._is_dark).error if self._message_failed
                  else appearance.roles(self._is_dark).muted)
+        # QSS sets WindowText. PlaceholderText would blend that ink with the
+        # background again, washing out errors in Light and dimming them in Dark.
+        self.message.setForegroundRole(QPalette.WindowText if self._nostr else QPalette.PlaceholderText)
         self.message.setStyleSheet(f"color: {color};" if self._nostr else "")
 
     def play(self, media, mime: str, name: str, *, nostr: bool = False) -> None:

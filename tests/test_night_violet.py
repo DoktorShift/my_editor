@@ -120,7 +120,12 @@ def test_status_origin_expires_and_local_replacement_restores_neutral():
     assert not status._nostr_message
     status.showMessage('Failed', 10, nostr=True, error=True)
     assert status._message_error
-    QTest.qWait(40)
+    # Native Windows timers may be coalesced under CI load. Wait for the
+    # observable expiry, without assuming a 40 ms scheduling deadline.
+    for _ in range(100):
+        if not status.currentMessage():
+            break
+        QTest.qWait(10)
     assert not status.currentMessage()
     assert not status._nostr_message and not status._message_error
 
@@ -197,6 +202,8 @@ def test_reused_media_viewer_clears_nostr_decoration(monkeypatch):
     viewer.play(media(1), 'audio/mp3', 'From Nostr', nostr=True)
     assert viewer.property('nightVioletSurface')
     assert viewer._night_violet_glow.isVisible()
+    viewer._failed('Could not load the recording')
+    assert viewer.message.palette().color(viewer.message.foregroundRole()) == QColor(appearance.roles(False).error)
     viewer.play(media(1), 'audio/mp3', 'Local file')
     assert not viewer.property('nightVioletSurface')
     assert not viewer._night_violet_glow.isVisible()

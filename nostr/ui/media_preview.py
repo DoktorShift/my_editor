@@ -107,12 +107,18 @@ class QuickLook(QDialog):
         row.addWidget(self.save_button)
         row.addStretch(1)
         layout.addLayout(row)
+        self.apply_theme(is_dark)
 
     def apply_theme(self, is_dark: bool) -> None:
         self._is_dark = is_dark
         self.setStyleSheet(appearance.dialog_stylesheet(is_dark)
                            + "QLabel#quick_look_name { font-weight: 600; }")
         appearance.surface(self, is_dark)
+        for name in ("message", "detail"):
+            label = getattr(self, name, None)
+            if label is not None:
+                label.setForegroundRole(QPalette.WindowText)
+                label.setStyleSheet(f"color: {appearance.roles(is_dark).muted};")
         if getattr(self, "_player", None) is not None:
             self._player.set_nostr(True, is_dark)
         if getattr(self, "_file_preview", None) is not None:

@@ -62,6 +62,8 @@ class FilePreview(QWidget):
         self._update_page()
 
     def apply_theme(self, dark: bool) -> None:
+        self.note.setForegroundRole(QPalette.WindowText)
+        self.note.setStyleSheet(f"color: {appearance.roles(dark).muted};")
         appearance.neutral(self.text, dark)
         p = theme._palette(dark)
         self.text.setStyleSheet(f"QPlainTextEdit {{ background: {p.color(QPalette.Base).name()};"
