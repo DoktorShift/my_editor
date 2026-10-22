@@ -5009,72 +5009,80 @@ msgstr ""
 msgid "{total} in total, up to {per_file} per file."
 msgstr ""
 
-#: nostr/imports_controller.py:105
+#: nostr/imports_controller.py:107
 msgid "The account changed. Resume when you're signed in to that account again."
 msgstr ""
 
-#: nostr/imports_controller.py:107
+#: nostr/imports_controller.py:109
 msgid "MyEditor was closed during the import. Resume it to go on."
 msgstr ""
 
-#: nostr/imports_controller.py:108
+#: nostr/imports_controller.py:110
 msgid "Imports are checked in another MyEditor window. This one only shows them."
 msgstr ""
 
-#: nostr/imports_controller.py:109
+#: nostr/imports_controller.py:111
 msgid "Couldn't show this post."
 msgstr ""
 
-#: nostr/imports_controller.py:114
+#: nostr/imports_controller.py:116
 #, python-brace-format
 msgid "MyEditor can't write to the folder where it keeps imports ({folder}). Check that you can write to it, then choose Nostr > Imports again. Your sources are kept."
 msgstr ""
 
-#: nostr/imports_controller.py:117
+#: nostr/imports_controller.py:119
 msgid "The disk is full, so MyEditor can't keep imports on this computer. Free some space, then choose Nostr > Imports again. Your sources are kept."
 msgstr ""
 
-#: nostr/imports_controller.py:119
+#: nostr/imports_controller.py:121
 msgid "Another program is using the imports kept on this computer. Choose Nostr > Imports again in a moment."
 msgstr ""
 
-#: nostr/imports_controller.py:121
+#: nostr/imports_controller.py:123
 msgid "The file that keeps imports on this computer is damaged, and MyEditor is open a second time. Quit the other MyEditor, then choose Nostr > Imports again."
 msgstr ""
 
-#: nostr/imports_controller.py:124
+#: nostr/imports_controller.py:126
 msgid "The file that keeps imports on this computer is damaged, and another program is using it, so MyEditor can't set it aside. Quit programs that might use it, such as a backup or sync app, then choose Nostr > Imports again."
 msgstr ""
 
-#: nostr/imports_controller.py:127
+#: nostr/imports_controller.py:129
 msgid "MyEditor can't open the imports kept on this computer. Choose Nostr > Imports again to try once more. Your sources are kept."
 msgstr ""
 
-#: nostr/imports_controller.py:129
+#: nostr/imports_controller.py:131
 msgid "The file that keeps imports on this computer was damaged, so MyEditor set it aside and started a new one. Your sources are kept; posts you had skipped show again."
 msgstr ""
 
-#: nostr/imports_controller.py:132
+#: nostr/imports_controller.py:134
 msgid "No sources were found in that list. Is it a subscription export from a feed reader?"
 msgstr ""
 
-#: nostr/imports_controller.py:134
+#: nostr/imports_controller.py:136
 msgid "Nothing to import was found at that address."
 msgstr ""
 
-#: nostr/imports_controller.py:135
+#: nostr/imports_controller.py:137
 msgid "This post is longer than MyEditor keeps here. Open Original reads all of it, and a draft made of it gets the whole post from its page."
 msgstr ""
 
-#: nostr/imports_controller.py:137
+#: nostr/imports_controller.py:139
+msgid "Reading the whole post from its page…"
+msgstr ""
+
+#: nostr/imports_controller.py:140
+msgid "Couldn't read the whole post from its page. Creating a draft tries again; if that fails too, the draft gets the text shown here."
+msgstr ""
+
+#: nostr/imports_controller.py:144
 msgid "MyEditor no longer keeps the text of this post here. Open Original reads it, and a draft made of it gets the post from its page."
 msgstr ""
 
-#: nostr/imports_controller.py:139
+#: nostr/imports_controller.py:146
 msgid "Couldn't read the images of these posts."
 msgstr ""
 
-#: nostr/imports_controller.py:636
+#: nostr/imports_controller.py:646
 msgid "MyEditor Sources"
 msgstr ""
 
@@ -5809,62 +5817,62 @@ msgstr ""
 msgid "the request could not be made"
 msgstr ""
 
-#: nostr/imports/pipeline.py:300
+#: nostr/imports/pipeline.py:297
 msgid "(untitled)"
 msgstr ""
 
-#: nostr/imports/pipeline.py:531
+#: nostr/imports/pipeline.py:527
 #, python-brace-format
 msgid "Fetching full text for '{title}'…"
 msgstr ""
 
-#: nostr/imports/pipeline.py:532
+#: nostr/imports/pipeline.py:528
 #, python-brace-format
 msgid "Fetching the details of '{title}'…"
 msgstr ""
 
-#: nostr/imports/pipeline.py:551
+#: nostr/imports/pipeline.py:547
 msgid "Couldn't read this post's page, and its full text isn't kept here."
 msgstr ""
 
-#: nostr/imports/pipeline.py:637
+#: nostr/imports/pipeline.py:611
 #, python-brace-format
 msgid "{failed} of {total} image(s) couldn't be mirrored; originals kept."
 msgid_plural "{failed} of {total} image(s) couldn't be mirrored; originals kept."
 msgstr[0] ""
 msgstr[1] ""
 
-#: nostr/imports/pipeline.py:302
+#: nostr/imports/pipeline.py:299
 #, python-brace-format
 msgid "Item {n}/{total}: {title}"
 msgstr ""
 
-#: nostr/imports/pipeline.py:322
+#: nostr/imports/pipeline.py:319
 #, python-brace-format
 msgid "Could not normalise item: {error}"
 msgstr ""
 
-#: nostr/imports/pipeline.py:406
+#: nostr/imports/pipeline.py:403
 #, python-brace-format
 msgid "Fetching chapters for '{title}'…"
 msgstr ""
 
-#: nostr/imports/pipeline.py:444
+#: nostr/imports/pipeline.py:443
 #, python-brace-format
 msgid "Resolving '{title}' from Nostr…"
 msgstr ""
 
-#: nostr/imports/pipeline.py:627
+#: nostr/imports/pipeline.py:601
 #, python-brace-format
 msgid "Mirroring images {n}/{total}…"
 msgstr ""
 
-#: nostr/imports/pipeline.py:704
+#: nostr/imports/pipeline.py:678
 #, python-brace-format
 msgid "Could not build article: {error}"
 msgstr ""
 
-#: nostr/imports/pipeline.py:722
+#: nostr/imports/pipeline.py:696
 #, python-brace-format
 msgid "Could not start draft job: {error}"
 msgstr ""

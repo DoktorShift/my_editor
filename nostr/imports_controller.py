@@ -45,7 +45,8 @@ import os
 import sqlite3
 import time
 import weakref
-from dataclasses import dataclass
+from collections import OrderedDict
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Callable, Dict, List, Optional, Sequence, Set, Tuple
 
@@ -63,6 +64,7 @@ from .imports.errors import LOCAL_NETWORK_MESSAGE, SourceError, friendly_message
 from .imports.feed_list import source_key
 from .imports.fulltext import extract_readable_content
 from .imports.page_meta import fill_from_page, read_page_meta
+from .imports.page_text import page_wanted, what_the_page_adds
 from .imports.sources.ghost import needs_site_address
 from .rss.parser import FeedItem
 from .imports.intake import FEED, is_whole_source, kind_of, post_at, same_page
@@ -134,6 +136,11 @@ NO_SOURCES_IN_LIST = _("No sources were found in that list. Is it a subscription
 NOTHING_FOUND = _("Nothing to import was found at that address.")
 PARTIAL_POST = _("This post is longer than MyEditor keeps here. Open Original reads all of "
                  "it, and a draft made of it gets the whole post from its page.")
+READING_PAGE = _("Reading the whole post from its page…")
+PAGE_UNREAD = _("Couldn't read the whole post from its page. Creating a draft tries again; "
+                "if that fails too, the draft gets the text shown here.")
+# Pages read for the article view, kept for posts opened again.
+_PAGES_KEPT = 40
 TRIMMED_POST = _("MyEditor no longer keeps the text of this post here. Open Original reads "
                  "it, and a draft made of it gets the post from its page.")
 IMAGES_UNREADABLE = _("Couldn't read the images of these posts.")
@@ -183,6 +190,9 @@ class ImportsController(QObject):
         self._blossom_primary = blossom_primary
         self._config_dir = Path(config_dir) if config_dir else CONFIG_DIR
         self._fetcher = fetcher if fetcher is not None else SourceFetcher(self)
+        # What the pages of posts opened in the article view added (page_text),
+        # so a post opened again is not read again.
+        self._pages_read: "OrderedDict[tuple, object]" = OrderedDict()
         self._run_blocking = run_blocking or (
             lambda fn, ok, err: workers.run_blocking(fn, ok, err, parent=self))
         self._item_job_factory = item_job_factory or self._make_item_job
@@ -1096,38 +1106,99 @@ class ImportsController(QObject):
     def prepare_article(self, post: Post, *, on_ready: Callable[[str, Article], None],
                         on_failed: Callable[[str], None]) -> None:
         """The post as the article an import of it publishes: its Markdown
-        and the details around it, made off the UI thread."""
+        and the details around it, made off the UI thread.
+
+        When the import would read the post's page (its source gave a
+        teaser or a link to it; page_text.py), the page is read here too
+        and the article shown again with what the page added, so what is
+        shown is what the draft gets. ``on_ready`` is then called twice:
+        first with the source's text and a line saying the page is read."""
         item = self.item(post)
         if item is None:
             on_failed(ARTICLE_FAILED)
             return
         author = getattr(self._profile, "display_name", "") or ""
         generation = self._generation
+        full_text = self._source_defaults(post.source_key)[1]
 
-        def make():
-            return item_to_article(item, identifier_prefix=IDENTIFIER_PREFIX)
-
-        def made(template) -> None:
+        def show(template, *, reading: bool = False, whole: bool = False,
+                 unread: bool = False) -> None:
             if generation != self._generation:
                 return
             content = template.content
-            if post.trimmed:
+            if reading:
+                content = "*" + READING_PAGE + "*\n\n" + content
+            elif unread:
+                content = "*" + PAGE_UNREAD + "*\n\n" + content
+            elif post.trimmed and not whole:
                 # Nothing of the body is left: the word first, where the
                 # body would be, then where the post is.
                 content = "*" + TRIMMED_POST + "*\n\n" + content
-            elif item.partial:
+            elif item.partial and not whole:
                 content += "\n\n*" + PARTIAL_POST + "*"
             on_ready(content, Article(
                 title=template.title, summary=template.summary,
                 image=template.image or snapshots.cover(item), tags=template.hashtags,
                 author=author, published_at=template.published_at or 0))
 
+        def made(template) -> None:
+            if generation != self._generation:
+                return
+            wants_text, wants_details = page_wanted(item, template, fetch_full_text=full_text)
+            if not (wants_text or wants_details):
+                show(template)
+                return
+            show(template, reading=wants_text)
+            self._add_from_page(item, template, wants_text, generation,
+                                on_done=lambda added: shown_with(template, added, wants_text))
+
+        def shown_with(template, added, wants_text: bool) -> None:
+            if added is None:
+                # The page could not be read (blocked, empty, gone) or added
+                # nothing: the reader is told when its text was wanted.
+                show(template, unread=wants_text and not item.partial and not post.trimmed)
+                return
+            page_item, body = added
+            remade = item_to_article(replace(page_item, content_markdown=body),
+                                     identifier_prefix=IDENTIFIER_PREFIX)
+            show(replace(remade, slug=template.slug), whole=body != template.body)
+
         def failed(exc) -> None:
             _log.warning("could not prepare an imported post: %s", exc)
             if generation == self._generation:
                 on_failed(ARTICLE_FAILED)
 
-        self._run_blocking(make, made, failed)
+        self._run_blocking(lambda: item_to_article(item, identifier_prefix=IDENTIFIER_PREFIX),
+                           made, failed)
+
+    def _add_from_page(self, item: FeedItem, template, wants_text: bool, generation: int, *,
+                       on_done: Callable[[Optional[tuple]], None]) -> None:
+        """Read ``item``'s page and answer what it adds (page_text), or
+        None; a page read before for this view is not read again. A page
+        that gave nothing is asked again next time: a site that turned
+        the reader away (too many requests) may answer then."""
+        key = (item.guid, item.link, wants_text)
+        if key in self._pages_read:
+            self._pages_read.move_to_end(key)
+            on_done(self._pages_read[key])
+            return
+
+        def keep(added) -> None:
+            if added is not None:
+                self._pages_read[key] = added
+                while len(self._pages_read) > _PAGES_KEPT:
+                    self._pages_read.popitem(last=False)
+            if generation == self._generation:
+                on_done(added)
+
+        def read(html: str) -> None:
+            self._run_blocking(
+                lambda: what_the_page_adds(item, template.body, html, wants_text=wants_text),
+                keep, lambda exc: keep(None))
+
+        self._fetcher.fetch(item.link, on_success=read,
+                            on_failure=lambda _error: on_done(None)
+                            if generation == self._generation else None)
 
     # ------------------------------------------------------------------ #
     # Creating drafts                                                      #

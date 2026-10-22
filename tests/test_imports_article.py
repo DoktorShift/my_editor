@@ -203,6 +203,61 @@ def test_a_post_kept_only_in_part_says_so(tmp_path):
     controller.account_changed(None)
 
 
+def test_a_teaser_shows_the_text_its_page_gives_as_the_draft_will(tmp_path):
+    """A feed that gives only a link to the post (Stacker News, Hacker
+    News) showed only that link here, while the draft got the whole post
+    from its page. The page is read here too, once."""
+    from nostr.imports_controller import READING_PAGE
+    from tests.imports_fakes import make_item
+    from tests.outbox_fakes import settle
+    from tests.test_imports_window import controller_for
+    controller = controller_for(tmp_path)
+    page = ("<html><body><article>" + "".join(
+        f"<p>Paragraph {i} of the whole post, with plenty of ordinary words in it.</p>"
+        for i in range(12)) + "</article></body></html>")
+    controller._fetcher.responses["https://stacker.news/items/1"] = ("ok", page)
+    collection = controller.open_posts(kind="link", label="A link", items=[
+        make_item("Post", guid="g", link="https://stacker.news/items/1",
+                  content_html='<p><a href="https://stacker.news/items/1">Comments</a></p>')])
+    shown = []
+    for _round in range(2):
+        controller.prepare_article(collection.posts()[0],
+                                   on_ready=lambda md, art: shown.append(md),
+                                   on_failed=lambda reason: shown.append(reason))
+        settle()
+    assert shown[0].startswith("*" + READING_PAGE + "*")
+    assert "Paragraph 11 of the whole post" in shown[1]
+    assert controller._fetcher.calls.count("https://stacker.news/items/1") == 1
+    assert "Paragraph 11 of the whole post" in shown[-1]
+    controller.account_changed(None)
+
+
+def test_a_page_that_turns_the_reader_away_is_said_and_asked_again(tmp_path):
+    """A site that answers with an empty page (Stacker News does, to many
+    requests in a row) leaves the feed's text, says so, and is asked
+    again the next time the post is opened."""
+    from nostr.imports_controller import PAGE_UNREAD
+    from tests.imports_fakes import make_item
+    from tests.outbox_fakes import settle
+    from tests.test_imports_window import controller_for
+    controller = controller_for(tmp_path)
+    link = "https://stacker.news/items/2"
+    controller._fetcher.responses[link] = ("ok", "")
+    collection = controller.open_posts(kind="link", label="A link", items=[
+        make_item("Post", guid="g2", link=link,
+                  content_html=f'<p><a href="{link}">Comments</a></p>')])
+    shown = []
+    for _round in range(2):
+        controller.prepare_article(collection.posts()[0],
+                                   on_ready=lambda md, art: shown.append(md),
+                                   on_failed=lambda reason: shown.append(reason))
+        settle()
+    assert shown[-1].startswith("*" + PAGE_UNREAD + "*")
+    assert "Comments" in shown[-1]
+    assert controller._fetcher.calls.count(link) == 2
+    controller.account_changed(None)
+
+
 def test_another_post_never_shows_the_previous_body():
     """Review L1: the header and Open Original switched at once while the
     body still showed the previous post until the new one was ready."""

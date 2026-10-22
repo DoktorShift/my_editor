@@ -25,8 +25,9 @@ SOURCE_TAG: str = "source"
 DEFAULT_LIMIT: int = 25
 MAX_LIMIT: int = 500
 
-# A feed item whose Markdown body (without the source footer) is shorter
-# than this is "thin": a teaser rather than an article body.
+# A feed item whose body says fewer words than this (in characters,
+# without addresses and link syntax; normalize.reading_text) is "thin":
+# a teaser or a link to the post rather than the post.
 THIN_CONTENT_CHARS: int = 80
 
 # Relay-friendliness: batches larger than the threshold insert a short

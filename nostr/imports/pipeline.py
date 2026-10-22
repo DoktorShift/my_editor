@@ -86,7 +86,6 @@ from ..relay import RelayPool
 from ..bunker import BunkerSessionPool
 from ..rss.normalize import (
     ArticleTemplate,
-    ends_as_teaser,
     html_to_markdown,
     item_to_article,
 )
@@ -96,19 +95,16 @@ from ..rss.nostr_resolver import (
     extract_nostr_coord,
 )
 from ..rss.parser import FeedItem
-from ..rss.urls import is_web
 from . import workers
 from .constants import (
     BATCH_PACE_MS,
     BATCH_PACE_THRESHOLD,
     IDENTIFIER_PREFIX,
     SOURCE_TAG,
-    THIN_CONTENT_CHARS,
 )
 from .fetch import SourceFetcher
-from .fulltext import extract_readable_content
-from .page_meta import fill_from_page, read_page_meta
 from .images import MirrorOutcome, MirrorProgress, blossom_rehost, rehost_images
+from .page_text import page_wanted, what_the_page_adds
 from .sources.podcast import build_podcast_markdown, fetch_podcast_chapters
 
 
@@ -522,12 +518,9 @@ class ImportItemsJob(QObject):
         """
         if self._cancelled:
             return
-        # A post kept only in part (too long for the inbox) is read from its
-        # page whatever the option: the part alone would be a cut draft.
-        wants_text = item.partial or (self._fetch_full_text and (
-            len(template.body) < THIN_CONTENT_CHARS or ends_as_teaser(template.body)))
-        wants_details = self._fetch_full_text and not template.image
-        if not ((wants_text or wants_details) and is_web(item.link)):
+        wants_text, wants_details = page_wanted(item, template,
+                                                fetch_full_text=self._fetch_full_text)
+        if not (wants_text or wants_details):
             self._without_page_text(item, template)
             return
         self.item_extracting.emit(self._index, title_for_ui)
@@ -565,40 +558,18 @@ class ImportItemsJob(QObject):
     ) -> None:
         if self._cancelled:
             return
-        feed_body_len = len(template.body)
 
-        def _extract():
-            page = read_page_meta(body, url=item.link)
-            content = extract_readable_content(body, url=item.link) if wants_text else None
-            if content is None:
-                return None, page, ""
-            # The page's own relative links and images, made whole
-            # against the page (CP1 review O3).
-            markdown = html_to_markdown(content.html, base_url=item.link).strip()
-            return markdown, page, content.title
-
-        def _done(result) -> None:
+        def _done(added) -> None:
             if self._cancelled:
                 return
-            markdown, page, page_title = result
-            whole = fill_from_page(item, page, page_title=page_title)
-            text = None
-            if markdown:
-                # Adopt only on a clear win over the summary we already
-                # have; a bad extraction is usually shorter, not longer.
-                # For a post kept only in part, any more text is a win.
-                needed = feed_body_len if item.partial else max(THIN_CONTENT_CHARS,
-                                                                 feed_body_len * 2)
-                if len(markdown) > needed:
-                    text = markdown
-            if text is None and (item.partial or whole is item):
+            if added is None:
                 self._without_page_text(item, template)
                 return
-            self._publish_template_as_draft(
-                self._remade(template, whole, text if text is not None else template.body))
+            whole, text = added
+            self._publish_template_as_draft(self._remade(template, whole, text))
 
         self._run_blocking(
-            _extract,
+            lambda: what_the_page_adds(item, template.body, body, wants_text=wants_text),
             _done,
             lambda _exc, i=item, t=template: self._without_page_text(i, t),
         )

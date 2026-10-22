@@ -180,11 +180,10 @@ def plain_summary(summary_html: Optional[str]) -> str:
     return _shorten(text)
 
 
-def summary_from_body(markdown: str) -> str:
-    """A summary made of the article's opening words, for a post whose
-    source gives none: what a reader sees first, cut at a word. Code,
-    headings, tables and a line that is only an address are skipped, and
-    so is a short kicker before the first real sentence ("TEIL 00")."""
+def _prose(markdown: str) -> List[str]:
+    """The paragraphs of a body as a reader sees their words: no code,
+    headings, tables or images, a link as its words, and a paragraph
+    that is only an address left out."""
     paragraphs = []
     for block in re.split(r"\n\s*\n", without_code_blocks(markdown or "")):
         stripped = block.strip()
@@ -195,6 +194,21 @@ def summary_from_body(markdown: str) -> str:
         text = _SPACE.sub(" ", unescape(text)).strip()
         if text and not _BARE_URL.fullmatch(text):
             paragraphs.append(text)
+    return paragraphs
+
+
+def reading_text(markdown: str) -> str:
+    """What a body says in words, without the addresses in it: a body of
+    links ("Article URL: https://… Comments URL: https://…") says little."""
+    return _SPACE.sub(" ", _BARE_URL.sub("", " ".join(_prose(markdown)))).strip()
+
+
+def summary_from_body(markdown: str) -> str:
+    """A summary made of the article's opening words, for a post whose
+    source gives none: what a reader sees first, cut at a word. Code,
+    headings, tables and a line that is only an address are skipped, and
+    so is a short kicker before the first real sentence ("TEIL 00")."""
+    paragraphs = _prose(markdown)
     start = next((i for i, text in enumerate(paragraphs) if len(text) >= _KICKER_CHARS), 0)
     words: List[str] = []
     for text in paragraphs[start:]:
