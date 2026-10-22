@@ -1,0 +1,43 @@
+{
+  "upstream_repository": "rinbal/my_editor",
+  "upstream_branch": "dev",
+  "upstream_commit": "57a023e5aa660749ef842e4fd8c277e33045c217",
+  "captured": "2026-10-22",
+  "reference_original_name": "MyEditor_Nostr_Design.html",
+  "reference_sha256": "6df3f2759381666459b32fa701e2a73812bbfff4673671aabb1938d3f070cebc",
+  "reference_capture": {
+    "renderer": "Chromium headless shell 1248 via Playwright",
+    "viewport_css_pixels": [
+      1600,
+      1100
+    ],
+    "device_scale_factor": 2,
+    "direction": "Night Violet",
+    "changes_to_reference": "none; appearance and direction selected using existing page controls"
+  },
+  "baseline_capture": {
+    "renderer": "PySide6 Qt offscreen, Fusion AppStyle",
+    "fixtures": [
+      "tests.test_imports_window.controller_for and fill",
+      "tests.test_publish_sheets.article"
+    ],
+    "data": "Example fixtures only; no live signer or relay calls",
+    "limitation": "Client-area captures do not validate native window decorations or assistive technology"
+  },
+  "files": {
+    "baseline-imports-dark.png": "77f478a1bbe30dcc359e164fceb43a318b6120d2a15a7a7478bac4a7d27da8e1",
+    "baseline-imports-light.png": "a28c70913e9659dfb596dc57cfd3c6466901ff64bccfab144a291b662f990a1d",
+    "baseline-publishing-dark.png": "b1bd8f330bcf6df2022a95436a6b7807be6715af0e4b386a01cc62d82e42eb95",
+    "baseline-publishing-light.png": "1cc260e9b05453778674d04577293cb3650d86a6a38b1559c602a363c682b4bd",
+    "editor-dark.png": "1c079de501c3d54dcf0c006f2cb41e1536635130d75fa9c5333b83ec1916f7b6",
+    "editor-light.png": "8cb7aa645079deecaa9eb0bce003e3e117d97f4b5fa10c93aa9a47141a7481a0",
+    "imports-dark.png": "0c55ea46c6562370e8c27910139db609874eedf05f6440fc948fe292800779ab",
+    "imports-light.png": "a2720c7b135f1bfeae6b9b2dc5b2cf7f45673a4b360c3e8437d4597670437eba",
+    "media-dark.png": "8a7bc5d47d1aa5a325b648cdbeb6f6ff177efc2e88ab290795c5b533c3e0dff7",
+    "media-light.png": "1da00d3a8a9a41ae14b963a19c14d955e0822b7e430c7e585efb32d910a49744",
+    "membership-dark.png": "b3a0df1d7e5b9ab88867cf1a329bc0154e2f54a5f0538dd311dd2294e1ed36c9",
+    "membership-light.png": "ff5016082c058efbc2e9f41ba0ec829193d44ab9e900103b8b5e51beef8896be",
+    "publishing-dark.png": "1fea3a99ee93536eb22646e21e8ba585b7f488419c1dda5661ebb58e31234f18",
+    "publishing-light.png": "c1defbfc3546584401f14911f24a2613b20f0c2f3a384b78fce0dfd15084ef0f"
+  }
+}
