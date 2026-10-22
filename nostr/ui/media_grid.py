@@ -56,6 +56,7 @@ from PySide6.QtWidgets import QAbstractItemView, QListView, QStyle, QStyledItemD
 import format_icons
 import media_files
 import theme
+from . import appearance
 from i18n import _
 
 from ..blossom.store import MediaFile
@@ -282,7 +283,7 @@ class TileDelegate(QStyledItemDelegate):
         self._paint_thumb(painter, palette, thumb, tile)
         self._paint_caption(painter, palette, cell, thumb, tile)
         if option.state & QStyle.StateFlag.State_HasFocus and self._view.hasFocus():
-            painter.setPen(QPen(QColor(theme.focus_ring_color(self._is_dark)), 2))
+            painter.setPen(QPen(QColor(appearance.roles(self._is_dark).focus), 2))
             painter.setBrush(Qt.BrushStyle.NoBrush)
             painter.drawRoundedRect(QRectF(cell).adjusted(3, 3, -3, -3), 8, 8)
         painter.restore()
@@ -356,11 +357,15 @@ class TileDelegate(QStyledItemDelegate):
         or, while nothing can be measured, a spinning arc (one shape for
         both, as Apple asks of an indicator that turns determinate)."""
         ring = QRectF(thumb.center().x() - 16, thumb.center().y() - 16, 32, 32)
+        # A fixed dusk backing keeps the violet meter legible over any picture.
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QColor(appearance.roles(True).dusk))
+        painter.drawEllipse(ring.adjusted(-5, -5, 5, 5))
         painter.setBrush(Qt.BrushStyle.NoBrush)
         painter.setPen(QPen(_ON_SCRIM_FAINT, 3))
         painter.drawEllipse(ring)
         fraction = tile.meter.fraction() if tile.meter is not None else None
-        pen = QPen(_ON_SCRIM, 3)
+        pen = QPen(QColor(appearance.roles(True).icon), 3)
         pen.setCapStyle(Qt.PenCapStyle.RoundCap)
         painter.setPen(pen)
         if fraction is None:
@@ -451,6 +456,14 @@ class MediaGrid(QListView):
     retry_requested = Signal(str)         # job name
     visible_changed = Signal()
 
+    def apply_theme(self, is_dark: bool) -> None:
+        self._is_dark = is_dark
+        palette = appearance.palette(is_dark, surface="list")
+        palette.setColor(QPalette.Base, QColor(appearance.roles(is_dark).list))
+        self.setPalette(palette)
+        self.delegate._is_dark = is_dark
+        self.viewport().update()
+
     def __init__(self, *, is_dark: bool, parent=None) -> None:
         super().__init__(parent)
         self.setViewMode(QListView.ViewMode.IconMode)
@@ -470,6 +483,7 @@ class MediaGrid(QListView):
         self._is_dark = is_dark
         self._drop_active = False
         self.delegate = TileDelegate(self, is_dark=is_dark)
+        self.apply_theme(is_dark)
         self.setItemDelegate(self.delegate)
         self.setGridSize(self.delegate.cell_size())
         self.setMinimumWidth(2 * CELL_WIDTH + self.verticalScrollBar().sizeHint().width() + 8)
@@ -620,6 +634,6 @@ class MediaGrid(QListView):
         if self._drop_active:
             painter = QPainter(self.viewport())
             painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-            painter.setPen(QPen(QColor(theme.focus_ring_color(self._is_dark)), 3))
+            painter.setPen(QPen(QColor(appearance.roles(self._is_dark).focus), 3))
             painter.drawRoundedRect(QRectF(self.viewport().rect()).adjusted(2, 2, -2, -2), 8, 8)
             painter.end()

@@ -21,7 +21,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout, QWidget,
 )
 
-import theme
+from . import appearance
 from i18n import _
 
 from doc_walk import iter_image_names
@@ -382,10 +382,10 @@ class PreviewReader(NostrPreview):
         self.zoomOut(2)
 
     def _apply_colors(self) -> None:
-        tokens = THEME_TOKENS[bool(self._dark)]
-        self.setStyleSheet(
-            f"QTextBrowser {{ background: {tokens['chrome_bg']}; color: {tokens['field_fg']};"
-            f" border: none; border-top: 1px solid {tokens['border']}; }}")
+        # Document text uses the same neutral reading ground as the editor.
+        # The enclosing preview header and action bar own the Nostr accent.
+        super()._apply_colors()
+        appearance.neutral(self, self._dark)
 
     def set_pictures(self, lookup: Optional[Callable[[str], Optional[QImage]]],
                      arrived=None) -> None:
@@ -517,6 +517,6 @@ QToolButton#drafts_preview_more::menu-indicator {{ image: none; width: 0px; }}
 QPushButton#drafts_preview_action:hover, QToolButton#drafts_preview_action:hover,
 QToolButton#drafts_preview_more:hover {{ background: {t["hover_bg"]}; }}
 QPushButton#drafts_preview_primary {{ border-radius: 6px; padding: 4px 14px; }}
-{theme.accent_button_css("QPushButton#drafts_preview_primary", self._is_dark)}
-QPushButton:focus, QToolButton:focus {{ border: 2px solid {theme.focus_ring_color(self._is_dark)}; }}
+{appearance.accent_button_css("QPushButton#drafts_preview_primary", self._is_dark)}
+QPushButton:focus, QToolButton:focus {{ border: 2px solid {appearance.roles(self._is_dark).focus}; }}
 """)
