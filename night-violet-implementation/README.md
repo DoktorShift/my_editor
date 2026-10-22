@@ -20,7 +20,7 @@ HTML reference: [original design and labeled reference captures](../night-violet
 
 ## All implemented fixtures
 
-Each row links native screenshots. Embedded panels/popovers are isolated real components in these fixtures; their standalone fixture frame is not an added application window. Some native title bars are inactive. English example content remains unchanged in the German layout checks.
+Rows link native screenshots unless explicitly labeled as client captures. Embedded panels/popovers are isolated real components in these fixtures; their standalone fixture frame is not an added application window. Some native title bars are inactive. English example content remains unchanged in the German layout checks.
 
 | Fixture | Light | Dark |
 | --- | --- | --- |
@@ -37,6 +37,7 @@ Each row links native screenshots. Embedded panels/popovers are isolated real co
 | follow-source | [Light](after/native-follow-source-light.png) | [Dark](after/native-follow-source-dark.png) |
 | import-file | [Light](after/native-import-file-light.png) | [Dark](after/native-import-file-dark.png) |
 | import-link | [Light](after/native-import-link-light.png) | [Dark](after/native-import-link-dark.png) |
+| import-options | [Light client (native capture distorted)](after/import-options-light.png) | [Dark](after/native-import-options-dark.png) |
 | import-progress | [Light](after/native-import-progress-light.png) | [Dark](after/native-import-progress-dark.png) |
 | imports | [Light](after/native-imports-light.png) | [Dark](after/native-imports-dark.png) |
 | live-publishing | [Light](after/native-live-publishing-light.png) | [Dark](after/native-live-publishing-dark.png) |
