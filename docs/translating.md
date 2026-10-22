@@ -63,14 +63,18 @@ The German translation should read like a well-made German app, in the everyday 
 | EINUNDZWANZIG | EINUNDZWANZIG |
 | feed | Feed |
 | fee (membership) | Mitgliedsbeitrag |
+| file list | Dateiliste |
+| folder; Add Folder to Sidebar; Remove from Sidebar | Ordner; Ordner zur Seitenleiste hinzufügen; Aus der Seitenleiste entfernen |
 | find / replace | Suchen / Ersetzen |
 | full screen; Enter / Exit Full Screen (the View menu) | Vollbild; Vollbildmodus aktivieren / Vollbildmodus beenden |
 | heading | Überschrift |
 | image | Bild |
 | import | importieren |
 | invoice (Lightning) | Rechnung (Lightning-Rechnung) |
+| item (a file or folder, as the Finder counts them) | Objekt |
 | key (Nostr) | Schlüssel |
 | Keyboard Shortcuts | Tastaturkurzbefehle |
+| Library (the sidebar's section); Recents | Bibliothek; Zuletzt benutzt |
 | line numbers | Zeilennummern |
 | link | Link |
 | list (bulleted / numbered) | Aufzählung / nummerierte Liste |
@@ -80,9 +84,11 @@ The German translation should read like a well-made German app, in the everyday 
 | mention | Erwähnung; to mention someone: jemanden erwähnen |
 | note (kind 1) | Notiz |
 | Nostr address | Nostr-Adresse |
+| Open in {app}; Open With | In {app} öffnen; Öffnen mit |
 | paper mode | Papiermodus |
 | profile | Profil |
 | publish | veröffentlichen |
+| Quick Look | Übersicht |
 | quit | beenden |
 | quote | Zitat |
 | Recent Files | Zuletzt geöffnet |
@@ -90,13 +96,18 @@ The German translation should read like a well-made German app, in the everyday 
 | restore | wiederherstellen |
 | save / save as | speichern / speichern unter |
 | sats | Sats |
+| Save a Copy… (a spreadsheet MyEditor cannot save into) | Kopie sichern … |
 | settings (the window) | Einstellungen |
+| sheet (of a workbook); workbook; spreadsheet (the file) | Tabellenblatt; Arbeitsmappe; Tabelle |
+| Show in Finder / Explorer / File Manager | Im Finder / Explorer / Dateimanager zeigen |
+| sidebar | Seitenleiste |
 | sign out | abmelden |
 | signer app | Signer-App |
 | statutes | Satzung |
 | subscribe / subscription | abonnieren / Abonnement |
 | syntax highlighting | Syntaxhervorhebung |
 | tab | Tab |
+| Trash (the Recycle Bin on Windows) | Papierkorb |
 | appearance (automatic / light / dark) | Erscheinungsbild (automatisch / hell / dunkel) |
 | update (software) | Update; install update: Update installieren |
 | upload / download | hochladen / herunterladen |

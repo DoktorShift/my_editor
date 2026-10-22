@@ -72,6 +72,14 @@ msgstr ""
 '''
 
 
+@pytest.fixture(autouse=True)
+def _english_afterwards():
+    """Every test here leaves English installed, whether it passes or
+    fails halfway: a language left behind changes every later test."""
+    yield
+    i18n.install(i18n.ENGLISH)
+
+
 @pytest.fixture
 def german(tmp_path):
     (tmp_path / "de.po").write_text(PO, encoding="utf-8")
@@ -360,3 +368,12 @@ def test_the_german_texts_speak_the_glossarys_words_too():
 ])
 def test_the_glossary_rules_read_both_languages_alike(text, language, off):
     assert _off_glossary(text, language) == off
+
+
+def test_the_shipped_german_uses_the_glossary_for_the_library_and_viewers():
+    """The picture's Fit is an infinitive like every German command, and a
+    spreadsheet is a Tabelle everywhere (its type, the grid's name)."""
+    i18n.install("de")
+    assert i18n._("Fit") == "Einpassen"
+    assert i18n._("Spreadsheet") == "Tabelle"
+    assert i18n._("Move to") == "Verschieben nach"

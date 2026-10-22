@@ -25,6 +25,13 @@ import atomic_file, main_window, recovery
 from tests.accessibility import unnamed_controls
 
 w = main_window.MainWindow()
+# The status bar's own width is measured: the folder sidebar, whose
+# narrowest width the window keeps, is put away.
+w._library_window.set_pane_shown("sidebar", False)
+# The message in a larger font, so that it is wider than the room the
+# narrowest window gives it: in the system's own font it may fit even
+# there (on Windows it does).
+w.statusBar().setStyleSheet("#BackupProblem { font-size: 24px; }")
 w.resize(1100, 700)
 w.show()
 first = w.new_tab()
@@ -50,8 +57,11 @@ r["names"] = unnamed_controls(w.statusBar())
 r["min_width"] = w.minimumSizeHint().width()
 w.resize(r["min_width"], 600)
 app.processEvents()
+from PySide6.QtGui import QFontMetricsF
 r["narrow"] = [w._backup_problem.text().endswith("\u2026"),
                w._backup_problem.accessibleName()]
+r["narrow_room"] = (QFontMetricsF(w._backup_problem.font()).horizontalAdvance(
+    w._backup_problem.full_text()) > w._backup_problem.width())
 w.resize(1100, 700)
 app.processEvents()
 w.tabs.setCurrentIndex(w._editor_widget_index(first))
@@ -83,6 +93,7 @@ def test_the_status_bar_speaks_only_when_a_backup_fails(tmp_path):
     assert r["whole"] == "Couldn't keep a backup of this document."   # room: never shortened
     assert r["names"] == []
     assert r["min_width"] < 420                       # the message does not widen it
+    assert r["narrow_room"]                           # the message is wider than its room
     assert r["narrow"] == [True, "Couldn't keep a backup of this document."]
     assert r["other_tab"] == [False, "", False]
     assert r["back"] == r["failed"]

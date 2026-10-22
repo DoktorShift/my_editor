@@ -16,6 +16,7 @@ from typing import List, Optional
 
 from PySide6.QtCore import (
     Qt, QTimer, QMargins, QRect, QPoint, QPointF, QMetaMethod, QEvent, QUrl, Signal,
+    QByteArray,
 )
 from PySide6.QtGui import (
     QPainter, QTextBlockFormat, QTextCursor, QTextCharFormat, QColor, QClipboard, QPen,
@@ -46,10 +47,22 @@ import url_safety
 from link_popover import LinkPopover, clipboard_address
 
 
-# Characters per line of prose (set_readable_width): within the 50 to 75
+# Characters per line of prose on Paper Mode's page: within the 50 to 75
 # that typography (and nostrdesign.org's UI tips) give for comfortable
-# reading.
+# reading. Outside Paper Mode prose runs across the whole width, and this
+# is the narrowest it is let to become when side panels need room
+# (panel_layout.min_text_width).
 WRITING_MEASURE = 72
+
+# Characters per line of code on Paper Mode's page, measured with "0":
+# longer than prose, as code lines are written longer.
+CODE_PAGE_MEASURE = 88
+
+# Distance from the editor's edges to prose at full width, in logical
+# pixels, the document's own margin included: a quiet border, as a page
+# has, so the words do not touch the window's edge or a side panel. Code
+# keeps only the document's margin, its lines as long as they were written.
+PROSE_INSET = 48
 
 # Stand-in painted for an image whose bytes have not arrived yet. Its
 # size is deliberately modest: it is replaced in place once the real
@@ -193,6 +206,10 @@ class HtmlEditor(QTextEdit):
         # What a screen reader calls the text area until the window names
         # it after its document.
         self.setAccessibleName(_("Document"))
+        # A soft line break read from a file (markdown_writer) is written
+        # back as the line end it was; what is typed after one, a line
+        # break with Shift+Return among it, must not take that on.
+        self.currentCharFormatChanged.connect(self._drop_soft_break)
 
         # Who fills the context menu: the window puts its own commands
         # there (the same ones as in its menus). Without one, the menu has
@@ -289,12 +306,21 @@ class HtmlEditor(QTextEdit):
         doc.setDocumentMargin(text_look.CODE_PAD_X + 4)
         doc.setUndoRedoEnabled(True)
         doc.setModified(False)
-        # Characters per line of prose; None for code (full width).
-        self._readable_chars = None
+        # The tab holds prose (set_prose): an inset at full width, and a
+        # page of WRITING_MEASURE characters in Paper Mode.
+        self._prose = False
         # Line numbers shown beside the text (set_gutter_shown).
         self._gutter_shown = False
         self._highlights = {layer: [] for layer in self.HIGHLIGHT_LAYERS}
         self.document().contentsChange.connect(self._renew_highlights)
+        # Pictures fitted to the text's width (_refit_pictures): looked at
+        # again once an edit brings one in, or the width changes.
+        self._picture_room = 0
+        self._refit_timer = QTimer(self)
+        self._refit_timer.setSingleShot(True)
+        self._refit_timer.setInterval(0)
+        self._refit_timer.timeout.connect(self._refit_pictures)
+        self.document().contentsChange.connect(self._pictures_maybe_added)
         self.verticalScrollBar().valueChanged.connect(self.visible_area_changed)
         # Spelling (spelling.DocumentSpelling), while it is checked here.
         self._spelling = None
@@ -330,7 +356,7 @@ class HtmlEditor(QTextEdit):
         self._bg_pattern = "none"        # none | lines | dashed | dots | grid
         self._paper_mode = False
         self._highlight_line = False
-        self._paper_measure_chars = 88   # target column measure in Paper Mode
+        self._paper_measure_chars = CODE_PAGE_MEASURE   # code's page in Paper Mode
         # Room above the text for a header shown there (editor_header.py).
         self._top_inset = 0
         self.viewport().setAutoFillBackground(False)
@@ -534,20 +560,115 @@ class HtmlEditor(QTextEdit):
             image = None
             if self._resource_resolver is not None:
                 image = self._resource_resolver(url.toString())
-            return image if image is not None else self._placeholder_image()
+            return self.fitted_picture(image) if image is not None else self._placeholder_image()
         if (type_ == QTextDocument.ImageResource
                 and self._local_image_resolver is not None
                 and _is_document_relative(url)):
             image = self._local_image_resolver(url.toString())
-            return image if image is not None else self._placeholder_image()
+            return self.fitted_picture(image) if image is not None else self._placeholder_image()
         if (type_ == QTextDocument.ImageResource
                 and self._web_image_resolver is not None
                 and url.scheme().lower() in ("http", "https")):
             # Qt's own resolution never fetches an address: the picture
             # would stay blank, and be asked for again on every repaint.
             image = self._web_image_resolver(url.toString())
-            return image if image is not None else self._placeholder_image()
-        return super().loadResource(type_, url)
+            return self.fitted_picture(image) if image is not None else self._placeholder_image()
+        found = super().loadResource(type_, url)
+        if type_ == QTextDocument.ImageResource and isinstance(found, (QImage, QPixmap)):
+            return self.fitted_picture(found)
+        return found
+
+    # -------- Pictures fitted to the text --------
+    # Qt draws a picture in the text at its full pixel size: a photo from a
+    # phone, 4000 pixels across, ran far past the page. As Pages and Notes
+    # do, a picture wider than the text is shown at the text's width, its
+    # height in proportion; a smaller one keeps its own size. Only how it
+    # is shown changes: the picture keeps every pixel (it is drawn at a
+    # higher pixel ratio, sharp on any screen), and neither the document
+    # nor its undo history is touched, so nothing is saved differently.
+
+    def _room_for_pictures(self) -> int:
+        """The width a picture may take: the text's, inside the
+        document's margins."""
+        margin = self.document().documentMargin()
+        return max(80, int(self.viewport().width() - 2 * margin))
+
+    def fitted_picture(self, image):
+        """``image`` (a QImage or QPixmap) as the text shows it: at most
+        as wide as the text, all of its pixels kept."""
+        if isinstance(image, QPixmap):
+            image = image.toImage()
+        if not isinstance(image, QImage) or image.isNull():
+            return image
+        room = self._room_for_pictures()
+        ratio = image.width() / room if image.width() > room else 1.0
+        if abs(image.devicePixelRatio() - ratio) < 1e-6:
+            return image
+        fitted = QImage(image)
+        fitted.setDevicePixelRatio(ratio)
+        return fitted
+
+    def add_picture_resource(self, name: str, payload) -> None:
+        """Give the document the picture called ``name``, fitted to the
+        text. ``payload`` is a QImage, a QPixmap or the file's bytes; bytes
+        that do not decode are handed over as they are, for Qt to try."""
+        image = payload
+        if isinstance(payload, (bytes, bytearray, QByteArray)):
+            image = image_safety.decode_image_bytes(bytes(payload))
+            if image is None:
+                self.document().addResource(QTextDocument.ImageResource, QUrl(name), payload)
+                return
+        self.document().addResource(QTextDocument.ImageResource, QUrl(name),
+                                    self.fitted_picture(image))
+
+    def _pictures_maybe_added(self, position: int, _removed: int, added: int) -> None:
+        """An edit that brought a picture in (typed text never does) has
+        it fitted once the edit is over."""
+        if added <= 0:
+            return
+        cursor = QTextCursor(self.document())
+        end = min(position + added, max(0, self.document().characterCount() - 1))
+        cursor.setPosition(min(position, end))
+        cursor.setPosition(end, QTextCursor.MoveMode.KeepAnchor)
+        if "\ufffc" in cursor.selectedText():
+            self._refit_timer.start()
+
+    def _refit_pictures(self) -> None:
+        """Fit every picture of the document to the text's width now:
+        after the width changed, or pictures came in. Pictures with a size
+        of their own (the cards of audio and video) are left as they are."""
+        doc = self.document()
+        self._picture_room = self._room_for_pictures()
+        changed = False
+        seen = set()
+        for block in iter_blocks(doc):
+            it = block.begin()
+            while not it.atEnd():
+                fragment = it.fragment()
+                it += 1
+                fmt = fragment.charFormat()
+                if not fmt.isImageFormat():
+                    continue
+                image_fmt = fmt.toImageFormat()
+                name = image_fmt.name()
+                if name in seen or image_fmt.hasProperty(QTextFormat.ImageWidth):
+                    continue
+                seen.add(name)
+                found = doc.resource(QTextDocument.ImageResource, QUrl(name))
+                if isinstance(found, (QByteArray, bytes, bytearray)):
+                    image = image_safety.decode_image_bytes(bytes(found))
+                elif isinstance(found, QPixmap):
+                    image = found.toImage()
+                else:
+                    image = found
+                if not isinstance(image, QImage) or image.isNull():
+                    continue
+                fitted = self.fitted_picture(image)
+                if fitted is not found:
+                    doc.addResource(QTextDocument.ImageResource, QUrl(name), fitted)
+                    changed = True
+        if changed:
+            doc.markContentsDirty(0, doc.characterCount())
 
     # -------- Format Toggles --------
     def toggle_bold(self):
@@ -694,6 +815,16 @@ class HtmlEditor(QTextEdit):
         self._highlight_line = bool(on)
         self.viewport().update()
 
+    def _drop_soft_break(self, fmt: QTextCharFormat) -> None:
+        """Keep the soft line break's mark (markdown_writer's
+        SOFT_BREAK_PROPERTY) on the break read from the file, off what is
+        typed at the caret after it."""
+        from markdown_writer import SOFT_BREAK_PROPERTY
+        if fmt.hasProperty(SOFT_BREAK_PROPERTY) and not self.textCursor().hasSelection():
+            plain = QTextCharFormat(fmt)
+            plain.clearProperty(SOFT_BREAK_PROPERTY)
+            self.setCurrentCharFormat(plain)
+
     def set_paper_mode(self, on: bool):
         self._paper_mode = bool(on)
         self._update_paper_margins()
@@ -704,17 +835,18 @@ class HtmlEditor(QTextEdit):
         Otherwise (code, plain text): the monospace font. ``font``: the one
         chosen (Settings: the writing font, and the app's text size); the
         defaults when not given. How wide the text runs is apart from it
-        (set_readable_width)."""
+        (set_prose)."""
         self.setFont(font if font is not None else (writing_font() if writing else code_font()))
         self._update_paper_margins()
         self.viewport().update()
 
-    def set_readable_width(self, on: bool) -> None:
-        """Prose (``on``) keeps to a readable line length, WRITING_MEASURE
-        characters of its font, in a column centred in the window, as
-        Apple's readable content width keeps text; code runs across the
-        whole width, its lines as long as they were written."""
-        self._readable_chars = WRITING_MEASURE if on else None
+    def set_prose(self, on: bool) -> None:
+        """The tab holds prose (``on``), in either font. Prose runs across
+        the whole width with a quiet border (PROSE_INSET); in Paper Mode it
+        is set on a page of WRITING_MEASURE characters of its font. Code
+        runs across the whole width, its lines as long as they were
+        written, and on a wider page in Paper Mode."""
+        self._prose = bool(on)
         self._update_paper_margins()
         self.viewport().update()
 
@@ -737,31 +869,52 @@ class HtmlEditor(QTextEdit):
         return self._top_inset
 
     def _update_paper_margins(self):
-        """The text column: Paper Mode's page, or the readable width, or
-        the whole width; below a header's room, if any; centred, or beside
-        the line numbers while they are shown."""
-        chars = self._paper_measure_chars if self._paper_mode else self._readable_chars
-        side = 0
-        if chars:
+        """Where the text runs: on Paper Mode's page, centred, or beside
+        the line numbers while they are shown; else across the whole
+        width, prose with its quiet border (PROSE_INSET), which starts at
+        the line numbers while they are shown. Below a header's room, if
+        any."""
+        doc_margin = self.document().documentMargin()
+        if self._paper_mode:
             metrics = self.fontMetrics()
-            char_w = (metrics.averageCharWidth() if self._readable_chars
-                      else metrics.horizontalAdvance("0")) or 8
-            # The line is ``chars`` long, the document's margins beside it.
-            measure = char_w * chars + 2 * self.document().documentMargin()
-            side = int(max(0, (self.width() - measure) / 2))
-        margins = (QMargins(0, self._top_inset, 2 * side, 0) if self._gutter_shown
-                   else QMargins(side, self._top_inset, side, 0))
+            if self._prose:
+                chars, char_w = WRITING_MEASURE, metrics.averageCharWidth()
+            else:
+                chars, char_w = self._paper_measure_chars, metrics.horizontalAdvance("0")
+            # The line is ``chars`` long, the document's margins beside it,
+            # in the room the frame and a scroll bar leave.
+            measure = (char_w or 8) * chars + 2 * doc_margin
+            now = self.viewportMargins()
+            room = self.viewport().width() + now.left() + now.right()
+            left = right = int(max(0, (room - measure) / 2))
+        elif self._prose:
+            left = right = int(max(0, PROSE_INSET - doc_margin))
+        else:
+            left = right = 0
+        if self._gutter_shown:
+            # Beside the numbers, as Xcode keeps them next to the text;
+            # the page keeps its width, its room all at the right.
+            if self._paper_mode:
+                right += left
+            left = 0
+        margins = QMargins(left, self._top_inset, right, 0)
         if margins != self.viewportMargins():
             self.setViewportMargins(margins)
             # Qt lays the text out again when the editor is resized, not
             # its viewport: laid out to the new width now, or its lines
             # run on past the column, cut off, until the window is resized.
             self.setLineWrapColumnOrWidth(self.lineWrapColumnOrWidth())
+        # Pictures follow the new width of the text.
+        if getattr(self, "_refit_timer", None) is not None \
+                and self._room_for_pictures() != self._picture_room:
+            self._refit_timer.start()
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
-        if self._paper_mode or self._readable_chars:
+        if self._paper_mode:
             self._update_paper_margins()
+        if self._room_for_pictures() != self._picture_room:
+            self._refit_timer.start()
         self.visible_area_changed.emit()
 
     # -------- Highlights over the text --------

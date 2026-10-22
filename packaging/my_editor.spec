@@ -64,6 +64,10 @@ hiddenimports = [
     "lxml.etree",
     "lxml.html",
     "lxml.html.clean",
+    # Spreadsheets (sheet_io.py), imported when one is opened: openpyxl
+    # for .xlsx and .xlsm, lxml.etree (above) for .ods.
+    "openpyxl",
+    "et_xmlfile",
 ]
 
 # coincurve ships compiled CFFI extensions (_libsecp256k1 and a vendored

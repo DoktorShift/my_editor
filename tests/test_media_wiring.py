@@ -386,7 +386,7 @@ def _quitting_host(added, saves=()):
     )
     for name in ("_uploading", "_still_uploading", "_what_leaving_does", "_may_leave_uploads",
                  "_save_question_words", "_editor_from_widget", "_library_uploads",
-                 "_media_saves"):
+                 "_media_saves", "_unsaved_tabs", "_sheet_from_widget"):
         method = getattr(MainWindow, name)
         setattr(host, name, method.__get__(host) if not isinstance(
             MainWindow.__dict__.get(name), staticmethod) else method)

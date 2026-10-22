@@ -30,7 +30,8 @@ IMAGE_TYPES = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
                ".bmp": "image/bmp", ".heic": "image/heic", ".heif": "image/heif",
                ".avif": "image/avif"}
 DOCUMENT_TYPES = {
-    ".pdf": "application/pdf", ".txt": "text/plain", ".md": "text/markdown",
+    ".pdf": "application/pdf", ".txt": "text/plain", ".text": "text/plain",
+    ".md": "text/markdown",
     ".markdown": "text/markdown", ".rmd": "text/plain", ".log": "text/plain", ".csv": "text/csv",
     ".tsv": "text/tab-separated-values", ".json": "application/json",
     ".xml": "application/xml", ".yaml": "application/yaml", ".yml": "application/yaml",
@@ -40,6 +41,7 @@ DOCUMENT_TYPES = {
     ".odt": "application/vnd.oasis.opendocument.text",
     ".xls": "application/vnd.ms-excel",
     ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    ".xlsm": "application/vnd.ms-excel.sheet.macroenabled.12",
     ".ods": "application/vnd.oasis.opendocument.spreadsheet",
     ".ppt": "application/vnd.ms-powerpoint",
     ".pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
@@ -83,7 +85,8 @@ def file_family(mime: str) -> str:
         return "pdf"
     if mime in ("text/csv", "text/tab-separated-values"):
         return "spreadsheet"
-    if "spreadsheet" in mime or mime in ("application/vnd.ms-excel", "application/vnd.apple.numbers"):
+    if "spreadsheet" in mime or mime.startswith("application/vnd.ms-excel") \
+            or mime == "application/vnd.apple.numbers":
         return "spreadsheet"
     if "presentation" in mime or mime in ("application/vnd.ms-powerpoint", "application/vnd.apple.keynote"):
         return "presentation"

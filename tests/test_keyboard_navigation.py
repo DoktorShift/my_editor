@@ -102,6 +102,7 @@ class Window(QWidget):
             self.tabs.addTab(editor, f"Tab {number}")
         document = QWidget()
         QVBoxLayout(document).addWidget(self.tabs)
+        self._editor_side = document
         self._article_details_panel = QWidget()
         self.title = QLineEdit(self._article_details_panel)
         self._drafts_panel = QWidget()
@@ -115,6 +116,12 @@ class Window(QWidget):
         return self.tabs.currentWidget()
 
     def current_pdf_viewer(self):
+        return None
+
+    def current_reader(self):
+        return None
+
+    def _sheet_from_widget(self, widget):
         return None
 
 

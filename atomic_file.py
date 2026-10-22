@@ -20,10 +20,18 @@ starting.
 The person's own files (a saved document, an export, a copied picture)
 are written with ``save_document``: the same one-step replacement, but
 keeping what belongs to the existing file (see there).
+
+Two parts of the app may write one file: the editor saving a note, and
+the folder library pointing that note's links at a file that moved (on
+a worker thread). ``one_writer`` makes them take turns: whoever holds a
+file's turn may look at it and replace it, and ``save_document`` takes
+the turn itself, so a save waits for a replacement in progress and the
+other way round, and nobody replaces what the other just wrote unseen.
 """
 
 from __future__ import annotations
 
+import contextlib
 import ctypes
 import ctypes.util
 import json
@@ -32,7 +40,9 @@ import os
 import stat
 import sys
 import tempfile
+import threading
 import time
+import unicodedata
 from typing import Any, Optional, Tuple, Type, TypeVar, Union
 
 PathLike = Union[str, "os.PathLike[str]"]
@@ -110,19 +120,54 @@ def write_json(path: PathLike, data: Any, **dump_options) -> bool:
     return True
 
 
+# One lock for each of a fixed number of stripes of file names: two names
+# may share one (they only take turns then), and the locks never pile up.
+_WRITER_STRIPES = tuple(threading.RLock() for _ in range(64))
+
+
+def _stripe(path: PathLike) -> int:
+    key = unicodedata.normalize("NFC", os.path.realpath(os.fspath(path)))
+    if sys.platform in ("darwin", "win32"):
+        key = key.casefold()                 # one file, however its case is written
+    return hash(key) % len(_WRITER_STRIPES)
+
+
+@contextlib.contextmanager
+def one_writer(*paths: PathLike):
+    """While held, no other thread of this app writes, replaces or
+    renames the files at ``paths`` (through ``save_document`` or another
+    holder of their turn). A thread may take a turn it holds again."""
+    stripes = sorted({_stripe(path) for path in paths})
+    taken = []
+    try:
+        for stripe in stripes:
+            _WRITER_STRIPES[stripe].acquire()
+            taken.append(stripe)
+        yield
+    finally:
+        for stripe in reversed(taken):
+            _WRITER_STRIPES[stripe].release()
+
+
 def save_document(path: PathLike, data: bytes) -> None:
-    """Save one of the person's own files in one step.
+    """Save one of the person's own files in one step, in its turn
+    (``one_writer``).
 
     A full disk or a crash during the save leaves the file as it was,
     instead of empty or cut off. What belongs to an existing file stays:
-    its permissions, and its extended attributes on macOS and Linux
-    (Finder tags, security labels). A link keeps pointing where it did,
+    its permissions (its access list on Windows), and its extended
+    attributes on macOS and Linux (Finder tags, security labels). A link keeps pointing where it did,
     because the file it points to is the one replaced. A new file gets
     the permissions any new file gets on this system. Where the file
     cannot be replaced (a folder the person may not write in, or a file
     with several hard links, which a replacement would split), it is
     written in place, as before. Raises OSError."""
     target = os.path.realpath(os.fspath(path))
+    with one_writer(target):
+        _save_document(target, data)
+
+
+def _save_document(target: str, data: bytes) -> None:
     if _hard_linked(target) or _denies_delete(target):
         _write_in_place(target, data)
         return
@@ -170,6 +215,7 @@ def place_document(temporary: PathLike, path: PathLike) -> None:
             os.chmod(temporary, stat.S_IMODE(existing.st_mode))
             _copy_extended_attributes(target, temporary)
             _keep_creation_date(temporary, existing)
+            _keep_access_list(target, temporary)
         else:
             os.chmod(temporary, _NEW_FILE_MODE)
         _replace(temporary, target)
@@ -192,6 +238,60 @@ def _keep_owner(temporary: str, existing: os.stat_result) -> None:
             return
         except OSError:
             continue
+
+
+_SE_FILE_OBJECT = 1
+_DACL_SECURITY_INFORMATION = 0x00000004
+_PROTECTED_DACL_SECURITY_INFORMATION = 0x80000000
+_UNPROTECTED_DACL_SECURITY_INFORMATION = 0x20000000
+_SE_DACL_PROTECTED = 0x1000
+
+
+def _keep_access_list(target: str, temporary: str) -> None:
+    """On Windows, best effort: the new file gets the document's access
+    list (who may read and change it), as it gets the document's
+    permissions on macOS and Linux. Made new in the folder, it has only
+    what the folder passes on, and a document shared with someone, or
+    kept from others, would lose that with the save. The entries the
+    folder passes on are worked out again for the new file, as for any
+    file there; a list that takes nothing from its folder stays so."""
+    if sys.platform != "win32":
+        return
+    from ctypes import wintypes
+    advapi32 = ctypes.WinDLL("advapi32")
+    kernel32 = ctypes.WinDLL("kernel32")
+    get = advapi32.GetNamedSecurityInfoW
+    get.argtypes = [wintypes.LPCWSTR, ctypes.c_int, wintypes.DWORD,
+                    ctypes.POINTER(ctypes.c_void_p), ctypes.POINTER(ctypes.c_void_p),
+                    ctypes.POINTER(ctypes.c_void_p), ctypes.POINTER(ctypes.c_void_p),
+                    ctypes.POINTER(ctypes.c_void_p)]
+    get.restype = wintypes.DWORD
+    put = advapi32.SetNamedSecurityInfoW
+    put.argtypes = [wintypes.LPWSTR, ctypes.c_int, wintypes.DWORD, ctypes.c_void_p,
+                    ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p]
+    put.restype = wintypes.DWORD
+    control_of = advapi32.GetSecurityDescriptorControl
+    control_of.argtypes = [ctypes.c_void_p, ctypes.POINTER(wintypes.WORD),
+                           ctypes.POINTER(wintypes.DWORD)]
+    control_of.restype = wintypes.BOOL
+    kernel32.LocalFree.argtypes = [ctypes.c_void_p]
+    dacl, descriptor = ctypes.c_void_p(), ctypes.c_void_p()
+    failed = get(target, _SE_FILE_OBJECT, _DACL_SECURITY_INFORMATION, None, None,
+                 ctypes.byref(dacl), None, ctypes.byref(descriptor))
+    if failed:
+        _log.debug("access list of %s not read (error %s)", target, failed)
+        return
+    try:
+        control, revision = wintypes.WORD(), wintypes.DWORD()
+        protected = (control_of(descriptor, ctypes.byref(control), ctypes.byref(revision))
+                     and control.value & _SE_DACL_PROTECTED)
+        how = _DACL_SECURITY_INFORMATION | (_PROTECTED_DACL_SECURITY_INFORMATION if protected
+                                            else _UNPROTECTED_DACL_SECURITY_INFORMATION)
+        failed = put(temporary, _SE_FILE_OBJECT, how, None, None, dacl, None)
+        if failed:
+            _log.debug("access list of %s not kept (error %s)", target, failed)
+    finally:
+        kernel32.LocalFree(descriptor)
 
 
 class _AttrList(ctypes.Structure):
@@ -598,5 +698,15 @@ def _sync_folder(folder: str) -> None:
 def _remove_quietly(path: str) -> None:
     try:
         os.remove(path)
+    except PermissionError:
+        if sys.platform != "win32":
+            return
+        # Windows removes no read-only file, and a temporary file took a
+        # read-only document's permissions before it could not replace it.
+        try:
+            os.chmod(path, stat.S_IREAD | stat.S_IWRITE)
+            os.remove(path)
+        except OSError:
+            pass
     except OSError:
         pass

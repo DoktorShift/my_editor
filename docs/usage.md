@@ -42,7 +42,7 @@ On macOS, `Ctrl` in these tables is the Command key (`⌘`) and `Alt` is Option 
 | | `Insert > Table…`: a table, its size chosen on a grid at the caret; `Format > Table` adds and deletes its rows and columns |
 | | `Insert > Footnote`: a footnote's mark at the caret and its note at the end of the document |
 
-Writing (Markdown files, new documents and drafts) is set in your system's own text font at a reading size, in a column of a comfortable line length, with the thin insertion point of a word processor; plain text and code files keep the monospace font across the whole window, and its block caret. `View > Use Monospace Font for Writing` sets all writing in monospace.
+Writing (Markdown files, new documents and drafts) is set in your system's own text font at a reading size, across the width of the window with a quiet border on either side (or on a page of its own in Paper Mode, see [Paper Mode and full width](#paper-mode-and-full-width)), with the thin insertion point of a word processor; plain text and code files keep the monospace font across the whole window, and its block caret. `View > Use Monospace Font for Writing` sets all writing in monospace.
 
 **Font and size.** `Settings > Font` chooses the writing font (System, Serif, Monospace, or any installed font with `Other…`) and its size in points, from 8 to 32 (10 and up on a Mac, where smaller text would be too small to read). `View > Zoom In` (`Cmd+=` on macOS, `Ctrl+=` elsewhere), `View > Zoom Out` and `View > Actual Size` step through the same sizes, for every document and preview at once. HTML documents open in your font and size too.
 
@@ -192,6 +192,98 @@ A Markdown file keeps its article's details in its front matter, the block at it
 | `Ctrl+Shift+S` | Save current document (chooser: local file or private Nostr draft) |
 
 The **`Nostr`** menu also holds `Drafts`, `Refresh Drafts`, `Draft Relays…`, the ways to an account (`Create Account…`, `Connect Signer App…`, `Restore Account…`) and the account in use (`Edit Profile…`, `Back Up Account…`, `Sign Out`). Until an account is in use, the commands that act for one are dimmed. While an account is in use, its avatar sits at the right end of the tab row: a one-click account switcher. See the [Nostr guide](nostr.md) for the full workflow.
+
+### Folders and files
+
+| Shortcut | Action |
+|---|---|
+| `⌃⌘S` (Control-Command-S) on a Mac | Show or hide the sidebar (`View > Show Sidebar`) |
+| `⌃⌘T` (Control-Command-T) on a Mac | Add a folder to the sidebar (`File > Add Folder to Sidebar…`) |
+| `Space` | Quick Look the file selected in the file list (`Space` again or `Escape` closes it) |
+| `Return` | Open the file selected in the file list |
+| `Cmd+Delete` on macOS, `Delete` on Windows and Linux | Move the selected files to the Trash |
+
+These are the Finder's own keys. On Windows and Linux the sidebar and Add Folder have no key; they are in the `View` and `File` menus.
+
+---
+
+## Folders and files
+
+MyEditor shows your folders the way the Finder and Apple Notes do: the sidebar on the left, the files of the folder you choose beside it, and the file you open on the right. The disk is the truth. There is no database and no hidden copy: what you move, rename or delete here happens to the real file, and what you change in the Finder or Explorer shows here at once. Nothing of this needs a Nostr account.
+
+### The sidebar
+
+`File > Add Folder to Sidebar…` (`⌃⌘T` on a Mac), or **Add Folder…** in the sidebar, adds a folder: your notes folder, a project, a shared drive. Add as many as you like. The sidebar has two parts:
+
+- **Library**: Recents (the files changed most lately), Notes, Media (pictures, films and sound) and Documents (PDFs, spreadsheets, documents and the rest), each gathered from every folder in the sidebar.
+- **Folders**: each folder you added, with its subfolders under it. Deeper folders open from the file list.
+
+A right-click on a folder offers New Note, New Folder, Add Files…, Show in Finder (Show in Explorer, Show in File Manager), Copy Path, Rename… and Move to Trash. **Remove from Sidebar** on a folder you added only forgets it here: nothing on the disk changes. `View > Show Sidebar` (`⌃⌘S` on a Mac) hides and shows it.
+
+### The file list
+
+The list beside the sidebar shows the files of what you chose there, newest first and grouped by day (Today, Yesterday, Previous 7 Days, and so on). A note shows its first line, a picture its size in pixels, any other file its size on the disk.
+
+- **List or gallery.** The two buttons at the top switch between a list and a gallery of pictures: photos and film stills, notes and PDFs as a small page.
+- **All, Notes, Media, Files.** The switch under the search field narrows the list to one kind.
+- **Search.** Type in the search field to find files by name, and notes by their first line.
+- **Quick Look.** Select a file and press `Space`: it shows in a panel over the window, as in the Finder. The arrow keys go on moving through the list and the panel follows; `Space` again or `Escape` closes it.
+- **New Note** (the + button) makes a note in the folder shown.
+
+`View > Show File List` hides the list when you only want to write.
+
+**Moving, renaming and deleting.** Drag files onto a folder in the sidebar to move them there, or use **Move to…** in the right-click menu. Files dragged in from the Finder or Explorer are copied into the folder you drop them on; files dragged out to the Finder, Mail or Messages are the real files. **Rename…** asks before it changes a file's extension, as the Finder does. **Move to Trash** asks first and puts the files in the system Trash (the Recycle Bin on Windows), where you can get them back.
+
+**Links keep working.** When you rename or move a file, every note in your sidebar folders that links to it is updated, and a note's pictures folder (`<name>_media`) moves and renames with its note. The status bar says how many notes were updated. A note open with unsaved changes is left as it is, and the status bar names it, so nothing you typed is overwritten.
+
+### Opening every kind of file
+
+Click a file to open it in a tab of its own. Notes and text open in the editor and PDFs in the [PDF reader](#pdf-reading). Everything else gets a viewer:
+
+- **Pictures** fit the window; Fit, Zoom In and Zoom Out are in the bar.
+- **Films and sound** play in a player of their own.
+- **Word and Writer documents** (`.docx`, `.odt`) open in a reading view: text, tables and pictures, without the exact page layout. With pandoc installed the view is more faithful; **Install pandoc…** offers it from its official source.
+- **Numbers, Pages, Keynote, PowerPoint and older Office files** show the preview picture the app saved in the file.
+- **Any other file** shows a calm card with its kind, size and the date it changed.
+
+The bar above each viewer offers only what makes sense for the file:
+
+- **Open in Numbers** (or Excel, LibreOffice, Preview: always the app this computer has set for the file, by its real name). The arrow beside it is **Open With**, with the other apps that can open it and **Other…**. When no app is set, the button is **Open With…**.
+- **Show in Finder** (Show in Explorer, Show in File Manager).
+- **Insert into Note** (pictures, films and sound): puts the file into the note you are writing. A file in the same sidebar folder as the note is linked where it is, without a copy; save a new note in that folder first.
+- **Import as Note** (`.docx`, `.odt`): makes a Markdown note of the document next to it, with its pictures in the note's own folder. The document stays as it is.
+
+The same commands are in the file list's right-click menu.
+
+When an office file is open in another app (Excel and LibreOffice leave a lock file beside it), the viewer says so and shows the last saved version.
+
+### Spreadsheets
+
+Excel workbooks (`.xlsx`, `.xlsm`), OpenDocument spreadsheets (`.ods`) and text tables (`.csv`, `.tsv`) open in MyEditor as tables you can edit, with a formula bar on top and one tab per sheet along the bottom.
+
+- **Editing** works the way Numbers, Excel and LibreOffice Calc taught you: typing replaces a cell, `F2` or a double-click edits it in place, `Return` confirms and goes down, `Tab` goes right, `Escape` cancels, `Delete` clears. Undo takes back every step. The cell box at the left of the formula bar goes to a cell you type there (`C12`).
+- **Formulas and numbers in your language.** In German you write `=SUMME(A1:A3;1,5)` and `12,5`, as German Excel does; the file keeps the spelling every app reads. MyEditor calculates the common functions itself. A formula it cannot calculate shows the result the spreadsheet app saved, and says so.
+- **Rows, columns and sheets.** A right-click on a row number or a column letter inserts rows above or below and columns before or after, and deletes them. `Format > Sheet` adds, duplicates, renames and deletes sheets; so does the right-click menu on a sheet's tab.
+- **Copy as Markdown Table** (the button above the table) copies the sheet as a Markdown table, ready to paste into a note.
+- **Saving** writes into the file itself, keeping its formatting, frozen rows and the rest. A text table is saved as text. `File > Save As…` also writes an Excel workbook, an OpenDocument spreadsheet, or the sheet shown as CSV or TSV.
+
+Saving never loses anything quietly:
+
+- **Save a Copy.** Some files hold parts MyEditor cannot keep (charts, pivot tables, macros and the like). The bar above the table names them, and saving offers **Save a Copy…**, so the original stays exactly as the other app wrote it.
+- **Open in another app means read-only.** While Excel or LibreOffice has the file open, MyEditor shows the last saved version and does not edit it. Editing is possible again once that app closes the file.
+- **Changed elsewhere.** When the file changes on the disk while you edit it, MyEditor asks: **Reload** shows the new version, **Keep My Version** keeps yours.
+
+Numbers files and older `.xls` files show their preview picture and open in their app.
+
+### Paper Mode and full width
+
+Text runs across the whole width of the window, with a quiet border on either side. **Paper Mode** (`View > Paper Mode`, or the page button at the right end of the toolbar) lays it on a page of 72 characters instead, on a calm ground. Switch at any time; MyEditor remembers your choice. Code and plain text always use the whole width.
+
+### Side panels
+
+The sidebar, the file list, Article Details and Drafts open beside the text, never on top of it: the window grows outward to make room, so the text stays where it was and as wide. Closing a panel gives the room back. When the screen is full (or the window is maximized), the text gives way, but never below a readable line; should even that not fit, the file list folds away first and comes back when there is room again.
+
+Drag the thin line between a panel and the text to make the panel wider or narrower. MyEditor remembers each panel's width.
 
 ---
 

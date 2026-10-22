@@ -245,7 +245,7 @@ def test_the_documents_commands_are_dimmed_while_imports_is_in_front(window, mon
     MainWindow._update_window_commands(host)
     assert fullscreen.text() == "Enter Full Screen"
     assert save.isEnabled() and not bold.isEnabled()
-    assert not sidebar.isEnabled()
+    assert sidebar.isEnabled()           # the folder sidebar's, in this window
     assert host.act_close_tab.text() == "Close Tab"
 
 

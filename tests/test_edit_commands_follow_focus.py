@@ -152,7 +152,7 @@ def test_paste_in_a_pdf_tabs_find_field(monkeypatch):
 
     host = Host()
     host._imports_in_front, host.current_editor = lambda: None, lambda: None
-    host.current_pdf_viewer = lambda: object()
+    host.current_pdf_viewer = host.current_reader = lambda: object()
     for name in ("cut", "copy", "delete", "paste", "paste_plain"):
         setattr(host, f"act_{name}", QAction(name))
     field = QLineEdit()
@@ -191,6 +191,7 @@ def test_a_picture_on_the_clipboard_pastes_from_the_menu(name, monkeypatch):
     document.image_pasted.connect(pasted.append)      # as MainWindow handles media
     host = Host()
     host._imports_in_front, host.current_pdf_viewer = lambda: None, lambda: None
+    host.current_reader = host.current_file_viewer = host.current_sheet = lambda: None
     host.current_editor = lambda: document
     for action in ("cut", "copy", "delete", "paste", "paste_plain"):
         setattr(host, f"act_{action}", QAction(action))

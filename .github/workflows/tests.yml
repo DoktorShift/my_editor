@@ -66,5 +66,10 @@ jobs:
       - name: Check the translations
         run: python scripts/i18n.py check
 
+      # A test that hangs (a dialog nobody answers, a wait that never
+      # ends) stops the run after 45 minutes instead of GitHub's six
+      # hours, and after five minutes in one test Python prints where
+      # every thread is. A whole run takes about 8 to 15 minutes.
       - name: Run the tests
-        run: python -m pytest -q
+        timeout-minutes: 45
+        run: python -m pytest -q -o faulthandler_timeout=300
