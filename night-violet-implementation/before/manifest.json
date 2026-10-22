@@ -1,0 +1,121 @@
+{
+  "revision": "f2225d751e0703d385190d308f05a088aa02f5ca",
+  "dirty": false,
+  "capture_script_sha256": "802edfd89bf5f9d76cf1fc2dffb48abb813915a5b1eca127ce54290d226b1ae5",
+  "os": "macOS-15.6-arm64-arm-64bit",
+  "qt": "6.11.2",
+  "language": "en",
+  "captures": [
+    {
+      "file": "imports-light.png",
+      "logical_size": [
+        1180,
+        760
+      ],
+      "scale": 1.0,
+      "platform": "cocoa",
+      "native_capture": true,
+      "native_error": ""
+    },
+    {
+      "file": "publishing-light.png",
+      "logical_size": [
+        760,
+        408
+      ],
+      "scale": 1.0,
+      "platform": "cocoa",
+      "native_capture": true,
+      "native_error": ""
+    },
+    {
+      "file": "editor-drafts-light.png",
+      "logical_size": [
+        1180,
+        760
+      ],
+      "scale": 1.0,
+      "platform": "cocoa",
+      "native_capture": true,
+      "native_error": ""
+    },
+    {
+      "file": "membership-light.png",
+      "logical_size": [
+        560,
+        586
+      ],
+      "scale": 1.0,
+      "platform": "cocoa",
+      "native_capture": true,
+      "native_error": ""
+    },
+    {
+      "file": "media-light.png",
+      "logical_size": [
+        860,
+        560
+      ],
+      "scale": 1.0,
+      "platform": "cocoa",
+      "native_capture": true,
+      "native_error": ""
+    },
+    {
+      "file": "imports-dark.png",
+      "logical_size": [
+        1180,
+        760
+      ],
+      "scale": 1.0,
+      "platform": "cocoa",
+      "native_capture": true,
+      "native_error": ""
+    },
+    {
+      "file": "publishing-dark.png",
+      "logical_size": [
+        760,
+        408
+      ],
+      "scale": 1.0,
+      "platform": "cocoa",
+      "native_capture": true,
+      "native_error": ""
+    },
+    {
+      "file": "editor-drafts-dark.png",
+      "logical_size": [
+        1180,
+        760
+      ],
+      "scale": 1.0,
+      "platform": "cocoa",
+      "native_capture": true,
+      "native_error": ""
+    },
+    {
+      "file": "membership-dark.png",
+      "logical_size": [
+        560,
+        586
+      ],
+      "scale": 1.0,
+      "platform": "cocoa",
+      "native_capture": true,
+      "native_error": ""
+    },
+    {
+      "file": "media-dark.png",
+      "logical_size": [
+        860,
+        560
+      ],
+      "scale": 1.0,
+      "platform": "cocoa",
+      "native_capture": true,
+      "native_error": ""
+    }
+  ],
+  "state_checks": []
+}
