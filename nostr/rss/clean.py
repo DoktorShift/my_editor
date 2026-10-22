@@ -47,9 +47,10 @@ from .urls import WEB_SCHEMES, is_web, scheme, whole_url
 # What a link may point at besides the web.
 _LINK_SCHEMES = (*WEB_SCHEMES, "mailto", "nostr", "lightning", "bitcoin", "tel")
 
-# Page furniture: its text is never part of the article.
+# Page furniture: its text is never part of the article (a <nav> is the
+# page's navigation, which a page read for its text can bring along).
 _DROP = ("script", "style", "template", "form", "button", "input", "select",
-         "textarea", "svg", "canvas", "head", "link", "meta")
+         "textarea", "svg", "canvas", "head", "link", "meta", "nav")
 
 # Attributes lazy-loading scripts keep the real picture in, best first:
 # lazysizes (data-src, data-srcset), WP Rocket (data-lazy-src,

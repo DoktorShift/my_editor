@@ -107,6 +107,10 @@ class FurnitureTests(unittest.TestCase):
                  '<style>p{}</style><!-- comment -->')
         self.assertEqual(out, "Body")
 
+    def test_a_pages_navigation_is_no_part_of_the_post(self) -> None:
+        self.assertEqual(md("<nav><a href='/'>Home</a> <a href='/top'>Top</a></nav>"
+                            "<h2>Title</h2><p>Text.</p>"), "## Title\n\nText.")
+
     def test_an_empty_link_is_dropped(self) -> None:
         self.assertEqual(md('<p>Hi<a href="/x"></a></p>'), "Hi")
 
