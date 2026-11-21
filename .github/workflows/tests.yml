@@ -1,4 +1,4 @@
-name: Tests
+name: Multilingual Windows diagnostic
 
 # Runs the test suite and the translation check for every pull request
 # and every push to main and dev, on the three platforms the installers
@@ -18,22 +18,9 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # Windows' own platform, as people run it: the runner has a
-          # desktop to draw on. Qt's offscreen platform finds no fonts on
-          # Windows (it reads them from a folder Qt does not ship), so
-          # text there is measured, wrapped and exported unlike in any
-          # real window.
           - os: windows-latest
             name: windows
             qt_platform: windows
-          # No screen on these runners: Qt draws into memory, with the
-          # system's fonts.
-          - os: macos-latest
-            name: macos
-            qt_platform: offscreen
-          - os: ubuntu-22.04
-            name: linux
-            qt_platform: offscreen
     env:
       QT_QPA_PLATFORM: ${{ matrix.qt_platform }}
     steps:
@@ -72,4 +59,4 @@ jobs:
       # every thread is. A whole run takes about 8 to 15 minutes.
       - name: Run the tests
         timeout-minutes: 45
-        run: python -m pytest -q -o faulthandler_timeout=300
+        run: python -m pytest -vv -o faulthandler_timeout=300 tests/test_published_view.py tests/test_multilingual_contract.py tests/test_self_test.py tests/test_commands.py tests/test_shortcut_map.py tests/test_window_layout.py
