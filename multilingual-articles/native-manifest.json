@@ -1,0 +1,108 @@
+{
+  "kind": "implemented-native-Qt-client-captures",
+  "base": "a88c403a4d4ce99cfc00874d33c5940e28530787",
+  "platform": "macOS-15.6-arm64-arm-64bit",
+  "qt": "6.11.1",
+  "pyside": "6.11.1",
+  "backend": "cocoa",
+  "style": "theme.AppStyle(Fusion) with production stylesheet guard",
+  "fixture": "Synthetic documents, no keys, mocked profile provider, no signer or publication calls",
+  "evidence": "Real Cocoa client rendering; not VoiceOver or native frame certification",
+  "screenshots": [
+    {
+      "file": "myeditor-writing-light.png",
+      "logical_width": 1248,
+      "logical_height": 890,
+      "dpr": 2.0,
+      "dark": false
+    },
+    {
+      "file": "myeditor-khmer-search-light.png",
+      "logical_width": 360,
+      "logical_height": 350,
+      "dpr": 2.0,
+      "dark": false
+    },
+    {
+      "file": "myeditor-publish-light.png",
+      "logical_width": 760,
+      "logical_height": 199,
+      "dpr": 2.0,
+      "dark": false
+    },
+    {
+      "file": "myeditor-publish-pair-light.png",
+      "logical_width": 760,
+      "logical_height": 316,
+      "dpr": 2.0,
+      "dark": false
+    },
+    {
+      "file": "myeditor-writing-dark.png",
+      "logical_width": 1248,
+      "logical_height": 890,
+      "dpr": 2.0,
+      "dark": true
+    },
+    {
+      "file": "myeditor-khmer-search-dark.png",
+      "logical_width": 360,
+      "logical_height": 350,
+      "dpr": 2.0,
+      "dark": true
+    },
+    {
+      "file": "myeditor-publish-dark.png",
+      "logical_width": 760,
+      "logical_height": 199,
+      "dpr": 2.0,
+      "dark": true
+    },
+    {
+      "file": "myeditor-publish-pair-dark.png",
+      "logical_width": 760,
+      "logical_height": 316,
+      "dpr": 2.0,
+      "dark": true
+    },
+    {
+      "file": "myeditor-narrow-writing-dark.png",
+      "logical_width": 760,
+      "logical_height": 850,
+      "dpr": 2.0,
+      "dark": true
+    },
+    {
+      "file": "myeditor-narrow-reference-dark.png",
+      "logical_width": 760,
+      "logical_height": 850,
+      "dpr": 2.0,
+      "dark": true
+    }
+  ],
+  "source_sha256": {
+    "main_window.py": "29c0e3c5445e9880f2061e2b7d7f93a6c5013426f47121c08412fd671c3bdca2",
+    "multilingual_authoring.py": "34395e5517650f64a644afeb748f0e2386b237baf53e0323640466aa1ed7985b",
+    "nostr/ui/language_chooser.py": "4ae00da25ead1aa98815759084b8ebe24b3eff9e2988b88c3d8c53451a911f8e",
+    "nostr/ui/publish_article_dialog.py": "cf10ac680d36bd6f23eb9629ff7037ac0b84311c3df0777513ad63fe1ccf0df5",
+    "nostr/ui/article_header.py": "245374b752c4181c8520abcddd6d740b8f9b6b11ef9245ee0a7ab0b4150f199d",
+    "nostr/ui/split_action_button.py": "b8ee629d170d3da4bc103dcba4f7749b8eb194c9bfa7cd0c233fc299b6ffedb8",
+    "format_icons.py": "1dd56c004cf806e2f17e370a75463180b268c8121922ce50dfc7f15cf11aa9d9"
+  },
+  "contrast": {
+    "light": {
+      "toolbar_icon": 11.39,
+      "picker_text": 16.18,
+      "primary_gradient_min": 5.12,
+      "card_secondary": 4.66
+    },
+    "dark": {
+      "toolbar_icon": 10.33,
+      "picker_text": 15.14,
+      "primary_gradient_min": 5.12,
+      "card_secondary": 4.74
+    }
+  },
+  "verified_against_commit": "29c38ceeb62959ca01a2f72f604bc4e616411132",
+  "verification_note": "Listed captured source hashes match final candidate. The final inspector restriction-state fix is outside the captured states and is verified by its regression suite."
+}
